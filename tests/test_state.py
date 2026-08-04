@@ -47,6 +47,53 @@ class SetupStateTests(TemporaryDirectoryTestCase, unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "not permitted"):
                     SetupState(host_facts=facts).save(path)
 
+    def test_save_rejects_nested_plural_environment_and_output_fields(self) -> None:
+        path = self.temp_path / "setup.json"
+        forbidden_keys = (
+            "environment_values",
+            "environment-values",
+            "environmentValues",
+            "ENVIRONMENT_VALUES",
+            "command_outputs",
+            "command-outputs",
+            "commandOutputs",
+            "COMMAND_OUTPUTS",
+            "captured.command.outputs",
+        )
+
+        for key in forbidden_keys:
+            with self.subTest(key=key):
+                state = SetupState(host_facts={"nested": {key: "raw value"}})
+                with self.assertRaisesRegex(ValueError, "not permitted"):
+                    state.save(path)
+
+    def test_load_rejects_nested_plural_environment_and_output_fields(self) -> None:
+        path = self.temp_path / "setup.json"
+        for key in ("environment_values", "command_outputs", "savedCommandOutputs"):
+            with self.subTest(key=key):
+                payload = {
+                    "schema_version": 1,
+                    "checkpoints": {},
+                    "host_facts": {"nested": {key: "raw value"}},
+                }
+                path.write_text(json.dumps(payload), encoding="utf-8")
+
+                with self.assertRaisesRegex(ValueError, "not permitted"):
+                    SetupState.load(path)
+
+    def test_allows_host_fact_keys_with_harmless_output_words(self) -> None:
+        path = self.temp_path / "setup.json"
+        state = SetupState(
+            host_facts={
+                "output_format_supported": True,
+                "environment_value_source_available": False,
+            }
+        )
+
+        state.save(path)
+
+        self.assertEqual(SetupState.load(path), state)
+
 
 class CommandRunnerTests(unittest.TestCase):
     @mock.patch("scripts.homeflix_setup.command.subprocess.run")

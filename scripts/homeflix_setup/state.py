@@ -6,29 +6,50 @@ from dataclasses import dataclass, field
 import json
 import os
 from pathlib import Path
+import re
 import tempfile
 from typing import Any
 
 
 CURRENT_SCHEMA_VERSION = 1
 
-_FORBIDDEN_KEY_PARTS = frozenset(
-    {
-        "api_key",
-        "apikey",
-        "command_output",
-        "credential",
-        "credentials",
-        "env",
-        "environment",
-        "output",
-        "password",
-        "secret",
-        "stderr",
-        "stdout",
-        "token",
-    }
+_FORBIDDEN_KEY_SUFFIXES = (
+    ("api", "key"),
+    ("apikey",),
+    ("command", "output"),
+    ("credential",),
+    ("env",),
+    ("environment",),
+    ("environment", "value"),
+    ("output",),
+    ("password",),
+    ("secret",),
+    ("stderr",),
+    ("stdout",),
+    ("token",),
 )
+_SINGULAR_KEY_TOKENS = {
+    "credentials": "credential",
+    "outputs": "output",
+    "passwords": "password",
+    "secrets": "secret",
+    "tokens": "token",
+    "values": "value",
+}
+
+
+def _key_tokens(key: str) -> tuple[str, ...]:
+    separated = re.sub(r"([A-Z]+)([A-Z][a-z])", r"\1_\2", key)
+    separated = re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", separated)
+    return tuple(
+        _SINGULAR_KEY_TOKENS.get(token, token)
+        for token in re.findall(r"[a-z0-9]+", separated.lower())
+    )
+
+
+def _is_forbidden_key(key: str) -> bool:
+    tokens = _key_tokens(key)
+    return any(tokens[-len(suffix) :] == suffix for suffix in _FORBIDDEN_KEY_SUFFIXES)
 
 
 def _validate_keys(value: Any, location: str = "state") -> None:
@@ -36,10 +57,7 @@ def _validate_keys(value: Any, location: str = "state") -> None:
         for key, child in value.items():
             if not isinstance(key, str):
                 raise ValueError(f"{location} keys must be strings")
-            normalized = key.lower().replace("-", "_")
-            if normalized in _FORBIDDEN_KEY_PARTS or any(
-                normalized.endswith(f"_{part}") for part in _FORBIDDEN_KEY_PARTS
-            ):
+            if _is_forbidden_key(key):
                 raise ValueError(f"state field {key!r} is not permitted")
             _validate_keys(child, f"{location}.{key}")
     elif isinstance(value, list):
