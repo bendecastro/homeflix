@@ -29,6 +29,9 @@ class RecordingRunner(FixtureRunner):
         self.failure: tuple[str, ...] | None = None
         self.fail_mutation_index: int | None = None
         self.exception: BaseException | None = None
+        self.cleanup_failure: bool | BaseException = False
+        self._primary_failure_seen = False
+        self._staged_cleanup_calls = 0
 
     def run(self, argv, *, input_text=None, timeout=None, **kwargs):
         key = " ".join(argv)
@@ -37,11 +40,22 @@ class RecordingRunner(FixtureRunner):
         command = tuple(argv)
         self.mutations.append((command, input_text, timeout))
         actual = unwrapped(command)
+        is_cleanup = actual[:2] == ("rm", "-f")
+        is_final_cleanup = is_cleanup and (
+            self._primary_failure_seen or self._staged_cleanup_calls > 0
+        )
+        if is_cleanup:
+            self._staged_cleanup_calls += 1
+        if is_final_cleanup and self.cleanup_failure:
+            if isinstance(self.cleanup_failure, BaseException):
+                raise self.cleanup_failure
+            return subprocess.CompletedProcess(list(argv), 8, "private cleanup", "private cleanup")
         should_fail = (
             self.fail_mutation_index is not None
             and len(self.mutations) - 1 == self.fail_mutation_index
         ) or (self.failure is not None and actual[: len(self.failure)] == self.failure)
         if should_fail:
+            self._primary_failure_seen = True
             if self.exception is not None:
                 raise self.exception
             return subprocess.CompletedProcess(list(argv), 9, "private stdout", "private stderr")
@@ -231,6 +245,39 @@ class HostPreparationTests(unittest.TestCase):
                 self.assertEqual(actual[-1][:2], ("rm", "-f"))
                 failed_operations.add(result.refusal["operation"])
         self.assertEqual(len(failed_operations), operation_count)
+
+    def test_final_cleanup_nonzero_or_exception_prevents_applied_success(self):
+        failures = (
+            True,
+            subprocess.TimeoutExpired(["sudo"], 1, output="private cleanup"),
+            FileNotFoundError("private cleanup missing"),
+            OSError("private cleanup process"),
+        )
+        for failure in failures:
+            with self.subTest(failure=type(failure).__name__):
+                plan = self.install_plan()
+                runner = RecordingRunner("discovery-ubuntu.json")
+                runner.cleanup_failure = failure
+                result = apply_host_preparation(
+                    plan, runner, confirm_plan=plan.plan_fingerprint
+                )
+                self.assertFalse(result.applied)
+                self.assertEqual(result.refusal["code"], "host_preparation_cleanup_failed")
+                self.assertEqual(result.refusal["operation"], "cleanup_repository_stage_after")
+                self.assertGreater(result.commands_completed, 0)
+                self.assertNotIn("private", json.dumps(result.to_dict()))
+
+    def test_primary_failure_is_preserved_when_final_cleanup_also_fails(self):
+        plan = self.install_plan()
+        runner = RecordingRunner("discovery-ubuntu.json")
+        runner.fail_mutation_index = 0
+        runner.cleanup_failure = OSError("private cleanup process")
+        result = apply_host_preparation(plan, runner, confirm_plan=plan.plan_fingerprint)
+        self.assertFalse(result.applied)
+        self.assertEqual(result.refusal["code"], "host_preparation_operation_failed")
+        self.assertEqual(result.refusal["operation"], "apt_metadata_before_repository")
+        self.assertEqual(result.refusal["cleanup_warning"], "cleanup_repository_stage_after_failed")
+        self.assertNotIn("private", json.dumps(result.to_dict()))
 
     def test_timeout_and_process_exceptions_are_structured(self):
         exceptions = (

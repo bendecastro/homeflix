@@ -344,20 +344,21 @@ def _failure(plan: HostPreparationPlan, operation_id: str, completed: int) -> Ho
     )
 
 
-def _cleanup_staged_files(runner: Runner, *, root: bool) -> None:
+def _cleanup_staged_files(runner: Runner, *, root: bool) -> bool:
     cleanup = _Operation(
         "cleanup_repository_stage_after",
         ("rm", "-f", KEYRING_STAGE_PATH, SOURCE_STAGE_PATH),
         30,
     )
     try:
-        runner.run(
+        result = runner.run(
             _bounded_argv(cleanup, root=root),
             check=False,
             timeout=cleanup.timeout_seconds + OUTER_TIMEOUT_MARGIN,
         )
     except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
-        pass
+        return False
+    return result.returncode == 0
 
 
 def apply_host_preparation(
@@ -397,6 +398,8 @@ def apply_host_preparation(
     root = current.uid == 0
     completed = 0
     cleanup_needed = bool(plan.packages)
+    cleanup_succeeded = True
+    primary_failure: HostPreparationPlan | None = None
     try:
         for operation in _operations(rebuilt, root=root):
             try:
@@ -407,11 +410,31 @@ def apply_host_preparation(
                     timeout=operation.timeout_seconds + OUTER_TIMEOUT_MARGIN,
                 )
             except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
-                return _failure(plan, operation.operation_id, completed)
+                primary_failure = _failure(plan, operation.operation_id, completed)
+                break
             if result.returncode:
-                return _failure(plan, operation.operation_id, completed)
+                primary_failure = _failure(plan, operation.operation_id, completed)
+                break
             completed += 1
     finally:
         if cleanup_needed:
-            _cleanup_staged_files(runner, root=root)
+            cleanup_succeeded = _cleanup_staged_files(runner, root=root)
+
+    if primary_failure is not None:
+        if not cleanup_succeeded:
+            refusal = dict(primary_failure.refusal or {})
+            refusal["cleanup_warning"] = "cleanup_repository_stage_after_failed"
+            primary_failure = replace(primary_failure, refusal=refusal)
+        return primary_failure
+    if not cleanup_succeeded:
+        return replace(
+            plan,
+            commands_completed=completed,
+            refusal={
+                "code": "host_preparation_cleanup_failed",
+                "operation": "cleanup_repository_stage_after",
+                "message": "Host preparation completed but staged-file cleanup failed",
+                "action": "Inspect and remove the reported staged repository paths before retrying",
+            },
+        )
     return replace(plan, applied=True, commands_completed=completed)
