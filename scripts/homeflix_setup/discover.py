@@ -12,6 +12,16 @@ from typing import Mapping, Protocol, Sequence
 
 PROBE_TIMEOUT_SECONDS = 5.0
 SUPPORTED_DISTRIBUTIONS = {"debian", "ubuntu"}
+CONFLICTING_DOCKER_PACKAGES = {
+    "docker.io",
+    "docker-compose",
+    "docker-compose-v2",
+    "docker-doc",
+    "podman-docker",
+    "containerd",
+    "runc",
+}
+PACKAGE_PROBE_FORMAT = r"${binary:Package}\t${db:Status-Abbrev}\n"
 
 
 class Runner(Protocol):
@@ -98,6 +108,11 @@ class HostFacts:
     docker_service_enabled: bool | None = None
     docker_service_status: str = "unknown"
     docker_service_reason: str | None = None
+    configured_groups_status: str = "unknown"
+    session_groups_status: str = "unknown"
+    conflicting_packages: tuple[str, ...] = ()
+    conflicting_packages_status: str = "unknown"
+    conflicting_packages_reason: str | None = None
     probe_errors: dict[str, str] = field(default_factory=dict)
     capability_gaps: tuple[dict[str, str], ...] = field(default_factory=tuple)
     refusal: dict[str, str] | None = None
@@ -146,6 +161,12 @@ class HostFacts:
             "daemon_status": self.docker_daemon_status,
             "service_enabled": self.docker_service_enabled,
             "service_status": self.docker_service_status,
+            "conflicting_packages": (
+                list(self.conflicting_packages)
+                if self.conflicting_packages_status == "ok"
+                else None
+            ),
+            "conflicting_packages_status": self.conflicting_packages_status,
         }
         if self.docker_cli_reason is not None:
             docker["cli_reason"] = self.docker_cli_reason
@@ -155,6 +176,8 @@ class HostFacts:
             docker["daemon_reason"] = self.docker_daemon_reason
         if self.docker_service_reason is not None:
             docker["service_reason"] = self.docker_service_reason
+        if self.conflicting_packages_reason is not None:
+            docker["conflicting_packages_reason"] = self.conflicting_packages_reason
         return {
             "os": {
                 "id": self.os_id,
@@ -168,7 +191,9 @@ class HostFacts:
                 "gid": self.gid,
                 "user": self.deployment_user,
                 "groups": list(self.user_groups),
+                "groups_status": self.configured_groups_status,
                 "session_groups": list(self.session_groups),
+                "session_groups_status": self.session_groups_status,
                 "privilege_escalation": self.privilege_escalation,
             },
             "timezone": self.timezone,
@@ -331,6 +356,18 @@ def _presence_for_status(status: str) -> bool | None:
     return None
 
 
+def _conflicting_packages(contents: str) -> tuple[str, ...]:
+    installed: set[str] = set()
+    for line in contents.splitlines():
+        if "\t" not in line:
+            continue
+        package, status = line.split("\t", 1)
+        package = package.split(":", 1)[0]
+        if package in CONFLICTING_DOCKER_PACKAGES and status.startswith("ii"):
+            installed.add(package)
+    return tuple(sorted(installed))
+
+
 def _service_enablement(
     result: subprocess.CompletedProcess[str],
 ) -> tuple[bool | None, str, str | None]:
@@ -394,6 +431,9 @@ def discover_host(runner: Runner) -> HostFacts:
         else session_groups_result
     )
     sudo_result = _run(runner, "sudo", "-n", "true")
+    conflicts_result = _run(
+        runner, "dpkg-query", "--show", f"--showformat={PACKAGE_PROBE_FORMAT}"
+    )
     timezone_result = _run(
         runner, "timedatectl", "show", "--property=Timezone", "--value"
     )
@@ -405,8 +445,20 @@ def discover_host(runner: Runner) -> HostFacts:
     deployment_user = deployment_user_value
     groups_value = _value(groups_result)
     user_groups = tuple(groups_value.split()) if groups_value is not None else ()
+    configured_groups_status = "ok" if groups_result.returncode == 0 else "error"
     session_groups_value = _value(session_groups_result)
     session_groups = tuple(session_groups_value.split()) if session_groups_value is not None else ()
+    session_groups_status = "ok" if session_groups_result.returncode == 0 else "error"
+    if conflicts_result.returncode == 0:
+        conflicting_packages = _conflicting_packages(conflicts_result.stdout)
+        conflicting_packages_status = "ok"
+        conflicting_packages_reason = None
+    else:
+        conflicting_packages = ()
+        conflicting_packages_status = "error"
+        conflicting_packages_reason = _probe_failure_reason(
+            conflicts_result, "conflicting-package"
+        )
     if uid == 0:
         privilege_escalation = "root"
     elif sudo_result.returncode == 0:
@@ -574,6 +626,11 @@ def discover_host(runner: Runner) -> HostFacts:
         docker_service_enabled=service_enabled,
         docker_service_status=service_status,
         docker_service_reason=service_reason,
+        configured_groups_status=configured_groups_status,
+        session_groups_status=session_groups_status,
+        conflicting_packages=conflicting_packages,
+        conflicting_packages_status=conflicting_packages_status,
+        conflicting_packages_reason=conflicting_packages_reason,
         probe_errors=probe_errors,
         capability_gaps=tuple(gaps),
         refusal=refusal,

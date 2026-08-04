@@ -56,7 +56,7 @@ class HostDiscoveryTests(unittest.TestCase):
         result = facts.to_dict()
 
         self.assertEqual(result["os"], {"id": "debian", "version_id": "12", "pretty_name": "Debian GNU/Linux 12 (bookworm)", "codename": "bookworm", "supported": True})
-        self.assertEqual(result["identity"], {"uid": 1000, "gid": 1001, "user": "homeflix", "groups": ["homeflix", "sudo", "docker"], "session_groups": ["homeflix", "sudo", "docker"], "privilege_escalation": "sudo_noninteractive"})
+        self.assertEqual(result["identity"], {"uid": 1000, "gid": 1001, "user": "homeflix", "groups": ["homeflix", "sudo", "docker"], "groups_status": "ok", "session_groups": ["homeflix", "sudo", "docker"], "session_groups_status": "ok", "privilege_escalation": "sudo_noninteractive"})
         self.assertEqual(result["timezone"], "Europe/London")
         self.assertEqual(result["memory_bytes"], 16_777_216_000)
         self.assertEqual(result["cpu"], {"architecture": "x86_64", "model": "Fixture Intel CPU"})
@@ -89,6 +89,8 @@ class HostDiscoveryTests(unittest.TestCase):
                 "daemon_status": "ok",
                 "service_enabled": True,
                 "service_status": "enabled",
+                "conflicting_packages": [],
+                "conflicting_packages_status": "ok",
             },
         )
         self.assertEqual(
@@ -155,6 +157,36 @@ class HostDiscoveryTests(unittest.TestCase):
                 if status in {"not_found", "error"}:
                     self.assertIn("service_reason", docker)
                     self.assertNotIn("private", json.dumps(docker))
+
+    def test_conflicting_package_probe_is_allowlisted_and_structured(self) -> None:
+        runner = FixtureRunner("discovery-ubuntu.json")
+        runner.commands["dpkg-query --show --showformat=${binary:Package}\\t${db:Status-Abbrev}\\n"] = [
+            0,
+            "docker.io\tii \nprivate-package\tii \nrunc\tii \ndocker-doc\trc \n",
+            "",
+        ]
+        docker = discover_host(runner).to_dict()["docker"]
+        self.assertEqual(docker["conflicting_packages"], ["docker.io", "runc"])
+        self.assertEqual(docker["conflicting_packages_status"], "ok")
+        self.assertNotIn("private-package", json.dumps(docker))
+
+    def test_conflicting_package_probe_error_does_not_claim_empty(self) -> None:
+        runner = FixtureRunner("discovery-ubuntu.json")
+        runner.commands["dpkg-query --show --showformat=${binary:Package}\\t${db:Status-Abbrev}\\n"] = [1, "docker.io\tii \n", "private failure"]
+        docker = discover_host(runner).to_dict()["docker"]
+        self.assertIsNone(docker["conflicting_packages"])
+        self.assertEqual(docker["conflicting_packages_status"], "error")
+        self.assertNotIn("private", json.dumps(docker))
+
+    def test_group_probe_failures_are_explicit_unknown_not_empty_success(self) -> None:
+        runner = FixtureRunner("discovery-debian.json")
+        runner.commands["id -nG homeflix"] = [1, "", "private configured groups"]
+        runner.commands["id -nG"] = [124, "", "private session groups"]
+        identity = discover_host(runner).to_dict()["identity"]
+        self.assertEqual(identity["groups"], [])
+        self.assertEqual(identity["groups_status"], "error")
+        self.assertEqual(identity["session_groups"], [])
+        self.assertEqual(identity["session_groups_status"], "error")
 
     def test_unsupported_distribution_is_structured_refusal(self) -> None:
         runner = FixtureRunner("discovery-debian.json")
@@ -342,7 +374,7 @@ class HostDiscoveryTests(unittest.TestCase):
 
         result = discover_host(runner).to_dict()
 
-        self.assertEqual(result["identity"], {"uid": None, "gid": None, "user": "homeflix", "groups": ["homeflix", "sudo", "docker"], "session_groups": ["homeflix", "sudo", "docker"], "privilege_escalation": "sudo_noninteractive"})
+        self.assertEqual(result["identity"], {"uid": None, "gid": None, "user": "homeflix", "groups": ["homeflix", "sudo", "docker"], "groups_status": "ok", "session_groups": ["homeflix", "sudo", "docker"], "session_groups_status": "ok", "privilege_escalation": "sudo_noninteractive"})
         self.assertIsNone(result["timezone"])
         self.assertIsNone(result["memory_bytes"])
         self.assertEqual(result["cpu"], {"architecture": None, "model": None})

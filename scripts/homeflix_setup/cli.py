@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+from dataclasses import replace
 import json
 from pathlib import Path
 import sys
@@ -40,6 +41,11 @@ def build_parser() -> argparse.ArgumentParser:
     mode = prepare_parser.add_mutually_exclusive_group()
     mode.add_argument("--apply", action="store_true", help="apply the exact plan after rediscovery")
     mode.add_argument("--dry-run", action="store_true", help="explicitly request the default read-only plan")
+    prepare_parser.add_argument(
+        "--confirm-plan",
+        metavar="FINGERPRINT",
+        help="confirm the exact SHA-256 fingerprint emitted by the reviewed plan",
+    )
     return parser
 
 
@@ -83,7 +89,19 @@ def main(argv: Sequence[str] | None = None, *, repository_root: Path | None = No
         discovered = discover_host(runner)
         preparation = plan_host_preparation(discovered)
         if arguments.apply and preparation.refusal is None:
-            preparation = apply_host_preparation(preparation, runner)
+            if not arguments.confirm_plan:
+                preparation = replace(
+                    preparation,
+                    refusal={
+                        "code": "plan_confirmation_required",
+                        "message": "Applying host preparation requires the reviewed plan fingerprint",
+                        "action": "Run a dry plan, review it, then pass --confirm-plan FINGERPRINT",
+                    },
+                )
+            else:
+                preparation = apply_host_preparation(
+                    preparation, runner, confirm_plan=arguments.confirm_plan
+                )
         result = preparation.to_dict()
     else:  # pragma: no cover - argparse limits command values
         raise AssertionError(f"unhandled command {arguments.command}")
