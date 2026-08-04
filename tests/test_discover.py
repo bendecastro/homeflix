@@ -55,8 +55,8 @@ class HostDiscoveryTests(unittest.TestCase):
         facts = discover_host(runner)
         result = facts.to_dict()
 
-        self.assertEqual(result["os"], {"id": "debian", "version_id": "12", "pretty_name": "Debian GNU/Linux 12 (bookworm)", "supported": True})
-        self.assertEqual(result["identity"], {"uid": 1000, "gid": 1001})
+        self.assertEqual(result["os"], {"id": "debian", "version_id": "12", "pretty_name": "Debian GNU/Linux 12 (bookworm)", "codename": "bookworm", "supported": True})
+        self.assertEqual(result["identity"], {"uid": 1000, "gid": 1001, "user": "homeflix", "groups": ["homeflix", "sudo", "docker"], "session_groups": ["homeflix", "sudo", "docker"], "privilege_escalation": "sudo_noninteractive"})
         self.assertEqual(result["timezone"], "Europe/London")
         self.assertEqual(result["memory_bytes"], 16_777_216_000)
         self.assertEqual(result["cpu"], {"architecture": "x86_64", "model": "Fixture Intel CPU"})
@@ -320,7 +320,7 @@ class HostDiscoveryTests(unittest.TestCase):
 
         result = discover_host(runner).to_dict()
 
-        self.assertEqual(result["identity"], {"uid": None, "gid": None})
+        self.assertEqual(result["identity"], {"uid": None, "gid": None, "user": "homeflix", "groups": ["homeflix", "sudo", "docker"], "session_groups": ["homeflix", "sudo", "docker"], "privilege_escalation": "sudo_noninteractive"})
         self.assertIsNone(result["timezone"])
         self.assertIsNone(result["memory_bytes"])
         self.assertEqual(result["cpu"], {"architecture": None, "model": None})

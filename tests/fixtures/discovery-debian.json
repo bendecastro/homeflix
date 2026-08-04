@@ -1,11 +1,15 @@
 {
   "commands": {
-    "cat /etc/os-release": [0, "PRETTY_NAME=\"Debian GNU/Linux 12 (bookworm)\"\nID=debian\nVERSION_ID=\"12\"\n", ""],
+    "cat /etc/os-release": [0, "PRETTY_NAME=\"Debian GNU/Linux 12 (bookworm)\"\nID=debian\nVERSION_ID=\"12\"\nVERSION_CODENAME=bookworm\n", ""],
     "docker --version": [0, "Docker version 27.5.1, build fixture\n", ""],
     "docker compose version": [0, "Docker Compose version v2.32.4\n", ""],
     "docker info --format {{json .ServerVersion}}": [0, "\"27.5.1\"\n", ""],
     "id -u": [0, "1000\n", ""],
     "id -g": [0, "1001\n", ""],
+    "id -un": [0, "homeflix\n", ""],
+    "id -nG": [0, "homeflix sudo docker\n", ""],
+    "id -nG homeflix": [0, "homeflix sudo docker\n", ""],
+    "sudo -n true": [0, "", ""],
     "timedatectl show --property=Timezone --value": [0, "Europe/London\n", ""],
     "cat /proc/meminfo": [0, "MemTotal:       16384000 kB\nMemFree:         1000000 kB\n", ""],
     "uname -m": [0, "x86_64\n", ""],

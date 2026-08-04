@@ -1,11 +1,15 @@
 {
   "commands": {
-    "cat /etc/os-release": [0, "PRETTY_NAME=\"Ubuntu 24.04 LTS\"\nID=ubuntu\nVERSION_ID=\"24.04\"\n", ""],
+    "cat /etc/os-release": [0, "PRETTY_NAME=\"Ubuntu 24.04 LTS\"\nID=ubuntu\nVERSION_ID=\"24.04\"\nVERSION_CODENAME=noble\n", ""],
     "docker --version": [127, "", "docker: command not found\n"],
     "docker compose version": [127, "", "docker: command not found\n"],
     "docker info --format {{json .ServerVersion}}": [127, "", "docker: command not found\n"],
     "id -u": [0, "1002\n", ""],
     "id -g": [0, "1002\n", ""],
+    "id -un": [0, "ubuntu\n", ""],
+    "id -nG": [0, "ubuntu sudo\n", ""],
+    "id -nG ubuntu": [0, "ubuntu sudo\n", ""],
+    "sudo -n true": [0, "", ""],
     "timedatectl show --property=Timezone --value": [0, "Etc/UTC\n", ""],
     "cat /proc/meminfo": [0, "MemTotal:        8388608 kB\n", ""],
     "uname -m": [0, "aarch64\n", ""],

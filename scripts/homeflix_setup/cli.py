@@ -10,6 +10,7 @@ from typing import Sequence
 
 from .command import CommandRunner
 from .discover import HostFacts, discover_host
+from .host import HostPreparationPlan, apply_host_preparation, plan_host_preparation
 from .state import SetupState
 
 
@@ -30,6 +31,15 @@ def build_parser() -> argparse.ArgumentParser:
         help="inspect the local host without changing it",
         description="Discover Debian/Ubuntu host capabilities without persisting private facts.",
     )
+    host_parser = subparsers.add_parser("host", help="inspect or prepare host prerequisites")
+    host_subparsers = host_parser.add_subparsers(dest="host_command", required=True)
+    prepare_parser = host_subparsers.add_parser(
+        "prepare",
+        help="plan Docker host preparation (read-only unless --apply is given)",
+    )
+    mode = prepare_parser.add_mutually_exclusive_group()
+    mode.add_argument("--apply", action="store_true", help="apply the exact plan after rediscovery")
+    mode.add_argument("--dry-run", action="store_true", help="explicitly request the default read-only plan")
     return parser
 
 
@@ -50,6 +60,7 @@ def main(argv: Sequence[str] | None = None, *, repository_root: Path | None = No
     root = repository_root or Path(__file__).resolve().parents[2]
 
     discovered: HostFacts | None = None
+    preparation: HostPreparationPlan | None = None
     if arguments.command == "status":
         try:
             result = _status(root)
@@ -67,11 +78,23 @@ def main(argv: Sequence[str] | None = None, *, repository_root: Path | None = No
     elif arguments.command == "discover":
         discovered = discover_host(CommandRunner())
         result = discovered.to_dict()
+    elif arguments.command == "host" and arguments.host_command == "prepare":
+        runner = CommandRunner()
+        discovered = discover_host(runner)
+        preparation = plan_host_preparation(discovered)
+        if arguments.apply and preparation.refusal is None:
+            preparation = apply_host_preparation(preparation, runner)
+        result = preparation.to_dict()
     else:  # pragma: no cover - argparse limits command values
         raise AssertionError(f"unhandled command {arguments.command}")
 
     if arguments.json_output:
         print(json.dumps(result, sort_keys=True))
+    elif preparation is not None:
+        print(json.dumps(result, indent=2, sort_keys=True))
+        if preparation.refusal:
+            print(f"homeflix: {preparation.refusal['message']}", file=sys.stderr)
+            print(f"Action: {preparation.refusal['action']}", file=sys.stderr)
     elif discovered is not None:
         if discovered.refusal:
             print(f"homeflix: {discovered.refusal['message']}", file=sys.stderr)
@@ -112,4 +135,6 @@ def main(argv: Sequence[str] | None = None, *, repository_root: Path | None = No
     else:
         state_description = "present" if result["state_exists"] else "not created"
         print(f"Setup state: {state_description} (schema {result['schema_version']})")
+    if preparation is not None:
+        return 1 if preparation.refusal is not None else 0
     return 1 if discovered is not None and not discovered.supported else 0

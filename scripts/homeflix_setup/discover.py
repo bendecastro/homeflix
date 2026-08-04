@@ -90,6 +90,11 @@ class HostFacts:
     host_dns_status: str
     host_dns_reason: str | None
     ssh_context: bool
+    os_codename: str = ""
+    deployment_user: str | None = None
+    user_groups: tuple[str, ...] = ()
+    session_groups: tuple[str, ...] = ()
+    privilege_escalation: str = "unknown"
     probe_errors: dict[str, str] = field(default_factory=dict)
     capability_gaps: tuple[dict[str, str], ...] = field(default_factory=tuple)
     refusal: dict[str, str] | None = None
@@ -148,9 +153,17 @@ class HostFacts:
                 "id": self.os_id,
                 "version_id": self.os_version_id,
                 "pretty_name": self.os_pretty_name,
+                "codename": self.os_codename,
                 "supported": self.supported,
             },
-            "identity": {"uid": self.uid, "gid": self.gid},
+            "identity": {
+                "uid": self.uid,
+                "gid": self.gid,
+                "user": self.deployment_user,
+                "groups": list(self.user_groups),
+                "session_groups": list(self.session_groups),
+                "privilege_escalation": self.privilege_escalation,
+            },
             "timezone": self.timezone,
             "memory_bytes": self.memory_bytes,
             "cpu": {"architecture": self.architecture, "model": self.cpu_model},
@@ -344,6 +357,15 @@ def discover_host(runner: Runner) -> HostFacts:
 
     uid_result = _run(runner, "id", "-u")
     gid_result = _run(runner, "id", "-g")
+    user_result = _run(runner, "id", "-un")
+    session_groups_result = _run(runner, "id", "-nG")
+    deployment_user_value = _value(user_result)
+    groups_result = (
+        _run(runner, "id", "-nG", deployment_user_value)
+        if deployment_user_value is not None
+        else session_groups_result
+    )
+    sudo_result = _run(runner, "sudo", "-n", "true")
     timezone_result = _run(
         runner, "timedatectl", "show", "--property=Timezone", "--value"
     )
@@ -352,6 +374,19 @@ def discover_host(runner: Runner) -> HostFacts:
     cpu_result = _run(runner, "cat", "/proc/cpuinfo")
     uid = _integer(uid_result)
     gid = _integer(gid_result)
+    deployment_user = deployment_user_value
+    groups_value = _value(groups_result)
+    user_groups = tuple(groups_value.split()) if groups_value is not None else ()
+    session_groups_value = _value(session_groups_result)
+    session_groups = tuple(session_groups_value.split()) if session_groups_value is not None else ()
+    if uid == 0:
+        privilege_escalation = "root"
+    elif sudo_result.returncode == 0:
+        privilege_escalation = "sudo_noninteractive"
+    elif sudo_result.returncode == 127:
+        privilege_escalation = "missing"
+    else:
+        privilege_escalation = "authorization_required"
     timezone = _value(timezone_result)
     architecture = _value(architecture_result)
     graphics_result = _run(
@@ -442,6 +477,9 @@ def discover_host(runner: Runner) -> HostFacts:
     scalar_probes = (
         ("uid", "UID", uid_result),
         ("gid", "GID", gid_result),
+        ("user", "user", user_result),
+        ("groups", "groups", groups_result),
+        ("session_groups", "session groups", session_groups_result),
         ("timezone", "timezone", timezone_result),
         ("memory", "memory", memory_result),
         ("architecture", "architecture", architecture_result),
@@ -500,6 +538,11 @@ def discover_host(runner: Runner) -> HostFacts:
         ssh_context=any(
             name in _environment(runner) for name in ("SSH_CONNECTION", "SSH_CLIENT", "SSH_TTY")
         ),
+        os_codename=os_release.get("VERSION_CODENAME", ""),
+        deployment_user=deployment_user,
+        user_groups=user_groups,
+        session_groups=session_groups,
+        privilege_escalation=privilege_escalation,
         probe_errors=probe_errors,
         capability_gaps=tuple(gaps),
         refusal=refusal,
