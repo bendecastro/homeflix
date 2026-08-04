@@ -1,0 +1,11 @@
+# Real secrets — never commit
+.env
+*.env
+!.env.example
+
+# Runtime data (lives on the host, not in the repo)
+appdata/
+cache/
+data/
+
+.DS_Store

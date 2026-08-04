@@ -1,0 +1,301 @@
+# homeflix — self-hosted streaming stack
+#
+# Storage layout per ADR-0008 (.agent/wiki/decisions/): downloads and media share ONE
+# filesystem under ${DATA_ROOT} so the *arr apps import by hardlink — instant, no extra
+# disk, and torrents keep seeding. The *arr apps MUST mount the single root as /data;
+# splitting it into separate torrents/ and media/ mounts silently breaks hardlinking.
+#
+# Copy .env.example to .env and fill it in before running.
+
+networks:
+  traefik-network:
+    driver: bridge
+
+x-common-env: &common-env
+  PUID: ${PUID:-1000}
+  PGID: ${PGID:-1000}
+  TZ: ${TZ:-UTC}
+
+services:
+  # ============================================
+  # Traefik — reverse proxy
+  # ============================================
+  traefik:
+    image: traefik:${TRAEFIK_TAG:-v3.0}
+    container_name: traefik
+    command:
+      # ⚠️ OPEN DECISION: api.insecure exposes an unauthenticated dashboard on :8080.
+      # Acceptable on a trusted LAN only. Must be hardened before any remote exposure.
+      - "--api.insecure=true"
+      - "--api.dashboard=true"
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--providers.docker.network=traefik-network"
+      - "--entrypoints.web.address=:80"
+      - "--entrypoints.websecure.address=:443"
+      - "--log.level=${LOG_LEVEL:-info}"
+    ports:
+      - "80:80"
+      - "443:443"
+      - "8080:8080"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ${CONFIG_ROOT}/traefik:/traefik
+    networks:
+      - traefik-network
+    restart: unless-stopped
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.dashboard.rule=Host(`traefik.${DOMAIN}`)"
+      - "traefik.http.routers.dashboard.service=api@internal"
+      - "traefik.http.services.dashboard.loadbalancer.server.port=8080"
+
+  # ============================================
+  # Gluetun — VPN egress for the download/indexer services
+  # ============================================
+  # qBittorrent, NZBGet and Prowlarr share this container's network namespace, so they
+  # have no IP of their own. Traefik's Docker provider therefore cannot discover them —
+  # their routers are declared HERE, on gluetun, which is on traefik-network.
+  # The *arr apps must reach them as gluetun:<port>, never localhost.
+  gluetun:
+    image: qmcgaw/gluetun:${GLUETUN_TAG:-latest}
+    container_name: gluetun
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun
+    ports:
+      - "${QBITTORRENT_PORT:-6969}:${QBITTORRENT_PORT:-6969}/tcp"   # qBittorrent WebUI
+      - "${TORRENT_PORT:-6881}:${TORRENT_PORT:-6881}/tcp"           # torrent traffic
+      - "${TORRENT_PORT:-6881}:${TORRENT_PORT:-6881}/udp"
+      - "${NZBGET_PORT:-6789}:${NZBGET_PORT:-6789}/tcp"
+      - "${PROWLARR_PORT:-9696}:${PROWLARR_PORT:-9696}/tcp"
+    environment:
+      VPN_SERVICE_PROVIDER: ${VPN_SERVICE_PROVIDER:-protonvpn}
+      VPN_TYPE: ${VPN_TYPE:-openvpn}
+      OPENVPN_USER: ${VPN_USER}
+      OPENVPN_PASSWORD: ${VPN_PASSWORD}
+      SERVER_COUNTRIES: ${VPN_SERVER_COUNTRIES}
+      FIREWALL: "on"
+      FIREWALL_OUTBOUND_SUBNETS: ${LAN_SUBNET:-192.168.0.0/16,10.0.0.0/8}
+      FIREWALL_INPUT_PORTS: ${TORRENT_PORT:-6881},${QBITTORRENT_PORT:-6969},${NZBGET_PORT:-6789},${PROWLARR_PORT:-9696}
+      DNS_ADDRESS: ${VPN_DNS:-1.1.1.1}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      HEALTH_TARGET_ADDRESS: ${VPN_HEALTH_TARGET:-cloudflare.com:443}
+    networks:
+      - traefik-network
+    restart: unless-stopped
+    # No custom healthcheck: the gluetun image ships its own, which actually probes the
+    # tunnel. (The inherited healthcheck hit :8888/v1/openvpn/status — wrong
+    # port, wrong route, and the control server now requires auth by default.)
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.qbittorrent.rule=Host(`qbittorrent.${DOMAIN}`)"
+      - "traefik.http.routers.qbittorrent.service=qbittorrent"
+      - "traefik.http.services.qbittorrent.loadbalancer.server.port=${QBITTORRENT_PORT:-6969}"
+      - "traefik.http.routers.nzbget.rule=Host(`nzbget.${DOMAIN}`)"
+      - "traefik.http.routers.nzbget.service=nzbget"
+      - "traefik.http.services.nzbget.loadbalancer.server.port=${NZBGET_PORT:-6789}"
+      - "traefik.http.routers.prowlarr.rule=Host(`prowlarr.${DOMAIN}`)"
+      - "traefik.http.routers.prowlarr.service=prowlarr"
+      - "traefik.http.services.prowlarr.loadbalancer.server.port=${PROWLARR_PORT:-9696}"
+
+  # ============================================
+  # Download clients + indexer manager (behind VPN)
+  # ============================================
+  qbittorrent:
+    image: lscr.io/linuxserver/qbittorrent:${QBITTORRENT_TAG:-latest}
+    container_name: qbittorrent
+    network_mode: container:gluetun
+    depends_on:
+      gluetun:
+        condition: service_healthy
+    environment:
+      <<: *common-env
+      WEBUI_PORT: ${QBITTORRENT_PORT:-6969}
+      TORRENTING_PORT: ${TORRENT_PORT:-6881}
+    volumes:
+      - ${CONFIG_ROOT}/qbittorrent:/config
+      - ${DATA_ROOT}/torrents:/data/torrents
+    restart: unless-stopped
+
+  nzbget:
+    image: lscr.io/linuxserver/nzbget:${NZBGET_TAG:-latest}
+    container_name: nzbget
+    network_mode: container:gluetun
+    depends_on:
+      gluetun:
+        condition: service_healthy
+    environment: *common-env
+    volumes:
+      - ${CONFIG_ROOT}/nzbget:/config
+      - ${DATA_ROOT}/usenet:/data/usenet
+    restart: unless-stopped
+
+  prowlarr:
+    image: lscr.io/linuxserver/prowlarr:${PROWLARR_TAG:-latest}
+    container_name: prowlarr
+    network_mode: container:gluetun
+    depends_on:
+      gluetun:
+        condition: service_healthy
+    environment: *common-env
+    volumes:
+      - ${CONFIG_ROOT}/prowlarr:/config
+    restart: unless-stopped
+
+  # ============================================
+  # The *arr apps — single /data root (hardlinks depend on this)
+  # ============================================
+  radarr:
+    image: lscr.io/linuxserver/radarr:${RADARR_TAG:-latest}
+    container_name: radarr
+    environment: *common-env
+    volumes:
+      - ${CONFIG_ROOT}/radarr:/config
+      - ${DATA_ROOT}:/data
+    networks:
+      - traefik-network
+    restart: unless-stopped
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.radarr.rule=Host(`radarr.${DOMAIN}`)"
+      - "traefik.http.services.radarr.loadbalancer.server.port=7878"
+
+  sonarr:
+    image: lscr.io/linuxserver/sonarr:${SONARR_TAG:-latest}
+    container_name: sonarr
+    environment: *common-env
+    volumes:
+      - ${CONFIG_ROOT}/sonarr:/config
+      - ${DATA_ROOT}:/data
+    networks:
+      - traefik-network
+    restart: unless-stopped
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.sonarr.rule=Host(`sonarr.${DOMAIN}`)"
+      - "traefik.http.services.sonarr.loadbalancer.server.port=8989"
+
+  lidarr:
+    image: lscr.io/linuxserver/lidarr:${LIDARR_TAG:-latest}
+    container_name: lidarr
+    environment: *common-env
+    volumes:
+      - ${CONFIG_ROOT}/lidarr:/config
+      - ${DATA_ROOT}:/data
+    networks:
+      - traefik-network
+    restart: unless-stopped
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.lidarr.rule=Host(`lidarr.${DOMAIN}`)"
+      - "traefik.http.services.lidarr.loadbalancer.server.port=8686"
+
+  # Bazarr writes subtitle files alongside the media, so this mount is NOT read-only.
+  bazarr:
+    image: lscr.io/linuxserver/bazarr:${BAZARR_TAG:-latest}
+    container_name: bazarr
+    environment: *common-env
+    volumes:
+      - ${CONFIG_ROOT}/bazarr:/config
+      - ${DATA_ROOT}/media:/data/media
+    networks:
+      - traefik-network
+    restart: unless-stopped
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.bazarr.rule=Host(`bazarr.${DOMAIN}`)"
+      - "traefik.http.services.bazarr.loadbalancer.server.port=6767"
+
+  # ============================================
+  # Family-facing
+  # ============================================
+  jellyfin:
+    image: lscr.io/linuxserver/jellyfin:${JELLYFIN_TAG:-latest}
+    container_name: jellyfin
+    environment:
+      <<: *common-env
+      JELLYFIN_PublishedServerUrl: ${JELLYFIN_PUBLISHED_URL:-http://jellyfin.${DOMAIN}}
+    volumes:
+      - ${CONFIG_ROOT}/jellyfin:/config
+      - ${CACHE_ROOT}/jellyfin:/cache
+      - ${DATA_ROOT}/media:/data/media:ro
+    # Hardware transcoding (Intel QuickSync): uncomment once verified on the host.
+    # devices:
+    #   - /dev/dri:/dev/dri
+    networks:
+      - traefik-network
+    ports:
+      - "8096:8096"
+    restart: unless-stopped
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.jellyfin.rule=Host(`jellyfin.${DOMAIN}`)"
+      - "traefik.http.services.jellyfin.loadbalancer.server.port=8096"
+
+  jellyseerr:
+    image: fallenbagel/jellyseerr:${JELLYSEERR_TAG:-latest}
+    container_name: jellyseerr
+    environment:
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      TZ: ${TZ:-UTC}
+    volumes:
+      - ${CONFIG_ROOT}/jellyseerr:/app/config
+    networks:
+      - traefik-network
+    restart: unless-stopped
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.jellyseerr.rule=Host(`jellyseerr.${DOMAIN}`)"
+      - "traefik.http.services.jellyseerr.loadbalancer.server.port=5055"
+
+  # ============================================
+  # Monitoring & lifecycle
+  # ============================================
+  glances:
+    image: nicolargo/glances:${GLANCES_TAG:-latest}
+    container_name: glances
+    environment:
+      GLANCES_OPT: -w
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ${CONFIG_ROOT}/glances:/config
+    networks:
+      - traefik-network
+    restart: unless-stopped
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.glances.rule=Host(`glances.${DOMAIN}`)"
+      - "traefik.http.services.glances.loadbalancer.server.port=61208"
+
+  # Restarts containers that report unhealthy — notably the VPN'd services, which lose
+  # networking if gluetun restarts.
+  deunhealth:
+    image: qmcgaw/deunhealth:${DEUNHEALTH_TAG:-latest}
+    container_name: deunhealth
+    network_mode: none
+    environment:
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      TZ: ${TZ:-UTC}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    restart: unless-stopped
+
+  # ⚠️ OPEN DECISION: auto-updating :latest images unattended on a family-critical box
+  # means a bad upstream image can break playback overnight. Alternative: pin the *_TAG
+  # vars in .env and run Watchtower notify-only. See .agent/wiki/references/gotchas.md.
+  watchtower:
+    image: containrrr/watchtower:${WATCHTOWER_TAG:-latest}
+    container_name: watchtower
+    environment:
+      WATCHTOWER_CLEANUP: "true"
+      WATCHTOWER_INCLUDE_STOPPED: "false"
+      WATCHTOWER_INCLUDE_RESTARTING: "false"
+      WATCHTOWER_SCHEDULE: ${WATCHTOWER_SCHEDULE:-0 0 2 * * *}
+      TZ: ${TZ:-UTC}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - traefik-network
+    restart: unless-stopped
