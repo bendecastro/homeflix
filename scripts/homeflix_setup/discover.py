@@ -291,12 +291,32 @@ def _command_probe_status(result: subprocess.CompletedProcess[str]) -> str:
     return "error"
 
 
+def _compose_probe_status(result: subprocess.CompletedProcess[str]) -> str:
+    status = _command_probe_status(result)
+    if status != "error" or result.returncode != 1:
+        return status
+    stderr = result.stderr.casefold()
+    missing_signatures = (
+        "'compose' is not a docker command",
+        "unknown command: docker compose",
+    )
+    return "missing" if any(signature in stderr for signature in missing_signatures) else "error"
+
+
 def _presence_for_status(status: str) -> bool | None:
     if status == "ok":
         return True
     if status == "missing":
         return False
     return None
+
+
+def _compose_probe_reason(
+    result: subprocess.CompletedProcess[str], status: str
+) -> str | None:
+    if status == "missing":
+        return "Docker Compose plugin is not available"
+    return _probe_failure_reason(result, "Docker Compose")
 
 
 def _environment(runner: Runner) -> Mapping[str, str]:
@@ -316,7 +336,7 @@ def discover_host(runner: Runner) -> HostFacts:
     compose_result = _run(runner, "docker", "compose", "version")
     daemon_result = _run(runner, "docker", "info", "--format", "{{json .ServerVersion}}")
     docker_status = _command_probe_status(docker_result)
-    compose_status = _command_probe_status(compose_result)
+    compose_status = _compose_probe_status(compose_result)
     daemon_status = _command_probe_status(daemon_result)
     docker_present = _presence_for_status(docker_status)
     compose_present = _presence_for_status(compose_status)
@@ -469,7 +489,7 @@ def discover_host(runner: Runner) -> HostFacts:
         docker_cli_reason=_probe_failure_reason(docker_result, "Docker CLI"),
         compose_present=compose_present,
         compose_status=compose_status,
-        compose_reason=_probe_failure_reason(compose_result, "Docker Compose"),
+        compose_reason=_compose_probe_reason(compose_result, compose_status),
         docker_daemon_reachable=daemon_reachable,
         docker_daemon_status=daemon_status,
         docker_daemon_reason=_probe_failure_reason(daemon_result, "Docker daemon"),

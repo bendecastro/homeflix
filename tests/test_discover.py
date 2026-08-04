@@ -234,6 +234,51 @@ class HostDiscoveryTests(unittest.TestCase):
         self.assertIn("listening ports: unavailable", stdout.getvalue())
         self.assertNotIn("Traceback", stdout.getvalue() + stderr.getvalue())
 
+    def test_docker_present_without_compose_plugin_reports_installable_missing_gap(self) -> None:
+        runner = FixtureRunner("discovery-debian.json")
+        runner.commands["docker compose version"] = [
+            1,
+            "",
+            "docker: 'compose' is not a docker command.\nSee 'docker --help'\n",
+        ]
+
+        result = discover_host(runner).to_dict()
+
+        self.assertTrue(result["docker"]["present"])
+        self.assertFalse(result["docker"]["compose_present"])
+        self.assertEqual(result["docker"]["compose_status"], "missing")
+        self.assertEqual(
+            result["docker"]["compose_reason"], "Docker Compose plugin is not available"
+        )
+        gaps = {gap["code"]: gap for gap in result["capability_gaps"]}
+        self.assertIn("compose_missing", gaps)
+        self.assertIn("Install", gaps["compose_missing"]["action"])
+        self.assertNotIn("compose_probe_error", gaps)
+
+    def test_unrelated_compose_exit_one_and_timeout_remain_probe_errors(self) -> None:
+        runners = (
+            FixtureRunner("discovery-debian.json"),
+            TimeoutRunner(
+                "discovery-debian.json", ("docker", "compose", "version")
+            ),
+        )
+        runners[0].commands["docker compose version"] = [
+            1,
+            "",
+            "private unrelated execution failure",
+        ]
+
+        for runner in runners:
+            with self.subTest(runner=type(runner).__name__):
+                result = discover_host(runner).to_dict()
+                self.assertIsNone(result["docker"]["compose_present"])
+                self.assertEqual(result["docker"]["compose_status"], "error")
+                gap_codes = {gap["code"] for gap in result["capability_gaps"]}
+                self.assertIn("compose_probe_error", gap_codes)
+                self.assertNotIn("compose_missing", gap_codes)
+                self.assertNotIn("private", json.dumps(result))
+                self.assertNotIn("poison", json.dumps(result))
+
     def test_docker_timeout_is_retryable_error_not_missing_install_gap(self) -> None:
         runner = TimeoutRunner("discovery-debian.json", ("docker", "--version"))
 
