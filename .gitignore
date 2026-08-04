@@ -3,10 +3,12 @@
 *.env
 !.env.example
 
-# Runtime data (lives on the host, not in the repo)
+# Runtime data and host-specific generated setup files
 appdata/
 cache/
 data/
+.homeflix/
+docker-compose.override.yml
 
 # Python caches
 __pycache__/

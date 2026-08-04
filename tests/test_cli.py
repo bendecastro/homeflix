@@ -69,6 +69,24 @@ class StatusCliTests(unittest.TestCase):
         self.assertRegex(stderr, r"^homeflix: invalid setup state: .+\n$")
         self.assertNotIn("Traceback", stderr)
 
+    def test_secret_reveal_refuses_json_and_redirected_output(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            secret = "must-not-appear"
+            (root / ".env").write_text(
+                f"JELLYFIN_ADMIN_USER=admin\nJELLYFIN_ADMIN_PASSWORD={secret}\n",
+                encoding="utf-8",
+            )
+            json_code, json_stdout, json_stderr = run_main(
+                "--json", "secrets", "reveal", "jellyfin", repository_root=root
+            )
+            pipe_code, pipe_stdout, pipe_stderr = run_main(
+                "secrets", "reveal", "jellyfin", repository_root=root
+            )
+        self.assertEqual(json_code, 2)
+        self.assertEqual(pipe_code, 2)
+        self.assertNotIn(secret, json_stdout + json_stderr + pipe_stdout + pipe_stderr)
+
     def test_launcher_works_cross_cwd_without_changing_repository_state(self) -> None:
         state_path = REPOSITORY_ROOT / ".homeflix" / "setup.json"
         existed_before = state_path.exists()

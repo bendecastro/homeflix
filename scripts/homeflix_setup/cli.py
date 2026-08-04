@@ -10,8 +10,10 @@ import sys
 from typing import Sequence
 
 from .command import CommandRunner
+from .compose import configure
 from .discover import HostFacts, discover_host
 from .host import HostPreparationPlan, apply_host_preparation, plan_host_preparation
+from .secrets import reveal_jellyfin
 from .state import SetupState
 
 
@@ -46,6 +48,18 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="FINGERPRINT",
         help="confirm the exact SHA-256 fingerprint emitted by the reviewed plan",
     )
+    configure_parser = subparsers.add_parser(
+        "configure", help="generate secure host configuration and a local Compose override"
+    )
+    configure_parser.add_argument("--data-root", required=True)
+    configure_parser.add_argument("--config-root", required=True)
+    configure_parser.add_argument("--cache-root", required=True)
+    configure_parser.add_argument("--quality-profile", default="HD-1080p")
+    configure_parser.add_argument("--direct-setup-ports", action="store_true")
+    secrets_parser = subparsers.add_parser("secrets", help="explicitly retrieve local credentials")
+    secrets_subparsers = secrets_parser.add_subparsers(dest="secrets_command", required=True)
+    reveal_parser = secrets_subparsers.add_parser("reveal", help="reveal credentials on /dev/tty only")
+    reveal_parser.add_argument("service", choices=("jellyfin",))
     return parser
 
 
@@ -67,6 +81,19 @@ def main(argv: Sequence[str] | None = None, *, repository_root: Path | None = No
 
     discovered: HostFacts | None = None
     preparation: HostPreparationPlan | None = None
+    if arguments.command == "secrets":
+        if arguments.json_output:
+            print("homeflix: secret reveal does not support JSON output", file=sys.stderr)
+            return 2
+        if not all(stream.isatty() for stream in (sys.stdin, sys.stdout, sys.stderr)):
+            print("homeflix: secret reveal requires an unredirected controlling terminal", file=sys.stderr)
+            return 2
+        try:
+            reveal_jellyfin(root / ".env")
+        except (OSError, ValueError, RuntimeError) as error:
+            print(f"homeflix: unable to reveal Jellyfin credentials: {error}", file=sys.stderr)
+            return 1
+        return 0
     if arguments.command == "status":
         try:
             result = _status(root)
@@ -103,6 +130,24 @@ def main(argv: Sequence[str] | None = None, *, repository_root: Path | None = No
                     preparation, runner, confirm_plan=arguments.confirm_plan
                 )
         result = preparation.to_dict()
+    elif arguments.command == "configure":
+        discovered = discover_host(CommandRunner())
+        try:
+            result = configure(
+                root,
+                discovered,
+                data_root=arguments.data_root,
+                config_root=arguments.config_root,
+                cache_root=arguments.cache_root,
+                quality_profile=arguments.quality_profile,
+                direct_setup_ports=arguments.direct_setup_ports,
+            )
+        except (OSError, ValueError) as error:
+            if arguments.json_output:
+                print(json.dumps({"error": {"code": "configuration_refused", "message": str(error)}}, sort_keys=True))
+            else:
+                print(f"homeflix: configuration refused: {error}", file=sys.stderr)
+            return 1
     else:  # pragma: no cover - argparse limits command values
         raise AssertionError(f"unhandled command {arguments.command}")
 
@@ -113,6 +158,12 @@ def main(argv: Sequence[str] | None = None, *, repository_root: Path | None = No
         if preparation.refusal:
             print(f"homeflix: {preparation.refusal['message']}", file=sys.stderr)
             print(f"Action: {preparation.refusal['action']}", file=sys.stderr)
+    elif arguments.command == "configure":
+        for item in result["environment"]["keys"]:
+            print(f"{item['name']}: {item['status']}")
+        for item in result["credentials"]:
+            print(f"{item['name']}: {item['status']}")
+        print(f"Compose override: {result['override']['status']}")
     elif discovered is not None:
         if discovered.refusal:
             print(f"homeflix: {discovered.refusal['message']}", file=sys.stderr)
