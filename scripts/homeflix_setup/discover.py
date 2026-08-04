@@ -76,27 +76,39 @@ class HostFacts:
     mounts: tuple[MountFact, ...]
     mounts_status: str
     mounts_reason: str | None
-    docker_present: bool
-    compose_present: bool
-    docker_daemon_reachable: bool
+    docker_present: bool | None
+    docker_cli_status: str
+    docker_cli_reason: str | None
+    compose_present: bool | None
+    compose_status: str
+    compose_reason: str | None
+    docker_daemon_reachable: bool | None
+    docker_daemon_status: str
+    docker_daemon_reason: str | None
     host_nameservers: tuple[str, ...]
     host_search_domains: tuple[str, ...]
     host_dns_status: str
     host_dns_reason: str | None
     ssh_context: bool
+    probe_errors: dict[str, str] = field(default_factory=dict)
     capability_gaps: tuple[dict[str, str], ...] = field(default_factory=tuple)
     refusal: dict[str, str] | None = None
 
     def to_dict(self) -> dict[str, object]:
-        if self.docker_daemon_reachable:
+        if self.docker_daemon_reachable is True:
             docker_dns = {
                 "status": "not_tested",
                 "reason": "No non-mutating Docker DNS probe is available without creating a container",
             }
-        else:
+        elif self.docker_daemon_reachable is False:
             docker_dns = {
                 "status": "not_tested",
                 "reason": "Docker daemon is not reachable",
+            }
+        else:
+            docker_dns = {
+                "status": "not_tested",
+                "reason": "Docker daemon reachability probe did not complete",
             }
         listening_ports: dict[str, object] = {
             "status": self.listening_ports_status,
@@ -117,6 +129,20 @@ class HostFacts:
         }
         if self.host_dns_reason is not None:
             host_dns["reason"] = self.host_dns_reason
+        docker: dict[str, object] = {
+            "present": self.docker_present,
+            "cli_status": self.docker_cli_status,
+            "compose_present": self.compose_present,
+            "compose_status": self.compose_status,
+            "daemon_reachable": self.docker_daemon_reachable,
+            "daemon_status": self.docker_daemon_status,
+        }
+        if self.docker_cli_reason is not None:
+            docker["cli_reason"] = self.docker_cli_reason
+        if self.compose_reason is not None:
+            docker["compose_reason"] = self.compose_reason
+        if self.docker_daemon_reason is not None:
+            docker["daemon_reason"] = self.docker_daemon_reason
         return {
             "os": {
                 "id": self.os_id,
@@ -131,14 +157,11 @@ class HostFacts:
             "graphics": self.graphics.to_dict(),
             "listening_ports": listening_ports,
             "mounts": mounts,
-            "docker": {
-                "present": self.docker_present,
-                "compose_present": self.compose_present,
-                "daemon_reachable": self.docker_daemon_reachable,
-            },
+            "docker": docker,
             "host_dns": host_dns,
             "docker_dns": docker_dns,
             "execution_context": {"ssh": self.ssh_context},
+            "probe_errors": self.probe_errors,
             "capability_gaps": list(self.capability_gaps),
             "refusal": self.refusal,
         }
@@ -147,12 +170,12 @@ class HostFacts:
 def _run(runner: Runner, *argv: str) -> subprocess.CompletedProcess[str]:
     try:
         return runner.run(argv, timeout=PROBE_TIMEOUT_SECONDS)
-    except (FileNotFoundError, PermissionError) as error:
+    except FileNotFoundError as error:
         return subprocess.CompletedProcess(list(argv), 127, "", str(error))
     except subprocess.TimeoutExpired:
         return subprocess.CompletedProcess(list(argv), 124, "", "probe timed out")
     except OSError as error:
-        return subprocess.CompletedProcess(list(argv), 1, "", str(error))
+        return subprocess.CompletedProcess(list(argv), 126, "", str(error))
 
 
 def _value(result: subprocess.CompletedProcess[str]) -> str | None:
@@ -260,6 +283,22 @@ def _probe_failure_reason(
     return f"{label} probe exited with status {result.returncode}"
 
 
+def _command_probe_status(result: subprocess.CompletedProcess[str]) -> str:
+    if result.returncode == 0:
+        return "ok"
+    if result.returncode == 127:
+        return "missing"
+    return "error"
+
+
+def _presence_for_status(status: str) -> bool | None:
+    if status == "ok":
+        return True
+    if status == "missing":
+        return False
+    return None
+
+
 def _environment(runner: Runner) -> Mapping[str, str]:
     environment = getattr(runner, "environment", None)
     return environment if isinstance(environment, Mapping) else os.environ
@@ -276,16 +315,25 @@ def discover_host(runner: Runner) -> HostFacts:
     docker_result = _run(runner, "docker", "--version")
     compose_result = _run(runner, "docker", "compose", "version")
     daemon_result = _run(runner, "docker", "info", "--format", "{{json .ServerVersion}}")
-    docker_present = docker_result.returncode == 0
-    compose_present = compose_result.returncode == 0
-    daemon_reachable = docker_present and daemon_result.returncode == 0
+    docker_status = _command_probe_status(docker_result)
+    compose_status = _command_probe_status(compose_result)
+    daemon_status = _command_probe_status(daemon_result)
+    docker_present = _presence_for_status(docker_status)
+    compose_present = _presence_for_status(compose_status)
+    daemon_reachable = _presence_for_status(daemon_status)
 
-    uid = _integer(_run(runner, "id", "-u"))
-    gid = _integer(_run(runner, "id", "-g"))
-    timezone = _value(_run(runner, "timedatectl", "show", "--property=Timezone", "--value"))
+    uid_result = _run(runner, "id", "-u")
+    gid_result = _run(runner, "id", "-g")
+    timezone_result = _run(
+        runner, "timedatectl", "show", "--property=Timezone", "--value"
+    )
     memory_result = _run(runner, "cat", "/proc/meminfo")
-    architecture = _value(_run(runner, "uname", "-m"))
+    architecture_result = _run(runner, "uname", "-m")
     cpu_result = _run(runner, "cat", "/proc/cpuinfo")
+    uid = _integer(uid_result)
+    gid = _integer(gid_result)
+    timezone = _value(timezone_result)
+    architecture = _value(architecture_result)
     graphics_result = _run(
         runner, "find", "/dev/dri", "-maxdepth", "1", "-name", "renderD*", "-type", "c", "-print"
     )
@@ -300,7 +348,13 @@ def discover_host(runner: Runner) -> HostFacts:
     ports_result = _run(runner, "ss", "-H", "-lntu")
     ports_reason = _probe_failure_reason(ports_result, "listening-port")
     mounts_result = _run(
-        runner, "findmnt", "--json", "--bytes", "--output", "TARGET,SOURCE,FSTYPE,AVAIL"
+        runner,
+        "findmnt",
+        "--list",
+        "--json",
+        "--bytes",
+        "--output",
+        "TARGET,SOURCE,FSTYPE,AVAIL",
     )
     mounts_reason = _probe_failure_reason(mounts_result, "mount")
     mounts = _parse_mounts(mounts_result.stdout) if mounts_reason is None else None
@@ -313,7 +367,7 @@ def discover_host(runner: Runner) -> HostFacts:
     )
 
     gaps: list[dict[str, str]] = []
-    if not docker_present:
+    if docker_status == "missing":
         gaps.append(
             {
                 "code": "docker_missing",
@@ -321,7 +375,15 @@ def discover_host(runner: Runner) -> HostFacts:
                 "action": "Install Docker Engine for this supported distribution",
             }
         )
-    if not compose_present:
+    elif docker_status == "error":
+        gaps.append(
+            {
+                "code": "docker_probe_error",
+                "message": _probe_failure_reason(docker_result, "Docker CLI") or "Docker probe failed",
+                "action": "Retry Docker discovery",
+            }
+        )
+    if compose_status == "missing":
         gaps.append(
             {
                 "code": "compose_missing",
@@ -329,14 +391,46 @@ def discover_host(runner: Runner) -> HostFacts:
                 "action": "Install the Docker Compose plugin",
             }
         )
-    if docker_present and not daemon_reachable:
+    elif compose_status == "error":
         gaps.append(
             {
-                "code": "docker_daemon_unreachable",
-                "message": "Docker is installed but its daemon is not reachable",
-                "action": "Start Docker or grant the current user access to its socket",
+                "code": "compose_probe_error",
+                "message": _probe_failure_reason(compose_result, "Docker Compose")
+                or "Docker Compose probe failed",
+                "action": "Retry Docker Compose discovery",
             }
         )
+    if docker_status == "ok" and daemon_status == "error":
+        if daemon_result.returncode == 124:
+            gaps.append(
+                {
+                    "code": "docker_daemon_probe_error",
+                    "message": "Docker daemon probe timed out",
+                    "action": "Retry Docker discovery",
+                }
+            )
+        else:
+            gaps.append(
+                {
+                    "code": "docker_daemon_unreachable",
+                    "message": "Docker is installed but its daemon is not reachable",
+                    "action": "Start Docker or grant the current user access to its socket",
+                }
+            )
+
+    probe_errors: dict[str, str] = {}
+    scalar_probes = (
+        ("uid", "UID", uid_result),
+        ("gid", "GID", gid_result),
+        ("timezone", "timezone", timezone_result),
+        ("memory", "memory", memory_result),
+        ("architecture", "architecture", architecture_result),
+        ("cpu_model", "CPU", cpu_result),
+    )
+    for name, label, result in scalar_probes:
+        reason = _probe_failure_reason(result, label)
+        if reason is not None:
+            probe_errors[name] = reason
 
     refusal = None
     if not supported:
@@ -354,9 +448,11 @@ def discover_host(runner: Runner) -> HostFacts:
         uid=uid,
         gid=gid,
         timezone=timezone,
-        memory_bytes=_parse_memory(memory_result.stdout),
+        memory_bytes=(
+            _parse_memory(memory_result.stdout) if memory_result.returncode == 0 else None
+        ),
         architecture=architecture,
-        cpu_model=_parse_cpu_model(cpu_result.stdout),
+        cpu_model=_parse_cpu_model(cpu_result.stdout) if cpu_result.returncode == 0 else None,
         graphics=GraphicsFact(
             render_devices,
             status="ok" if graphics_reason is None else "error",
@@ -369,8 +465,14 @@ def discover_host(runner: Runner) -> HostFacts:
         mounts_status="ok" if mounts_reason is None else "error",
         mounts_reason=mounts_reason,
         docker_present=docker_present,
+        docker_cli_status=docker_status,
+        docker_cli_reason=_probe_failure_reason(docker_result, "Docker CLI"),
         compose_present=compose_present,
+        compose_status=compose_status,
+        compose_reason=_probe_failure_reason(compose_result, "Docker Compose"),
         docker_daemon_reachable=daemon_reachable,
+        docker_daemon_status=daemon_status,
+        docker_daemon_reason=_probe_failure_reason(daemon_result, "Docker daemon"),
         host_nameservers=nameservers,
         host_search_domains=search_domains,
         host_dns_status="ok" if dns_reason is None else "error",
@@ -378,6 +480,7 @@ def discover_host(runner: Runner) -> HostFacts:
         ssh_context=any(
             name in _environment(runner) for name in ("SSH_CONNECTION", "SSH_CLIENT", "SSH_TTY")
         ),
+        probe_errors=probe_errors,
         capability_gaps=tuple(gaps),
         refusal=refusal,
     )

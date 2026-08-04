@@ -77,7 +77,12 @@ def main(argv: Sequence[str] | None = None, *, repository_root: Path | None = No
             print(f"homeflix: {discovered.refusal['message']}", file=sys.stderr)
             print(f"Action: {discovered.refusal['action']}", file=sys.stderr)
         else:
-            docker = "ready" if discovered.docker_daemon_reachable else "not ready"
+            if discovered.docker_daemon_reachable is True:
+                docker = "ready"
+            elif discovered.docker_daemon_reachable is False:
+                docker = "not ready"
+            else:
+                docker = "probe unavailable"
             print(
                 f"Host: {discovered.os_pretty_name} ({discovered.architecture or 'unknown architecture'})"
             )

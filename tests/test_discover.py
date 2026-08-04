@@ -31,6 +31,23 @@ class FixtureRunner:
         return subprocess.CompletedProcess(list(argv), return_code, stdout, stderr)
 
 
+class TimeoutRunner(FixtureRunner):
+    def __init__(self, fixture_name: str, timed_out_command: tuple[str, ...]) -> None:
+        super().__init__(fixture_name)
+        self.timed_out_command = timed_out_command
+
+    def run(
+        self,
+        argv: list[str] | tuple[str, ...],
+        *,
+        timeout: float | None = None,
+        **kwargs: object,
+    ) -> subprocess.CompletedProcess[str]:
+        if tuple(argv) == self.timed_out_command:
+            raise subprocess.TimeoutExpired(list(argv), timeout, output="poison output")
+        return super().run(argv, timeout=timeout, **kwargs)
+
+
 class HostDiscoveryTests(unittest.TestCase):
     def test_debian_discovers_supported_host_and_private_runtime_facts(self) -> None:
         runner = FixtureRunner("discovery-debian.json")
@@ -61,9 +78,17 @@ class HostDiscoveryTests(unittest.TestCase):
                 "free_bytes": 1099511627776,
             },
         )
-        self.assertTrue(result["docker"]["present"])
-        self.assertTrue(result["docker"]["compose_present"])
-        self.assertTrue(result["docker"]["daemon_reachable"])
+        self.assertEqual(
+            result["docker"],
+            {
+                "present": True,
+                "cli_status": "ok",
+                "compose_present": True,
+                "compose_status": "ok",
+                "daemon_reachable": True,
+                "daemon_status": "ok",
+            },
+        )
         self.assertEqual(
             result["host_dns"],
             {
@@ -75,7 +100,19 @@ class HostDiscoveryTests(unittest.TestCase):
         self.assertEqual(result["docker_dns"]["status"], "not_tested")
         self.assertIn("non-mutating", result["docker_dns"]["reason"])
         self.assertEqual(result["execution_context"], {"ssh": True})
+        self.assertIn(
+            (
+                "findmnt",
+                "--list",
+                "--json",
+                "--bytes",
+                "--output",
+                "TARGET,SOURCE,FSTYPE,AVAIL",
+            ),
+            [argv for argv, _ in runner.calls],
+        )
         self.assertTrue(all(timeout is not None and timeout > 0 for _, timeout in runner.calls))
+        self.assertEqual(result["probe_errors"], {})
 
     def test_ubuntu_without_docker_reports_actionable_capability_gaps(self) -> None:
         facts = discover_host(FixtureRunner("discovery-ubuntu.json")).to_dict()
@@ -87,8 +124,11 @@ class HostDiscoveryTests(unittest.TestCase):
         )
         self.assertEqual(facts["listening_ports"], {"status": "ok", "ports": [53]})
         self.assertFalse(facts["docker"]["present"])
+        self.assertEqual(facts["docker"]["cli_status"], "missing")
         self.assertFalse(facts["docker"]["compose_present"])
+        self.assertEqual(facts["docker"]["compose_status"], "missing")
         self.assertFalse(facts["docker"]["daemon_reachable"])
+        self.assertEqual(facts["docker"]["daemon_status"], "missing")
         self.assertEqual(facts["docker_dns"], {"status": "not_tested", "reason": "Docker daemon is not reachable"})
         gap_codes = {gap["code"] for gap in facts["capability_gaps"]}
         self.assertEqual(gap_codes, {"docker_missing", "compose_missing"})
@@ -139,7 +179,7 @@ class HostDiscoveryTests(unittest.TestCase):
             with self.subTest(reason=reason):
                 runner = FixtureRunner("discovery-debian.json")
                 runner.commands[
-                    "findmnt --json --bytes --output TARGET,SOURCE,FSTYPE,AVAIL"
+                    "findmnt --list --json --bytes --output TARGET,SOURCE,FSTYPE,AVAIL"
                 ] = response
 
                 mounts = discover_host(runner).to_dict()["mounts"]
@@ -162,7 +202,7 @@ class HostDiscoveryTests(unittest.TestCase):
         runner = FixtureRunner("discovery-debian.json")
         runner.commands["find /dev/dri -maxdepth 1 -name renderD* -type c -print"] = [0, "", ""]
         runner.commands["ss -H -lntu"] = [0, "", ""]
-        runner.commands["findmnt --json --bytes --output TARGET,SOURCE,FSTYPE,AVAIL"] = [
+        runner.commands["findmnt --list --json --bytes --output TARGET,SOURCE,FSTYPE,AVAIL"] = [
             0,
             '{"filesystems": []}\n',
             "",
@@ -193,6 +233,71 @@ class HostDiscoveryTests(unittest.TestCase):
         self.assertEqual(return_code, 0, stderr.getvalue())
         self.assertIn("listening ports: unavailable", stdout.getvalue())
         self.assertNotIn("Traceback", stdout.getvalue() + stderr.getvalue())
+
+    def test_docker_timeout_is_retryable_error_not_missing_install_gap(self) -> None:
+        runner = TimeoutRunner("discovery-debian.json", ("docker", "--version"))
+
+        result = discover_host(runner).to_dict()
+
+        self.assertIsNone(result["docker"]["present"])
+        self.assertEqual(result["docker"]["cli_status"], "error")
+        self.assertEqual(result["docker"]["cli_reason"], "Docker CLI probe timed out")
+        gaps = {gap["code"]: gap for gap in result["capability_gaps"]}
+        self.assertNotIn("docker_missing", gaps)
+        self.assertEqual(gaps["docker_probe_error"]["action"], "Retry Docker discovery")
+        self.assertNotIn("Install", gaps["docker_probe_error"]["action"])
+        self.assertNotIn("poison", json.dumps(result))
+
+    def test_nonzero_docker_probe_is_error_not_missing(self) -> None:
+        runner = FixtureRunner("discovery-debian.json")
+        runner.commands["docker --version"] = [1, "", "private execution error"]
+
+        result = discover_host(runner).to_dict()
+
+        self.assertIsNone(result["docker"]["present"])
+        self.assertEqual(result["docker"]["cli_status"], "error")
+        gap_codes = {gap["code"] for gap in result["capability_gaps"]}
+        self.assertIn("docker_probe_error", gap_codes)
+        self.assertNotIn("docker_missing", gap_codes)
+        self.assertNotIn("private", json.dumps(result))
+
+    def test_failed_scalar_probes_are_reported_and_poison_stdout_is_ignored(self) -> None:
+        runner = FixtureRunner("discovery-debian.json")
+        failures = {
+            "id -u": [1, "9999\n", ""],
+            "id -g": [124, "9999\n", ""],
+            "timedatectl show --property=Timezone --value": [1, "Private/Timezone\n", ""],
+            "cat /proc/meminfo": [1, "MemTotal: 999999 kB\n", ""],
+            "uname -m": [127, "poison-architecture\n", ""],
+            "cat /proc/cpuinfo": [1, "model name : Poison CPU\n", ""],
+        }
+        runner.commands.update(failures)
+
+        result = discover_host(runner).to_dict()
+
+        self.assertEqual(result["identity"], {"uid": None, "gid": None})
+        self.assertIsNone(result["timezone"])
+        self.assertIsNone(result["memory_bytes"])
+        self.assertEqual(result["cpu"], {"architecture": None, "model": None})
+        self.assertEqual(
+            set(result["probe_errors"]),
+            {"uid", "gid", "timezone", "memory", "architecture", "cpu_model"},
+        )
+        self.assertEqual(result["probe_errors"]["gid"], "GID probe timed out")
+        self.assertNotIn("Poison", json.dumps(result))
+        self.assertNotIn("9999", json.dumps(result))
+
+    def test_successful_empty_scalar_values_remain_legitimately_unavailable(self) -> None:
+        runner = FixtureRunner("discovery-debian.json")
+        runner.commands["timedatectl show --property=Timezone --value"] = [0, "", ""]
+        runner.commands["cat /proc/cpuinfo"] = [0, "processor : 0\n", ""]
+
+        result = discover_host(runner).to_dict()
+
+        self.assertIsNone(result["timezone"])
+        self.assertIsNone(result["cpu"]["model"])
+        self.assertNotIn("timezone", result["probe_errors"])
+        self.assertNotIn("cpu_model", result["probe_errors"])
 
     def test_malformed_or_missing_docker_output_does_not_crash_parser(self) -> None:
         runner = FixtureRunner("discovery-debian.json")
