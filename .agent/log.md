@@ -190,3 +190,12 @@ placeholder, and updated repository links and maintainer guidance for the new la
 Added a lean root `AGENTS.md` that routes coding agents into the maintained `.agent/`
 wiki, states the load-bearing project constraints, and documents safe validation commands.
 Added `CLAUDE.md` as a symlink to the same file so Claude receives identical guidance.
+
+## [2026-08-04] design | Approved agent-first setup and implementation slices
+
+Chose an agent-led, phased setup instead of a documentation-only playbook or one rigid
+installer. The target is Debian/Ubuntu locally or over SSH, with composable idempotent CLI
+primitives, ignored resumable state, secure terminal secret handoff, optional guarded
+LUKS2/ext4 provisioning, core-first deployment without VPN credentials, and API-driven
+Jellyfin/Jellyseerr/Radarr/Sonarr initialization. Split delivery into independently testable
+core, encrypted-storage, and VPN/acquisition plans; implementation has not started.

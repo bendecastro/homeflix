@@ -6,41 +6,27 @@ Updated: 2026-08-04
 
 ## In flight
 
-- **Phase:** Roadmap → **Phase 0→1 transition**. Nothing executing on the host yet.
-- **Just done (2026-08-04):** storage design reversed. **ADR-0008 supersedes ADR-0003** —
-  downloads move off the SSD onto the HDD alongside the library (one filesystem), so
-  imports are hardlinks and seeding survives. Wiki updated throughout.
-- **Published 2026-08-04:** homeflix is now a standalone **public repo**, with this wiki
-  included as the build record. Added README, MIT LICENSE, `docs/` for replicators, and
-  `scripts/preflight.sh` (which proves hardlinking works rather than assuming it).
-  Operator-private material moved to a private note outside the repo. **Not yet pushed to
-  a remote.**
-- **Also done (2026-08-04):** first real deliverables written at the homeflix root —
-  `docker-compose.yml`, `.env.example`, `.gitignore`. Fully parameterised, on the ADR-0008
-  `/data` root, validates via `docker compose config`. **Never run against real services.**
-  Fixed three latent bugs inherited from the prior compose (Traefik couldn't route to the VPN'd
-  services; gluetun healthcheck wrong port/route/auth; Bazarr needs write access to media).
-  Overseerr dropped per ADR-0004.
-- **Blockers:** needs Ben's input on (a) family members + devices + off-LAN use → ADR-0007,
-  and (b) the open public-repo questions below.
+- **Effort:** [Agent-first setup](../project/agent-first-setup.md) — design approved;
+  implementation has not started.
+- **Proposed first slice:** [Agent-first core setup](../project/agent-first-core-setup-plan.md),
+  covering supported-host discovery through API-initialized Jellyfin/Jellyseerr/Radarr/Sonarr
+  on existing mounted storage. Awaiting execution-mode selection.
+- **Follow-ups:** guarded [encrypted storage](../project/agent-first-storage-plan.md) and
+  VPN-gated [acquisition setup](../project/agent-first-acquisition-plan.md).
+- **Approved defaults:** Debian/Ubuntu local or SSH target; secure terminal secret handoff;
+  resumable core-first deployment; API-driven application setup; agent-led composable tools.
+- **Blockers:** none for the core implementation slice.
 
 ## Next up (priority order)
 
-1. **Deploy-readiness on the host** — the compose is untested. Create the dirs
-   (`references/commands.md`), fill `.env`, `docker compose up -d`, then verify in order:
-   gluetun healthy + VPN IP + kill switch → Traefik routes resolve → **hardlinks actually
-   work** (`ls -li` inode match) → one full request-to-playback loop.
-2. ~~**Open public-repo decisions**~~ — all resolved 2026-08-04 (see `log.md`). Still
-   worth writing up as **ADR-0009 (public repo, parameterisation, and the
-   two-audience docs split)**, since the reasoning currently lives only in the log.
-3. **Two open decisions still embedded in the compose as ⚠️ comments:**
-   Traefik `--api.insecure=true` (unauthenticated dashboard), and `:latest` + Watchtower
-   auto-update on a family box. Both left at prior behaviour deliberately — tags are now
-   pinnable via `.env` if the Watchtower call goes the other way.
-4. **Confirm family device inventory** → accepts [ADR-0007](../decisions/adr-0007-remote-access.md).
-5. **Verify on the host:** Docker present, QuickSync transcode (then uncomment the
-   `/dev/dri` passthrough in the compose), library drive fstab auto-mount by UUID.
-6. Plan the **off-box backup** fix (Phase 5).
+1. Execute the core plan task-by-task, beginning with the tested CLI/state foundation.
+2. Run its fixture acceptance suite, then verify on a disposable Debian/Ubuntu target before
+   claiming general host support.
+3. Execute the encrypted-storage slice with loop-device tests before any real-disk test.
+4. Execute acquisition only with authorized VPN/provider credentials and real fail-closed
+   evidence.
+5. Resolve the independent Traefik dashboard, update policy, remote-access, and off-box
+   backup decisions already tracked elsewhere.
 
 ## Decisions recorded so far
 ADR-0001 (wiki) · 0002 (host) · ~~0003 (storage)~~ superseded · 0004 (Jellyfin) ·
