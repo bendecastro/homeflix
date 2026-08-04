@@ -35,7 +35,7 @@ class CommandRunner:
             capture_output=True,
             check=False,
         )
-        secrets = tuple(redact)
+        secrets = tuple(sorted({secret for secret in redact if secret}, key=len, reverse=True))
         safe_command = [_redact(argument, secrets) for argument in command]
         result = subprocess.CompletedProcess(
             safe_command,

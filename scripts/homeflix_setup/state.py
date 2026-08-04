@@ -78,8 +78,8 @@ class SetupState:
             raise ValueError("setup state must be a JSON object")
 
         version = payload.get("schema_version")
-        if version != CURRENT_SCHEMA_VERSION:
-            if isinstance(version, int) and version > CURRENT_SCHEMA_VERSION:
+        if type(version) is not int or version != CURRENT_SCHEMA_VERSION:
+            if type(version) is int and version > CURRENT_SCHEMA_VERSION:
                 raise ValueError(f"unsupported future setup state schema version {version}")
             raise ValueError(f"unsupported setup state schema version {version!r}")
         if set(payload) != {"schema_version", "checkpoints", "host_facts"}:
@@ -90,7 +90,7 @@ class SetupState:
         return cls(version, checkpoints, host_facts)
 
     def save(self, path: str | os.PathLike[str]) -> None:
-        if self.schema_version != CURRENT_SCHEMA_VERSION:
+        if type(self.schema_version) is not int or self.schema_version != CURRENT_SCHEMA_VERSION:
             raise ValueError(f"unsupported setup state schema version {self.schema_version!r}")
         payload = {
             "schema_version": self.schema_version,

@@ -40,6 +40,37 @@ class SetupStateTests(TemporaryDirectoryTestCase, unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "schema version"):
             SetupState.load(path)
 
+    def test_schema_version_requires_exact_integer_on_load_and_save(self) -> None:
+        path = self.temp_path / "setup.json"
+        for version in (True, 1.0, "1"):
+            with self.subTest(version=version, operation="load"):
+                payload = {"schema_version": version, "checkpoints": {}, "host_facts": {}}
+                path.write_text(json.dumps(payload), encoding="utf-8")
+                with self.assertRaisesRegex(ValueError, "schema version"):
+                    SetupState.load(path)
+
+            with self.subTest(version=version, operation="save"):
+                with self.assertRaisesRegex(ValueError, "schema version"):
+                    SetupState(schema_version=version).save(path)  # type: ignore[arg-type]
+
+    @mock.patch("scripts.homeflix_setup.state.os.replace")
+    @mock.patch("scripts.homeflix_setup.state.os.fsync", side_effect=OSError("fsync failed"))
+    def test_atomic_save_failure_preserves_existing_state_and_cleans_temp(
+        self, fsync: mock.Mock, replace: mock.Mock
+    ) -> None:
+        path = self.temp_path / ".homeflix" / "setup.json"
+        path.parent.mkdir()
+        original = b'{"existing": "state"}\n'
+        path.write_bytes(original)
+
+        with self.assertRaisesRegex(OSError, "fsync failed"):
+            SetupState(checkpoints={"configured": True}).save(path)
+
+        fsync.assert_called_once()
+        replace.assert_not_called()
+        self.assertEqual(path.read_bytes(), original)
+        self.assertEqual(list(path.parent.glob(".*.tmp")), [])
+
     def test_rejects_secret_and_command_output_fields(self) -> None:
         path = self.temp_path / "setup.json"
         for facts in ({"api_key": "secret"}, {"stdout": "command result"}, {"environment": {"TZ": "UTC"}}):
@@ -188,3 +219,24 @@ class CommandRunnerTests(unittest.TestCase):
 
         self.assertNotIn("token-value", str(raised.exception))
         self.assertEqual(raised.exception.stderr, "bad [REDACTED]")
+
+    @mock.patch("scripts.homeflix_setup.command.subprocess.run")
+    def test_run_redacts_overlapping_secrets_longest_first(self, run: mock.Mock) -> None:
+        run.return_value = subprocess.CompletedProcess(
+            ["tool", "token-value"], 1, "token-value", "bad token-value"
+        )
+
+        with self.assertRaises(subprocess.CalledProcessError) as raised:
+            CommandRunner().run(
+                ["tool", "token-value"],
+                check=True,
+                redact=("token", "token-value", "", "token-value"),
+            )
+
+        error = raised.exception
+        for rendered in (*error.cmd, error.output, error.stderr, str(error)):
+            self.assertNotIn("token", rendered)
+            self.assertNotIn("value", rendered)
+        self.assertEqual(error.cmd, ["tool", "[REDACTED]"])
+        self.assertEqual(error.output, "[REDACTED]")
+        self.assertEqual(error.stderr, "bad [REDACTED]")
