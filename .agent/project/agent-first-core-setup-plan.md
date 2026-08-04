@@ -54,13 +54,13 @@ Updated: 2026-08-04
 
 ## Task 1: Establish the CLI, state model, and test harness
 
-- [ ] Add failing tests proving `scripts/homeflix --json status` emits one JSON object, reports schema version `1`, and does not create state during a read-only status call.
-- [ ] Run `python3 -m unittest tests.test_cli tests.test_state -v`; expect failures because the launcher and package do not exist.
-- [ ] Implement `CommandRunner.run(argv, *, input_text=None, check=False, redact=())`, `SetupState.load(path)`, `SetupState.save(path)`, and `build_parser()` with `status` and global `--json`.
-- [ ] Persist state atomically through a same-directory temporary file, reject unknown future schema versions, and store no environment values or command output.
-- [ ] Make `scripts/homeflix` resolve its package relative to itself so it works from any current directory.
-- [ ] Run `python3 -m unittest tests.test_cli tests.test_state -v`; expect all tests green.
-- [ ] Commit with `git add scripts/homeflix scripts/homeflix_setup tests/__init__.py tests/helpers.py tests/test_cli.py tests/test_state.py && git commit -m "Add setup CLI foundation"`.
+- [x] Add failing tests proving `scripts/homeflix --json status` emits one JSON object, reports schema version `1`, and does not create state during a read-only status call.
+- [x] Run `python3 -m unittest tests.test_cli tests.test_state -v`; expect failures because the launcher and package do not exist.
+- [x] Implement `CommandRunner.run(argv, *, input_text=None, check=False, redact=())`, `SetupState.load(path)`, `SetupState.save(path)`, and `build_parser()` with `status` and global `--json`.
+- [x] Persist state atomically through a same-directory temporary file, reject unknown future schema versions, and store no environment values or command output.
+- [x] Make `scripts/homeflix` resolve its package relative to itself so it works from any current directory.
+- [x] Run `python3 -m unittest tests.test_cli tests.test_state -v`; expect all tests green.
+- [x] Commit with `git add scripts/homeflix scripts/homeflix_setup tests/__init__.py tests/helpers.py tests/test_cli.py tests/test_state.py && git commit -m "Add setup CLI foundation"`.
 
 ## Task 2: Add Debian/Ubuntu host discovery
 

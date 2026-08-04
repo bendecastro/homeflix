@@ -198,4 +198,13 @@ installer. The target is Debian/Ubuntu locally or over SSH, with composable idem
 primitives, ignored resumable state, secure terminal secret handoff, optional guarded
 LUKS2/ext4 provisioning, core-first deployment without VPN credentials, and API-driven
 Jellyfin/Jellyseerr/Radarr/Sonarr initialization. Split delivery into independently testable
-core, encrypted-storage, and VPN/acquisition plans; implementation has not started.
+core, encrypted-storage, and VPN/acquisition plans.
+
+## [2026-08-04] implementation | Agent setup task 1 — CLI foundation
+
+Added the Python standard-library setup launcher, structured status command, injectable
+redacting command runner, and atomic schema-versioned local state. State accepts only typed
+non-secret facts and boolean checkpoints; malformed versions, secret/output-shaped fields,
+and corrupt JSON fail safely. Nineteen focused tests pass, including cross-directory use,
+machine-readable errors, overlapping-secret redaction, and failed-write preservation. Fresh
+spec and quality reviews passed after their findings were fixed.
