@@ -1,6 +1,6 @@
 # Agent-first Core Setup Implementation Plan
 
-Status: Proposed
+Status: In progress
 Updated: 2026-08-04
 
 **Goal:** Let an agent take a clone on a local or SSH-accessible Debian/Ubuntu host with an existing mounted data filesystem to a fully initialized, verified Homeflix core without browser wizards.
