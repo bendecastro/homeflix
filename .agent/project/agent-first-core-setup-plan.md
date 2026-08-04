@@ -74,13 +74,13 @@ Updated: 2026-08-04
 
 ## Task 3: Prepare Docker safely on supported hosts
 
-- [ ] Add failing command-runner tests for Debian and Ubuntu with Docker absent, Docker present but Compose absent, a stopped daemon, missing sudo, and a user not yet in the `docker` group.
-- [ ] Run `python3 -m unittest tests.test_host -v`; expect failures because `host.py` does not exist.
-- [ ] Implement `HostPreparationPlan`, `plan_host_preparation(facts)`, and `apply_host_preparation(plan, runner)`. Use Docker's signed Debian/Ubuntu apt repository and Compose plugin packages; do not pipe a network script into a shell.
-- [ ] Require `host prepare --apply` for package/service/group mutations; the default command prints the exact repository, packages, service, and group changes. Re-discover OS/repository identity before applying.
-- [ ] Start/enable Docker, add the deployment user to the Docker group when needed, and report whether an SSH reconnect/new login is required. Continue verification through `sudo docker` when authorized rather than pretending current-session group membership changed.
-- [ ] Run `python3 -m unittest tests.test_host tests.test_discover -v`; expect green. Run `scripts/homeflix --json host prepare --dry-run | python3 -m json.tool` on a Docker-present host and verify it plans no package changes.
-- [ ] Commit with `git add scripts/homeflix_setup/host.py scripts/homeflix_setup/cli.py tests/test_host.py tests/fixtures && git commit -m "Prepare supported Docker hosts"`.
+- [x] Add failing command-runner tests for Debian and Ubuntu with Docker absent, Docker present but Compose absent, a stopped daemon, missing sudo, and a user not yet in the `docker` group.
+- [x] Run `python3 -m unittest tests.test_host -v`; expect failures because `host.py` does not exist.
+- [x] Implement `HostPreparationPlan`, `plan_host_preparation(facts)`, and `apply_host_preparation(plan, runner)`. Use Docker's signed Debian/Ubuntu apt repository and Compose plugin packages; do not pipe a network script into a shell.
+- [x] Require `host prepare --apply` for package/service/group mutations; the default command prints the exact repository, packages, service, and group changes. Re-discover OS/repository identity before applying.
+- [x] Start/enable Docker, add the deployment user to the Docker group when needed, and report whether an SSH reconnect/new login is required. Continue verification through `sudo docker` when authorized rather than pretending current-session group membership changed.
+- [x] Run `python3 -m unittest tests.test_host tests.test_discover -v`; expect green. Run `scripts/homeflix --json host prepare --dry-run | python3 -m json.tool` on a Docker-present host and verify it plans no package changes.
+- [x] Commit with `git add scripts/homeflix_setup/host.py scripts/homeflix_setup/cli.py tests/test_host.py tests/fixtures && git commit -m "Prepare supported Docker hosts"`.
 
 ## Task 4: Generate secure configuration and host overrides
 

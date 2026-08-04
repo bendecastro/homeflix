@@ -216,3 +216,12 @@ CPU/memory, graphics, ports, mounts, DNS, and SSH context. Every uncertain probe
 confirmed absence from missing/error/not-tested state; unsupported distributions refuse
 cleanly, Docker/Compose gaps are actionable, nested mounts are preserved, and no host facts
 are persisted. Thirty-seven tests pass; fresh spec and quality reviews passed.
+
+## [2026-08-04] implementation | Agent setup task 3 — guarded Docker preparation
+
+Added exact read-only Debian/Ubuntu Docker preparation plans with explicit fingerprint
+confirmation before apply. The apply path fully rediscovers/rebuilds the plan, refuses stale
+state and conflicting distro packages, stages apt repository files atomically, bounds
+privileged child processes, verifies identity/group/service state, and reports partial or
+cleanup failures structurally. Fifty-eight fixture tests pass and fresh spec/safety reviews
+passed. No real apt, systemd, group, repository, or Docker mutation was run.
