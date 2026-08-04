@@ -208,3 +208,11 @@ non-secret facts and boolean checkpoints; malformed versions, secret/output-shap
 and corrupt JSON fail safely. Nineteen focused tests pass, including cross-directory use,
 machine-readable errors, overlapping-secret redaction, and failed-write preservation. Fresh
 spec and quality reviews passed after their findings were fixed.
+
+## [2026-08-04] implementation | Agent setup task 2 — host discovery
+
+Added read-only, bounded Debian/Ubuntu discovery for Docker/Compose, identity, timezone,
+CPU/memory, graphics, ports, mounts, DNS, and SSH context. Every uncertain probe distinguishes
+confirmed absence from missing/error/not-tested state; unsupported distributions refuse
+cleanly, Docker/Compose gaps are actionable, nested mounts are preserved, and no host facts
+are persisted. Thirty-seven tests pass; fresh spec and quality reviews passed.

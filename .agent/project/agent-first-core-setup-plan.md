@@ -64,13 +64,13 @@ Updated: 2026-08-04
 
 ## Task 2: Add Debian/Ubuntu host discovery
 
-- [ ] Add fixture-backed failing tests for Debian and Ubuntu covering `/etc/os-release`, Docker/Compose presence, UID/GID, timezone, memory, CPU architecture, `/dev/dri/renderD*`, listening ports, mount source/filesystem/free space, host DNS, and Docker DNS when the daemon is reachable.
-- [ ] Add refusal tests for unsupported distributions and tests showing absent Docker is reported as an actionable capability gap rather than a parser crash.
-- [ ] Run `python3 -m unittest tests.test_discover -v`; expect failures because `discover.py` is absent.
-- [ ] Implement `HostFacts`, `MountFact`, `GraphicsFact`, `discover_host(runner)`, and the `discover` CLI command. Text output may summarize private facts; JSON output must be structured for an agent and must never be persisted automatically.
-- [ ] Detect SSH only as execution context metadata; keep remote transport outside the CLI so any coding agent can use its native SSH tooling.
-- [ ] Run `python3 -m unittest tests.test_discover -v` and `scripts/homeflix --json discover | python3 -m json.tool`; expect green tests and valid JSON on the development host.
-- [ ] Commit with `git add scripts/homeflix_setup/discover.py scripts/homeflix_setup/cli.py tests/test_discover.py tests/fixtures && git commit -m "Add setup host discovery"`.
+- [x] Add fixture-backed failing tests for Debian and Ubuntu covering `/etc/os-release`, Docker/Compose presence, UID/GID, timezone, memory, CPU architecture, `/dev/dri/renderD*`, listening ports, mount source/filesystem/free space, host DNS, and Docker DNS when the daemon is reachable.
+- [x] Add refusal tests for unsupported distributions and tests showing absent Docker is reported as an actionable capability gap rather than a parser crash.
+- [x] Run `python3 -m unittest tests.test_discover -v`; expect failures because `discover.py` is absent.
+- [x] Implement `HostFacts`, `MountFact`, `GraphicsFact`, `discover_host(runner)`, and the `discover` CLI command. Text output may summarize private facts; JSON output must be structured for an agent and must never be persisted automatically.
+- [x] Detect SSH only as execution context metadata; keep remote transport outside the CLI so any coding agent can use its native SSH tooling.
+- [x] Run `python3 -m unittest tests.test_discover -v` and `scripts/homeflix --json discover | python3 -m json.tool`; expect green tests and valid JSON on the development host.
+- [x] Commit with `git add scripts/homeflix_setup/discover.py scripts/homeflix_setup/cli.py tests/test_discover.py tests/fixtures && git commit -m "Add setup host discovery"`.
 
 ## Task 3: Prepare Docker safely on supported hosts
 
