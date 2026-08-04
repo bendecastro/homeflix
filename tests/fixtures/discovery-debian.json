@@ -4,6 +4,7 @@
     "docker --version": [0, "Docker version 27.5.1, build fixture\n", ""],
     "docker compose version": [0, "Docker Compose version v2.32.4\n", ""],
     "docker info --format {{json .ServerVersion}}": [0, "\"27.5.1\"\n", ""],
+    "systemctl is-enabled docker": [0, "enabled\n", ""],
     "id -u": [0, "1000\n", ""],
     "id -g": [0, "1001\n", ""],
     "id -un": [0, "homeflix\n", ""],

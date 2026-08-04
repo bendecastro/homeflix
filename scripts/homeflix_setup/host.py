@@ -126,11 +126,23 @@ def plan_host_preparation(facts: HostFacts) -> HostPreparationPlan:
     elif facts.compose_present is None:
         return _refusal(facts, "compose_state_unknown", "Docker Compose presence could not be determined safely", "Retry host discovery")
 
+    installing_engine = facts.docker_present is False
+    if (
+        facts.docker_service_enabled is None
+        and not (installing_engine and facts.docker_service_status == "not_found")
+    ):
+        return _refusal(
+            facts,
+            "docker_service_state_unknown",
+            "Docker service enablement could not be determined safely",
+            "Repair systemd service discovery before preparing Docker",
+        )
+
     mutations: list[dict[str, str]] = []
     if packages:
         mutations.append({"kind": "repository", "action": "configure_signed_apt_repository"})
         mutations.append({"kind": "packages", "action": "install", "names": ",".join(packages)})
-    if facts.docker_daemon_reachable is not True:
+    if facts.docker_daemon_reachable is not True or facts.docker_service_enabled is not True:
         mutations.append({"kind": "service", "service": "docker", "action": "enable_and_start"})
     needs_group = "docker" not in facts.user_groups and facts.uid != 0
     reconnect_pending = "docker" in facts.user_groups and "docker" not in facts.session_groups and facts.uid != 0

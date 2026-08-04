@@ -87,6 +87,8 @@ class HostDiscoveryTests(unittest.TestCase):
                 "compose_status": "ok",
                 "daemon_reachable": True,
                 "daemon_status": "ok",
+                "service_enabled": True,
+                "service_status": "enabled",
             },
         )
         self.assertEqual(
@@ -129,10 +131,30 @@ class HostDiscoveryTests(unittest.TestCase):
         self.assertEqual(facts["docker"]["compose_status"], "missing")
         self.assertFalse(facts["docker"]["daemon_reachable"])
         self.assertEqual(facts["docker"]["daemon_status"], "missing")
+        self.assertIsNone(facts["docker"]["service_enabled"])
+        self.assertEqual(facts["docker"]["service_status"], "not_found")
         self.assertEqual(facts["docker_dns"], {"status": "not_tested", "reason": "Docker daemon is not reachable"})
         gap_codes = {gap["code"] for gap in facts["capability_gaps"]}
         self.assertEqual(gap_codes, {"docker_missing", "compose_missing"})
         self.assertIn("Install Docker", facts["capability_gaps"][0]["action"])
+
+    def test_docker_service_probe_distinguishes_disabled_not_found_and_error(self) -> None:
+        cases = (
+            ([1, "disabled\n", ""], False, "disabled"),
+            ([4, "not-found\n", "private unit detail"], None, "not_found"),
+            ([1, "unexpected\n", "private systemd failure"], None, "error"),
+            ([124, "enabled\n", "probe timed out"], None, "error"),
+        )
+        for response, enabled, status in cases:
+            with self.subTest(status=status, response=response):
+                runner = FixtureRunner("discovery-debian.json")
+                runner.commands["systemctl is-enabled docker"] = response
+                docker = discover_host(runner).to_dict()["docker"]
+                self.assertIs(docker["service_enabled"], enabled)
+                self.assertEqual(docker["service_status"], status)
+                if status in {"not_found", "error"}:
+                    self.assertIn("service_reason", docker)
+                    self.assertNotIn("private", json.dumps(docker))
 
     def test_unsupported_distribution_is_structured_refusal(self) -> None:
         runner = FixtureRunner("discovery-debian.json")

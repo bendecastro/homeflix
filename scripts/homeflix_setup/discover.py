@@ -95,6 +95,9 @@ class HostFacts:
     user_groups: tuple[str, ...] = ()
     session_groups: tuple[str, ...] = ()
     privilege_escalation: str = "unknown"
+    docker_service_enabled: bool | None = None
+    docker_service_status: str = "unknown"
+    docker_service_reason: str | None = None
     probe_errors: dict[str, str] = field(default_factory=dict)
     capability_gaps: tuple[dict[str, str], ...] = field(default_factory=tuple)
     refusal: dict[str, str] | None = None
@@ -141,6 +144,8 @@ class HostFacts:
             "compose_status": self.compose_status,
             "daemon_reachable": self.docker_daemon_reachable,
             "daemon_status": self.docker_daemon_status,
+            "service_enabled": self.docker_service_enabled,
+            "service_status": self.docker_service_status,
         }
         if self.docker_cli_reason is not None:
             docker["cli_reason"] = self.docker_cli_reason
@@ -148,6 +153,8 @@ class HostFacts:
             docker["compose_reason"] = self.compose_reason
         if self.docker_daemon_reason is not None:
             docker["daemon_reason"] = self.docker_daemon_reason
+        if self.docker_service_reason is not None:
+            docker["service_reason"] = self.docker_service_reason
         return {
             "os": {
                 "id": self.os_id,
@@ -324,6 +331,20 @@ def _presence_for_status(status: str) -> bool | None:
     return None
 
 
+def _service_enablement(
+    result: subprocess.CompletedProcess[str],
+) -> tuple[bool | None, str, str | None]:
+    state = result.stdout.strip().casefold()
+    if result.returncode == 0 and state in {"enabled", "enabled-runtime"}:
+        return True, "enabled", None
+    if result.returncode == 1 and state == "disabled":
+        return False, "disabled", None
+    if result.returncode == 4 or state == "not-found":
+        return None, "not_found", "Docker systemd service is not installed"
+    reason = _probe_failure_reason(result, "Docker service enablement")
+    return None, "error", reason or "Docker service enablement probe returned an unknown state"
+
+
 def _compose_probe_reason(
     result: subprocess.CompletedProcess[str], status: str
 ) -> str | None:
@@ -348,6 +369,13 @@ def discover_host(runner: Runner) -> HostFacts:
     docker_result = _run(runner, "docker", "--version")
     compose_result = _run(runner, "docker", "compose", "version")
     daemon_result = _run(runner, "docker", "info", "--format", "{{json .ServerVersion}}")
+    if supported:
+        service_result = _run(runner, "systemctl", "is-enabled", "docker")
+        service_enabled, service_status, service_reason = _service_enablement(service_result)
+    else:
+        service_enabled = None
+        service_status = "not_tested"
+        service_reason = "Docker service enablement is only probed on supported hosts"
     docker_status = _command_probe_status(docker_result)
     compose_status = _compose_probe_status(compose_result)
     daemon_status = _command_probe_status(daemon_result)
@@ -543,6 +571,9 @@ def discover_host(runner: Runner) -> HostFacts:
         user_groups=user_groups,
         session_groups=session_groups,
         privilege_escalation=privilege_escalation,
+        docker_service_enabled=service_enabled,
+        docker_service_status=service_status,
+        docker_service_reason=service_reason,
         probe_errors=probe_errors,
         capability_gaps=tuple(gaps),
         refusal=refusal,

@@ -61,6 +61,22 @@ class HostPreparationTests(unittest.TestCase):
         plan = plan_host_preparation(self.facts(docker_daemon_reachable=False, docker_daemon_status="error"))
         self.assertIn({"kind": "service", "service": "docker", "action": "enable_and_start"}, plan.mutations)
 
+    def test_running_but_disabled_daemon_plans_enable_and_start(self):
+        plan = plan_host_preparation(
+            self.facts(docker_service_enabled=False, docker_service_status="disabled")
+        )
+        self.assertIn(
+            {"kind": "service", "service": "docker", "action": "enable_and_start"},
+            plan.mutations,
+        )
+
+    def test_service_probe_error_refuses_instead_of_guessing_disabled(self):
+        plan = plan_host_preparation(
+            self.facts(docker_service_enabled=None, docker_service_status="error")
+        )
+        self.assertEqual(plan.refusal["code"], "docker_service_state_unknown")
+        self.assertEqual(plan.mutations, ())
+
     def test_missing_sudo_is_structured_refusal(self):
         plan = plan_host_preparation(self.facts("discovery-ubuntu.json", privilege_escalation="missing"))
         self.assertEqual(plan.refusal["code"], "privilege_escalation_unavailable")

@@ -4,6 +4,7 @@
     "docker --version": [127, "", "docker: command not found\n"],
     "docker compose version": [127, "", "docker: command not found\n"],
     "docker info --format {{json .ServerVersion}}": [127, "", "docker: command not found\n"],
+    "systemctl is-enabled docker": [4, "not-found\n", "Unit docker.service could not be found.\n"],
     "id -u": [0, "1002\n", ""],
     "id -g": [0, "1002\n", ""],
     "id -un": [0, "ubuntu\n", ""],
