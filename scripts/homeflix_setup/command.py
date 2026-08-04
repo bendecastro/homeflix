@@ -26,6 +26,7 @@ class CommandRunner:
         input_text: str | None = None,
         check: bool = False,
         redact: Sequence[str] = (),
+        timeout: float | None = None,
     ) -> subprocess.CompletedProcess[str]:
         command = list(argv)
         completed = subprocess.run(
@@ -34,6 +35,7 @@ class CommandRunner:
             text=True,
             capture_output=True,
             check=False,
+            timeout=timeout,
         )
         secrets = tuple(sorted({secret for secret in redact if secret}, key=len, reverse=True))
         safe_command = [_redact(argument, secrets) for argument in command]

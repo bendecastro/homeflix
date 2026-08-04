@@ -8,6 +8,8 @@ from pathlib import Path
 import sys
 from typing import Sequence
 
+from .command import CommandRunner
+from .discover import HostFacts, discover_host
 from .state import SetupState
 
 
@@ -22,6 +24,11 @@ def build_parser() -> argparse.ArgumentParser:
         "status",
         help="show non-secret local setup status",
         description="Show setup status. Invalid state returns exit status 1.",
+    )
+    subparsers.add_parser(
+        "discover",
+        help="inspect the local host without changing it",
+        description="Discover Debian/Ubuntu host capabilities without persisting private facts.",
     )
     return parser
 
@@ -42,6 +49,7 @@ def main(argv: Sequence[str] | None = None, *, repository_root: Path | None = No
     arguments = build_parser().parse_args(argv)
     root = repository_root or Path(__file__).resolve().parents[2]
 
+    discovered: HostFacts | None = None
     if arguments.command == "status":
         try:
             result = _status(root)
@@ -56,12 +64,27 @@ def main(argv: Sequence[str] | None = None, *, repository_root: Path | None = No
             else:
                 print(f"homeflix: invalid setup state: {error}", file=sys.stderr)
             return 1
+    elif arguments.command == "discover":
+        discovered = discover_host(CommandRunner())
+        result = discovered.to_dict()
     else:  # pragma: no cover - argparse limits command values
         raise AssertionError(f"unhandled command {arguments.command}")
 
     if arguments.json_output:
         print(json.dumps(result, sort_keys=True))
+    elif discovered is not None:
+        if discovered.refusal:
+            print(f"homeflix: {discovered.refusal['message']}", file=sys.stderr)
+            print(f"Action: {discovered.refusal['action']}", file=sys.stderr)
+        else:
+            docker = "ready" if discovered.docker_daemon_reachable else "not ready"
+            print(
+                f"Host: {discovered.os_pretty_name} ({discovered.architecture or 'unknown architecture'})"
+            )
+            print(f"Docker: {docker}; mounts: {len(discovered.mounts)}; listening ports: {len(discovered.listening_ports)}")
+            for gap in discovered.capability_gaps:
+                print(f"Capability gap: {gap['message']}. Action: {gap['action']}")
     else:
         state_description = "present" if result["state_exists"] else "not created"
         print(f"Setup state: {state_description} (schema {result['schema_version']})")
-    return 0
+    return 1 if discovered is not None and not discovered.supported else 0

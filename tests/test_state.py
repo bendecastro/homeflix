@@ -205,7 +205,7 @@ class CommandRunnerTests(unittest.TestCase):
 
         self.assertEqual(result.stdout, "done\n")
         run.assert_called_once_with(
-            ["tool"], input="answer\n", text=True, capture_output=True, check=False
+            ["tool"], input="answer\n", text=True, capture_output=True, check=False, timeout=None
         )
 
     @mock.patch("scripts.homeflix_setup.command.subprocess.run")

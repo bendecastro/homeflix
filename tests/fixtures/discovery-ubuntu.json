@@ -1,0 +1,19 @@
+{
+  "commands": {
+    "cat /etc/os-release": [0, "PRETTY_NAME=\"Ubuntu 24.04 LTS\"\nID=ubuntu\nVERSION_ID=\"24.04\"\n", ""],
+    "docker --version": [1, "", "docker: command not found\n"],
+    "docker compose version": [1, "", "docker: command not found\n"],
+    "docker info --format {{json .ServerVersion}}": [1, "", "docker: command not found\n"],
+    "id -u": [0, "1002\n", ""],
+    "id -g": [0, "1002\n", ""],
+    "timedatectl show --property=Timezone --value": [0, "Etc/UTC\n", ""],
+    "cat /proc/meminfo": [0, "MemTotal:        8388608 kB\n", ""],
+    "uname -m": [0, "aarch64\n", ""],
+    "cat /proc/cpuinfo": [0, "processor : 0\nmodel name : Fixture ARM CPU\n", ""],
+    "find /dev/dri -maxdepth 1 -name renderD* -type c -print": [1, "", "find: /dev/dri: No such file or directory\n"],
+    "ss -H -lntu": [0, "udp UNCONN 0 0 127.0.0.53:53 0.0.0.0:*\n", ""],
+    "findmnt --json --bytes --output TARGET,SOURCE,FSTYPE,AVAIL": [0, "{\"filesystems\":[{\"target\":\"/\",\"source\":\"/dev/nvme0n1p2\",\"fstype\":\"ext4\",\"avail\":\"26843545600\"}]}\n", ""],
+    "cat /etc/resolv.conf": [0, "nameserver 127.0.0.53\n", ""]
+  },
+  "environment": {}
+}
