@@ -81,18 +81,88 @@ class SetupStateTests(TemporaryDirectoryTestCase, unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "not permitted"):
                     SetupState.load(path)
 
-    def test_allows_host_fact_keys_with_harmless_output_words(self) -> None:
+    def test_rejects_reviewer_bypass_fields_on_save_and_load(self) -> None:
+        path = self.temp_path / "setup.json"
+        for key in ("env_values", "environment_variables", "command_results", "stdout_lines"):
+            with self.subTest(key=key, operation="save"):
+                with self.assertRaisesRegex(ValueError, "not permitted"):
+                    SetupState(host_facts={key: "raw value"}).save(path)
+
+            with self.subTest(key=key, operation="load"):
+                payload = {
+                    "schema_version": 1,
+                    "checkpoints": {},
+                    "host_facts": {key: "raw value"},
+                }
+                path.write_text(json.dumps(payload), encoding="utf-8")
+                with self.assertRaisesRegex(ValueError, "not permitted"):
+                    SetupState.load(path)
+
+    def test_allowlisted_scalar_host_facts_round_trip(self) -> None:
         path = self.temp_path / "setup.json"
         state = SetupState(
             host_facts={
-                "output_format_supported": True,
-                "environment_value_source_available": False,
+                "os_id": "debian",
+                "os_version_id": "12",
+                "architecture": "x86_64",
+                "uid": 1000,
+                "gid": 1000,
+                "timezone": "Etc/UTC",
+                "memory_bytes": 8_000_000_000,
+                "cpu_model": "Fixture CPU",
+                "docker_present": True,
+                "compose_present": True,
+                "docker_daemon_reachable": False,
+                "ssh_context": False,
             }
         )
 
         state.save(path)
 
         self.assertEqual(SetupState.load(path), state)
+
+    def test_rejects_nested_or_wrong_typed_host_facts(self) -> None:
+        path = self.temp_path / "setup.json"
+        invalid_facts = (
+            {"os_id": {"value": "debian"}},
+            {"cpu_model": ["Fixture CPU"]},
+            {"uid": "1000"},
+            {"memory_bytes": True},
+            {"docker_present": 1},
+        )
+        for facts in invalid_facts:
+            with self.subTest(facts=facts, operation="save"):
+                with self.assertRaises(ValueError):
+                    SetupState(host_facts=facts).save(path)
+
+            with self.subTest(facts=facts, operation="load"):
+                payload = {
+                    "schema_version": 1,
+                    "checkpoints": {},
+                    "host_facts": facts,
+                }
+                path.write_text(json.dumps(payload), encoding="utf-8")
+                with self.assertRaises(ValueError):
+                    SetupState.load(path)
+
+    def test_checkpoints_require_slug_names_and_boolean_values(self) -> None:
+        path = self.temp_path / "setup.json"
+        SetupState(checkpoints={"core_containers_started": True}).save(path)
+
+        for checkpoints in ({"Not a slug": True}, {"configured": "yes"}, {"nested": {"done": True}}):
+            with self.subTest(checkpoints=checkpoints, operation="save"):
+                with self.assertRaises(ValueError):
+                    SetupState(checkpoints=checkpoints).save(path)
+
+            with self.subTest(checkpoints=checkpoints, operation="load"):
+                payload = {
+                    "schema_version": 1,
+                    "checkpoints": checkpoints,
+                    "host_facts": {},
+                }
+                path.write_text(json.dumps(payload), encoding="utf-8")
+                with self.assertRaises(ValueError):
+                    SetupState.load(path)
 
 
 class CommandRunnerTests(unittest.TestCase):

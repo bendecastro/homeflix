@@ -13,58 +13,47 @@ from typing import Any
 
 CURRENT_SCHEMA_VERSION = 1
 
-_FORBIDDEN_KEY_SUFFIXES = (
-    ("api", "key"),
-    ("apikey",),
-    ("command", "output"),
-    ("credential",),
-    ("env",),
-    ("environment",),
-    ("environment", "value"),
-    ("output",),
-    ("password",),
-    ("secret",),
-    ("stderr",),
-    ("stdout",),
-    ("token",),
-)
-_SINGULAR_KEY_TOKENS = {
-    "credentials": "credential",
-    "outputs": "output",
-    "passwords": "password",
-    "secrets": "secret",
-    "tokens": "token",
-    "values": "value",
+_CHECKPOINT_NAME = re.compile(r"^[a-z][a-z0-9]*(?:[_-][a-z0-9]+)*$")
+_HOST_FACT_TYPES: dict[str, type[object]] = {
+    "os_id": str,
+    "os_version_id": str,
+    "architecture": str,
+    "uid": int,
+    "gid": int,
+    "timezone": str,
+    "memory_bytes": int,
+    "cpu_model": str,
+    "docker_present": bool,
+    "compose_present": bool,
+    "docker_daemon_reachable": bool,
+    "ssh_context": bool,
 }
 
 
-def _key_tokens(key: str) -> tuple[str, ...]:
-    separated = re.sub(r"([A-Z]+)([A-Z][a-z])", r"\1_\2", key)
-    separated = re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", separated)
-    return tuple(
-        _SINGULAR_KEY_TOKENS.get(token, token)
-        for token in re.findall(r"[a-z0-9]+", separated.lower())
-    )
+def _validate_checkpoints(checkpoints: object) -> None:
+    if not isinstance(checkpoints, dict):
+        raise ValueError("setup state checkpoints must be an object")
+    for name, completed in checkpoints.items():
+        if not isinstance(name, str) or _CHECKPOINT_NAME.fullmatch(name) is None:
+            raise ValueError(f"checkpoint name {name!r} is not permitted")
+        if type(completed) is not bool:
+            raise ValueError(f"checkpoint {name!r} must be boolean")
 
 
-def _is_forbidden_key(key: str) -> bool:
-    tokens = _key_tokens(key)
-    return any(tokens[-len(suffix) :] == suffix for suffix in _FORBIDDEN_KEY_SUFFIXES)
+def _validate_host_facts(host_facts: object) -> None:
+    if not isinstance(host_facts, dict):
+        raise ValueError("setup state host_facts must be an object")
+    for name, value in host_facts.items():
+        expected_type = _HOST_FACT_TYPES.get(name)
+        if expected_type is None:
+            raise ValueError(f"host fact {name!r} is not permitted")
+        if type(value) is not expected_type:
+            raise ValueError(f"host fact {name!r} must be {expected_type.__name__}")
 
 
-def _validate_keys(value: Any, location: str = "state") -> None:
-    if isinstance(value, dict):
-        for key, child in value.items():
-            if not isinstance(key, str):
-                raise ValueError(f"{location} keys must be strings")
-            if _is_forbidden_key(key):
-                raise ValueError(f"state field {key!r} is not permitted")
-            _validate_keys(child, f"{location}.{key}")
-    elif isinstance(value, list):
-        for index, child in enumerate(value):
-            _validate_keys(child, f"{location}[{index}]")
-    elif value is not None and not isinstance(value, (bool, int, float, str)):
-        raise ValueError(f"{location} contains a non-JSON value")
+def _validate_state_parts(checkpoints: object, host_facts: object) -> None:
+    _validate_checkpoints(checkpoints)
+    _validate_host_facts(host_facts)
 
 
 @dataclass(eq=True)
@@ -97,9 +86,7 @@ class SetupState:
             raise ValueError("setup state contains unknown fields")
         checkpoints = payload["checkpoints"]
         host_facts = payload["host_facts"]
-        if not isinstance(checkpoints, dict) or not isinstance(host_facts, dict):
-            raise ValueError("setup state checkpoints and host_facts must be objects")
-        _validate_keys({"checkpoints": checkpoints, "host_facts": host_facts})
+        _validate_state_parts(checkpoints, host_facts)
         return cls(version, checkpoints, host_facts)
 
     def save(self, path: str | os.PathLike[str]) -> None:
@@ -110,7 +97,7 @@ class SetupState:
             "checkpoints": self.checkpoints,
             "host_facts": self.host_facts,
         }
-        _validate_keys(payload)
+        _validate_state_parts(self.checkpoints, self.host_facts)
         serialized = json.dumps(payload, indent=2, sort_keys=True) + "\n"
 
         state_path = Path(path)
