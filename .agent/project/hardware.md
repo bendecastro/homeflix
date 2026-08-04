@@ -4,7 +4,7 @@ Updated: 2026-08-04
 Decision: [ADR-0002](../decisions/adr-0002-host-minipc-debian-docker.md).
 
 The hardware class homeflix targets, and the constraints it imposes on the design.
-Replicator-facing requirements are in [`docs/hardware.md`](../../../docs/hardware.md);
+Replicator-facing requirements are in [`docs/hardware.md`](../../docs/hardware.md);
 this page records *why* the hardware shapes the architecture.
 
 ## Reference build

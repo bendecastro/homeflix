@@ -60,5 +60,5 @@ ls -li ${DATA_ROOT}/media/movies/*/*.mkv   # column 1 = inode, column 3 = link c
 ## Greppable wiki log
 
 ```bash
-grep "^## \[" log.md | tail -5   # last 5 log entries (run from .agent/wiki/)
+grep "^## \[" log.md | tail -5   # last 5 log entries (run from .agent/)
 ```

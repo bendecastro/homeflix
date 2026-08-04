@@ -128,7 +128,7 @@ Two known-open items, marked in `docker-compose.yml`:
 - **Traefik dashboard is unauthenticated** (`--api.insecure=true`). Acceptable on a
   trusted LAN; harden before exposing anything remotely.
 - **No remote access is configured.** The stack is LAN-only by design. See
-  [ADR-0007](../.agent/wiki/decisions/adr-0007-remote-access.md) for the intended
+  [ADR-0007](../.agent/decisions/adr-0007-remote-access.md) for the intended
   approach (Tailscale, with a Cloudflare Tunnel fallback for TVs that can't run it).
 
 Never commit `.env`. If a credential leaks, rotate it — rewriting git history doesn't

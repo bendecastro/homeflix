@@ -18,7 +18,7 @@ mine, which bends the pattern toward *producing a practical outcome* by adding a
 roadmap, plans, ADRs, a live task cursor, and a log.
 
 ## Decision
-Instantiate a project-scoped agent wiki at `.agent/wiki/` in the homeflix repo, modeled
+Instantiate a project-scoped agent wiki at `.agent/` in the homeflix repo, modeled
 on that earlier adaptation:
 - `AGENTS.md` is the maintainer schema (update triggers + session protocol).
 - `project/` holds durable architecture, the roadmap (the build spine), and plans.

@@ -20,5 +20,5 @@ agent's brain for building it — design, decisions, live progress. The delivera
 
 ## Scope reminder
 
-This vault is local to `.agent/wiki/` and detached from any personal wiki. No secrets
+This vault is local to `.agent/` and detached from any personal wiki. No secrets
 ever live here.

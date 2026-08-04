@@ -9,7 +9,7 @@ No secrets here.
 | Thing | Value |
 |---|---|
 | Reference host | Low-power x86-64 mini-PC, Debian |
-| This wiki | `.agent/wiki/` in the homeflix repo |
+| This wiki | `.agent/` in the homeflix repo |
 | Provenance | prior private package (unpublished — see `source-research.md`) |
 | Deploy method | public git repo, cloned on the host; `git pull && docker compose up -d` |
 

@@ -1,6 +1,6 @@
 # homeflix — self-hosted streaming stack
 #
-# Storage layout per ADR-0008 (.agent/wiki/decisions/): downloads and media share ONE
+# Storage layout per ADR-0008 (.agent/decisions/): downloads and media share ONE
 # filesystem under ${DATA_ROOT} so the *arr apps import by hardlink — instant, no extra
 # disk, and torrents keep seeding. The *arr apps MUST mount the single root as /data;
 # splitting it into separate torrents/ and media/ mounts silently breaks hardlinking.
@@ -284,7 +284,7 @@ services:
 
   # ⚠️ OPEN DECISION: auto-updating :latest images unattended on a family-critical box
   # means a bad upstream image can break playback overnight. Alternative: pin the *_TAG
-  # vars in .env and run Watchtower notify-only. See .agent/wiki/references/gotchas.md.
+  # vars in .env and run Watchtower notify-only. See .agent/references/gotchas.md.
   watchtower:
     image: containrrr/watchtower:${WATCHTOWER_TAG:-latest}
     container_name: watchtower

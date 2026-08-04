@@ -13,7 +13,7 @@ where `<kind>` is one of: `scaffold | ingest | decision | build | fix | blocked 
 
 ## [2026-06-14] scaffold | Initialized homeflix agent wiki
 
-Created the project agent wiki under `.agent/wiki/` using Karpathy's LLM-wiki pattern
+Created the project agent wiki under `.agent/` using Karpathy's LLM-wiki pattern
 adapted for producing a practical outcome (modeled on an earlier project's wiki).
 Laid down AGENTS.md (maintainer schema), index/home/map, project pages (overview,
 roadmap, hardware, storage, media-server, acquisition-stack, networking-remote-access,
@@ -76,7 +76,7 @@ source-research, index, active.
 ## [2026-08-04] direction | homeflix to become a public, replicable repo
 
 Intent: publish homeflix publicly so anyone can replicate it, with this deployment as just
-one instance, and keep `.agent/wiki/` visible as a CV artifact demonstrating AI-assisted
+one instance, and keep `.agent/` visible as a CV artifact demonstrating AI-assisted
 engineering. Implications recorded: all host-specific paths become variables; the wiki is
 already secret-clean (grepped — no keys, IPs, or credentials) but has dead links into the
 the prior private design package (which holds host secrets and stays unpublished). Open questions parked in `tasks/active.md` pending an ADR-0009.
@@ -179,3 +179,8 @@ Two bugs found by testing the preflight script rather than assuming it worked:
 Both positive and negative cases are now verified.
 
 Verified clean: no secrets, no personal paths, no broken links, compose valid.
+
+## [2026-08-04] maintenance | Flattened the agent wiki structure
+
+Moved the nested wiki contents directly into `.agent/`, removed the empty research
+placeholder, and updated repository links and maintainer guidance for the new layout.

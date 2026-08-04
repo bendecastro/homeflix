@@ -46,7 +46,7 @@ parameterised rather than hardcoded to this box. Any given deployment is then ju
 > ├── .env.example            # every var documented; real .env never committed
 > ├── docs/                   # for replicators
 > ├── scripts/                # bootstrap.sh, backup.sh, monitor-disk.sh
-> └── .agent/wiki/            # this wiki (the build record)
+> └── .agent/                 # this wiki (the build record)
 > ```
 > Host runtime dirs, created on the box (never committed):
 > ```

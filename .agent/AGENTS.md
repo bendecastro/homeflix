@@ -90,7 +90,7 @@ big rewrite at the end.
 - `tasks/` — `active.md` (live cursor), `parking-lot.md` (future), `completed.md`.
 - `log.md` — append-only journal. `index.md` — catalog. `map.md` — context picker.
 - Long research writeups (hardware comparisons, "Plex vs Jellyfin", indexer
-  research) go in `.agent/research/`; summarize the durable conclusion back into the
+  research) go in `references/`; summarize the durable conclusion back into the
   relevant `project/` page and record the choice as an ADR. Scratch goes in
   `.agent/scratch/`.
 

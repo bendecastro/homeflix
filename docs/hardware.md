@@ -59,7 +59,7 @@ library disk stops them competing with playback reads.
 **The one hard requirement is that `DATA_ROOT` is internally a single filesystem.** Do
 not split `torrents/` and `media/` across drives; that breaks hardlinking, which is the
 foundation of the whole storage design
-([ADR-0008](../.agent/wiki/decisions/adr-0008-single-filesystem-data-root-hardlinks.md)).
+([ADR-0008](../.agent/decisions/adr-0008-single-filesystem-data-root-hardlinks.md)).
 
 Avoid **exFAT and NTFS** for `DATA_ROOT` — they don't support hardlinks properly. ext4,
 XFS and Btrfs are all fine.

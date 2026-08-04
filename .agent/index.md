@@ -11,9 +11,9 @@ running homeflix.
 > backups, hardening). See [overview](project/overview.md).
 
 **Two doors.** This wiki explains *why* homeflix is built the way it is. If you just want
-to run it, you want [`docs/`](../../docs/) instead —
-[quickstart](../../docs/quickstart.md) · [hardware](../../docs/hardware.md) ·
-[configuration](../../docs/configuration.md). Nothing here is required reading to deploy.
+to run it, you want [`docs/`](../docs/) instead —
+[quickstart](../docs/quickstart.md) · [hardware](../docs/hardware.md) ·
+[configuration](../docs/configuration.md). Nothing here is required reading to deploy.
 
 ## Start here
 
@@ -75,7 +75,7 @@ This wiki **must not** contain: personal (non-homeflix) wiki content; secrets,
 credentials, API keys, indexer logins, or real `.env` values; long raw logs;
 hardcoded home-directory paths in anything portable.
 
-This wiki is also a standalone Obsidian vault rooted at `.agent/wiki/`.
+This wiki is also a standalone Obsidian vault rooted at `.agent/`.
 
 ## Maintenance policy
 
