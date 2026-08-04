@@ -39,13 +39,22 @@ class MountFact:
 @dataclass(frozen=True)
 class GraphicsFact:
     render_devices: tuple[str, ...] = ()
+    status: str = "ok"
+    reason: str | None = None
 
     @property
-    def available(self) -> bool:
-        return bool(self.render_devices)
+    def available(self) -> bool | None:
+        return bool(self.render_devices) if self.status == "ok" else None
 
     def to_dict(self) -> dict[str, object]:
-        return {"render_devices": list(self.render_devices), "available": self.available}
+        result: dict[str, object] = {
+            "status": self.status,
+            "render_devices": list(self.render_devices),
+            "available": self.available,
+        }
+        if self.reason is not None:
+            result["reason"] = self.reason
+        return result
 
 
 @dataclass(frozen=True)
@@ -62,12 +71,18 @@ class HostFacts:
     cpu_model: str | None
     graphics: GraphicsFact
     listening_ports: tuple[int, ...]
+    listening_ports_status: str
+    listening_ports_reason: str | None
     mounts: tuple[MountFact, ...]
+    mounts_status: str
+    mounts_reason: str | None
     docker_present: bool
     compose_present: bool
     docker_daemon_reachable: bool
     host_nameservers: tuple[str, ...]
     host_search_domains: tuple[str, ...]
+    host_dns_status: str
+    host_dns_reason: str | None
     ssh_context: bool
     capability_gaps: tuple[dict[str, str], ...] = field(default_factory=tuple)
     refusal: dict[str, str] | None = None
@@ -83,6 +98,25 @@ class HostFacts:
                 "status": "not_tested",
                 "reason": "Docker daemon is not reachable",
             }
+        listening_ports: dict[str, object] = {
+            "status": self.listening_ports_status,
+            "ports": list(self.listening_ports),
+        }
+        if self.listening_ports_reason is not None:
+            listening_ports["reason"] = self.listening_ports_reason
+        mounts: dict[str, object] = {
+            "status": self.mounts_status,
+            "items": [mount.to_dict() for mount in self.mounts],
+        }
+        if self.mounts_reason is not None:
+            mounts["reason"] = self.mounts_reason
+        host_dns: dict[str, object] = {
+            "status": self.host_dns_status,
+            "nameservers": list(self.host_nameservers),
+            "search": list(self.host_search_domains),
+        }
+        if self.host_dns_reason is not None:
+            host_dns["reason"] = self.host_dns_reason
         return {
             "os": {
                 "id": self.os_id,
@@ -95,17 +129,14 @@ class HostFacts:
             "memory_bytes": self.memory_bytes,
             "cpu": {"architecture": self.architecture, "model": self.cpu_model},
             "graphics": self.graphics.to_dict(),
-            "listening_ports": list(self.listening_ports),
-            "mounts": [mount.to_dict() for mount in self.mounts],
+            "listening_ports": listening_ports,
+            "mounts": mounts,
             "docker": {
                 "present": self.docker_present,
                 "compose_present": self.compose_present,
                 "daemon_reachable": self.docker_daemon_reachable,
             },
-            "host_dns": {
-                "nameservers": list(self.host_nameservers),
-                "search": list(self.host_search_domains),
-            },
+            "host_dns": host_dns,
             "docker_dns": docker_dns,
             "execution_context": {"ssh": self.ssh_context},
             "capability_gaps": list(self.capability_gaps),
@@ -177,12 +208,14 @@ def _parse_ports(contents: str) -> tuple[int, ...]:
     return tuple(sorted(ports))
 
 
-def _parse_mounts(contents: str) -> tuple[MountFact, ...]:
+def _parse_mounts(contents: str) -> tuple[MountFact, ...] | None:
     try:
         payload = json.loads(contents)
     except (json.JSONDecodeError, TypeError):
-        return ()
-    filesystems = payload.get("filesystems", []) if isinstance(payload, dict) else []
+        return None
+    if not isinstance(payload, dict) or not isinstance(payload.get("filesystems", []), list):
+        return None
+    filesystems = payload.get("filesystems", [])
     mounts: list[MountFact] = []
     for item in filesystems:
         if not isinstance(item, dict):
@@ -215,6 +248,18 @@ def _parse_resolver(contents: str) -> tuple[tuple[str, ...], tuple[str, ...]]:
     return tuple(nameservers), tuple(search)
 
 
+def _probe_failure_reason(
+    result: subprocess.CompletedProcess[str], label: str
+) -> str | None:
+    if result.returncode == 0:
+        return None
+    if result.returncode == 127:
+        return f"{label} probe command is unavailable"
+    if result.returncode == 124:
+        return f"{label} probe timed out"
+    return f"{label} probe exited with status {result.returncode}"
+
+
 def _environment(runner: Runner) -> Mapping[str, str]:
     environment = getattr(runner, "environment", None)
     return environment if isinstance(environment, Mapping) else os.environ
@@ -244,16 +289,27 @@ def discover_host(runner: Runner) -> HostFacts:
     graphics_result = _run(
         runner, "find", "/dev/dri", "-maxdepth", "1", "-name", "renderD*", "-type", "c", "-print"
     )
+    graphics_reason = _probe_failure_reason(graphics_result, "graphics")
     render_devices = tuple(
-        sorted(line for line in graphics_result.stdout.splitlines() if line.startswith("/dev/dri/renderD"))
+        sorted(
+            line
+            for line in graphics_result.stdout.splitlines()
+            if graphics_reason is None and line.startswith("/dev/dri/renderD")
+        )
     )
     ports_result = _run(runner, "ss", "-H", "-lntu")
+    ports_reason = _probe_failure_reason(ports_result, "listening-port")
     mounts_result = _run(
         runner, "findmnt", "--json", "--bytes", "--output", "TARGET,SOURCE,FSTYPE,AVAIL"
     )
+    mounts_reason = _probe_failure_reason(mounts_result, "mount")
+    mounts = _parse_mounts(mounts_result.stdout) if mounts_reason is None else None
+    if mounts is None and mounts_reason is None:
+        mounts_reason = "mount probe returned invalid data"
     resolver_result = _run(runner, "cat", "/etc/resolv.conf")
+    dns_reason = _probe_failure_reason(resolver_result, "host-DNS")
     nameservers, search_domains = _parse_resolver(
-        resolver_result.stdout if resolver_result.returncode == 0 else ""
+        resolver_result.stdout if dns_reason is None else ""
     )
 
     gaps: list[dict[str, str]] = []
@@ -301,14 +357,24 @@ def discover_host(runner: Runner) -> HostFacts:
         memory_bytes=_parse_memory(memory_result.stdout),
         architecture=architecture,
         cpu_model=_parse_cpu_model(cpu_result.stdout),
-        graphics=GraphicsFact(render_devices),
-        listening_ports=_parse_ports(ports_result.stdout),
-        mounts=_parse_mounts(mounts_result.stdout),
+        graphics=GraphicsFact(
+            render_devices,
+            status="ok" if graphics_reason is None else "error",
+            reason=graphics_reason,
+        ),
+        listening_ports=_parse_ports(ports_result.stdout) if ports_reason is None else (),
+        listening_ports_status="ok" if ports_reason is None else "error",
+        listening_ports_reason=ports_reason,
+        mounts=mounts or (),
+        mounts_status="ok" if mounts_reason is None else "error",
+        mounts_reason=mounts_reason,
         docker_present=docker_present,
         compose_present=compose_present,
         docker_daemon_reachable=daemon_reachable,
         host_nameservers=nameservers,
         host_search_domains=search_domains,
+        host_dns_status="ok" if dns_reason is None else "error",
+        host_dns_reason=dns_reason,
         ssh_context=any(
             name in _environment(runner) for name in ("SSH_CONNECTION", "SSH_CLIENT", "SSH_TTY")
         ),

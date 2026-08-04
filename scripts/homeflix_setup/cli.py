@@ -81,7 +81,27 @@ def main(argv: Sequence[str] | None = None, *, repository_root: Path | None = No
             print(
                 f"Host: {discovered.os_pretty_name} ({discovered.architecture or 'unknown architecture'})"
             )
-            print(f"Docker: {docker}; mounts: {len(discovered.mounts)}; listening ports: {len(discovered.listening_ports)}")
+            mounts = (
+                str(len(discovered.mounts))
+                if discovered.mounts_status == "ok"
+                else f"unavailable ({discovered.mounts_reason})"
+            )
+            ports = (
+                str(len(discovered.listening_ports))
+                if discovered.listening_ports_status == "ok"
+                else f"unavailable ({discovered.listening_ports_reason})"
+            )
+            graphics = (
+                str(len(discovered.graphics.render_devices))
+                if discovered.graphics.status == "ok"
+                else f"unavailable ({discovered.graphics.reason})"
+            )
+            print(
+                f"Docker: {docker}; mounts: {mounts}; listening ports: {ports}; "
+                f"graphics devices: {graphics}"
+            )
+            if discovered.host_dns_status != "ok":
+                print(f"Host DNS: unavailable ({discovered.host_dns_reason})")
             for gap in discovered.capability_gaps:
                 print(f"Capability gap: {gap['message']}. Action: {gap['action']}")
     else:
