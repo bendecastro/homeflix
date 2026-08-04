@@ -184,3 +184,9 @@ Verified clean: no secrets, no personal paths, no broken links, compose valid.
 
 Moved the nested wiki contents directly into `.agent/`, removed the empty research
 placeholder, and updated repository links and maintainer guidance for the new layout.
+
+## [2026-08-04] scaffold | Added root agent entry points
+
+Added a lean root `AGENTS.md` that routes coding agents into the maintained `.agent/`
+wiki, states the load-bearing project constraints, and documents safe validation commands.
+Added `CLAUDE.md` as a symlink to the same file so Claude receives identical guidance.
