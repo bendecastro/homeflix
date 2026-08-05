@@ -121,6 +121,28 @@ class CoreDeploymentTests(unittest.TestCase):
         self.assertFalse(any("up" in command for command in runner.commands))
         self.assertFalse((root / ".homeflix" / "setup.json").exists())
 
+    def test_malformed_compose_identity_never_reaches_preflight_or_compose_up(self) -> None:
+        malformed_services = ("radarré", ".radarr", "-radarr", "radarr service")
+        for malformed_service in malformed_services:
+            with self.subTest(service=malformed_service):
+                temporary, root = self.make_root()
+                try:
+                    malformed = {"bad": {
+                        "Service": malformed_service,
+                        "State": "running",
+                        "Health": "healthy",
+                    }}
+                    runner = FakeRunner([malformed])
+                    result = deploy_core(
+                        root, runner=runner,
+                        preflight_runner=lambda *args: self.fail("preflight must not run"),
+                    )
+                    self.assertEqual(result["status"], "live_state_failed")
+                    self.assertFalse(any("up" in command for command in runner.commands))
+                    self.assertFalse((root / ".homeflix" / "setup.json").exists())
+                finally:
+                    temporary.cleanup()
+
     def test_malformed_whitespace_state_never_reaches_preflight_or_compose_up(self) -> None:
         temporary, root = self.make_root()
         self.addCleanup(temporary.cleanup)

@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+import re
 import subprocess
 import tempfile
 from typing import Mapping, Protocol, Sequence
@@ -18,6 +19,7 @@ DIRECT_PORTS = (("jellyseerr", 5055), ("radarr", 7878), ("sonarr", 8989))
 CORE_SERVICES = ("traefik", "jellyfin", "jellyseerr", "radarr", "sonarr")
 _COMPOSE_STATES = {"created", "dead", "exited", "paused", "removing", "restarting", "running"}
 _COMPOSE_HEALTH = {"", "healthy", "starting", "unhealthy"}
+_COMPOSE_SERVICE_NAME = re.compile(r"[a-z0-9][a-z0-9_.-]*\Z", re.ASCII)
 
 
 class Runner(Protocol):
@@ -234,9 +236,7 @@ def compose_ps(
         health = health_value.strip().casefold()
         if not service or not state or (health_value and not health):
             raise ValueError("Compose service state was malformed")
-        if not service[0].isalnum() or not all(
-            character.isalnum() or character in "_.-" for character in service
-        ):
+        if _COMPOSE_SERVICE_NAME.fullmatch(service) is None:
             raise ValueError("Compose service state was malformed")
         if state not in _COMPOSE_STATES or health not in _COMPOSE_HEALTH or service in states:
             raise ValueError("Compose service state was malformed")
