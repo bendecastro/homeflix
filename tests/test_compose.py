@@ -184,7 +184,21 @@ class ComposeExecutionTests(unittest.TestCase):
                 states = compose_ps(root, self.Runner(stdout))
                 self.assertEqual(states["traefik"], {"state": "running", "health": "healthy"})
                 self.assertEqual(states["radarr"]["state"], "exited")
-        for malformed in ("not-json", json.dumps({"State": "running"}), json.dumps([1])):
+        malformed_records = (
+            "not-json",
+            json.dumps({"State": "running"}),
+            json.dumps([1]),
+            json.dumps({"Service": "   ", "State": "running"}),
+            json.dumps({"Service": "radarr", "State": "   "}),
+            json.dumps({"Service": "radarr", "State": "mystery"}),
+            json.dumps({"Service": "radarr", "State": "running", "Health": "   "}),
+            json.dumps({"Service": "radarr", "State": "running", "Health": "mystery"}),
+            json.dumps([
+                {"Service": "radarr", "State": "running"},
+                {"Service": " radarr ", "State": "running"},
+            ]),
+        )
+        for malformed in malformed_records:
             with self.subTest(malformed=malformed), self.assertRaises(ValueError):
                 compose_ps(root, self.Runner(malformed))
 

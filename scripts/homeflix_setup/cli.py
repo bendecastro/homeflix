@@ -6,6 +6,7 @@ import argparse
 from dataclasses import replace
 import json
 from pathlib import Path
+import subprocess
 import sys
 from typing import Sequence
 
@@ -216,12 +217,12 @@ def main(argv: Sequence[str] | None = None, *, repository_root: Path | None = No
     elif arguments.command == "deploy" and arguments.phase == "core":
         try:
             result = deploy_core(root, dry_run=arguments.dry_run)
-        except (OSError, RuntimeError, ValueError) as error:
+        except (OSError, RuntimeError, ValueError, subprocess.SubprocessError):
             return _input_error(
                 json_output=arguments.json_output,
                 code="deployment_refused",
                 label="deployment refused",
-                error=error,
+                error=RuntimeError("core deployment could not be completed safely"),
             )
     else:  # pragma: no cover - argparse limits command values
         raise AssertionError(f"unhandled command {arguments.command}")

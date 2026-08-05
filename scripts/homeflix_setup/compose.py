@@ -16,6 +16,8 @@ from .secrets import ensure_service_credentials
 
 DIRECT_PORTS = (("jellyseerr", 5055), ("radarr", 7878), ("sonarr", 8989))
 CORE_SERVICES = ("traefik", "jellyfin", "jellyseerr", "radarr", "sonarr")
+_COMPOSE_STATES = {"created", "dead", "exited", "paused", "removing", "restarting", "running"}
+_COMPOSE_HEALTH = {"", "healthy", "starting", "unhealthy"}
 
 
 class Runner(Protocol):
@@ -222,12 +224,21 @@ def compose_ps(
     for record in records:
         if not isinstance(record, Mapping):
             raise ValueError("Compose service state was malformed")
-        service = record.get("Service") or record.get("service")
-        state = record.get("State") or record.get("state")
-        health = record.get("Health") or record.get("health") or ""
-        if not isinstance(service, str) or not service or not isinstance(state, str):
+        service_value = record.get("Service", record.get("service"))
+        state_value = record.get("State", record.get("state"))
+        health_value = record.get("Health", record.get("health", ""))
+        if not all(isinstance(value, str) for value in (service_value, state_value, health_value)):
             raise ValueError("Compose service state was malformed")
-        if not isinstance(health, str) or service in states:
+        service = service_value.strip().casefold()
+        state = state_value.strip().casefold()
+        health = health_value.strip().casefold()
+        if not service or not state or (health_value and not health):
             raise ValueError("Compose service state was malformed")
-        states[service] = {"state": state.casefold(), "health": health.casefold()}
+        if not service[0].isalnum() or not all(
+            character.isalnum() or character in "_.-" for character in service
+        ):
+            raise ValueError("Compose service state was malformed")
+        if state not in _COMPOSE_STATES or health not in _COMPOSE_HEALTH or service in states:
+            raise ValueError("Compose service state was malformed")
+        states[service] = {"state": state, "health": health}
     return states

@@ -1,20 +1,30 @@
 from __future__ import annotations
 
+from contextlib import redirect_stderr, redirect_stdout
+import io
 import json
 from pathlib import Path
 import subprocess
 import tempfile
 import unittest
+from unittest.mock import patch
 
+from scripts.homeflix_setup.cli import main
 from scripts.homeflix_setup.compose import CORE_SERVICES
 from scripts.homeflix_setup.core import ReadinessResult, deploy_core
 from scripts.homeflix_setup.preflight import CheckResult, PreflightReport
 
 
 class FakeRunner:
-    def __init__(self, states: list[dict[str, object]], up_returncode: int = 0) -> None:
+    def __init__(
+        self,
+        states: list[dict[str, object]],
+        up_returncode: int = 0,
+        up_error: BaseException | None = None,
+    ) -> None:
         self.states = states
         self.up_returncode = up_returncode
+        self.up_error = up_error
         self.commands: list[tuple[str, ...]] = []
 
     def run(self, argv, **kwargs):
@@ -24,6 +34,8 @@ class FakeRunner:
             payload = self.states.pop(0) if len(self.states) > 1 else self.states[0]
             return subprocess.CompletedProcess(command, 0, json.dumps(list(payload.values())), "")
         if "up" in command:
+            if self.up_error is not None:
+                raise self.up_error
             return subprocess.CompletedProcess(command, self.up_returncode, "10.0.0.8 password=hunter2", "")
         raise AssertionError(f"unexpected command: {command}")
 
@@ -108,6 +120,77 @@ class CoreDeploymentTests(unittest.TestCase):
         self.assertEqual(result["status"], "live_state_failed")
         self.assertFalse(any("up" in command for command in runner.commands))
         self.assertFalse((root / ".homeflix" / "setup.json").exists())
+
+    def test_malformed_whitespace_state_never_reaches_preflight_or_compose_up(self) -> None:
+        temporary, root = self.make_root()
+        self.addCleanup(temporary.cleanup)
+        malformed = {"radarr": {"Service": " radarr ", "State": "   ", "Health": "healthy"}}
+        runner = FakeRunner([malformed])
+        result = deploy_core(
+            root, runner=runner,
+            preflight_runner=lambda *args: self.fail("preflight must not run"),
+        )
+        self.assertEqual(result["status"], "live_state_failed")
+        self.assertFalse(any("up" in command for command in runner.commands))
+        self.assertFalse((root / ".homeflix" / "setup.json").exists())
+
+    def test_startup_process_failures_reconcile_safely_without_checkpoint(self) -> None:
+        errors = (
+            subprocess.TimeoutExpired(
+                ["docker", "compose", "--env-file", "/private/.env"],
+                300,
+                output="10.0.0.8 password=hunter2",
+            ),
+            FileNotFoundError("docker missing at /private/path"),
+            OSError("private 192.168.1.10 error"),
+        )
+        for startup_error in errors:
+            with self.subTest(error=type(startup_error).__name__):
+                temporary, root = self.make_root()
+                try:
+                    partial = records(**{
+                        name: ("running", "healthy")
+                        for name in CORE_SERVICES
+                        if name != "radarr"
+                    })
+                    runner = FakeRunner([{}, partial], up_error=startup_error)
+                    result = deploy_core(
+                        root, runner=runner, preflight_runner=passing_preflight,
+                        container_waiter=lambda *args, **kwargs: ReadinessResult(True, "ready"),
+                        http_waiter=lambda *args, **kwargs: ReadinessResult(True, "ready"),
+                    )
+                    self.assertEqual(result["status"], "startup_failed")
+                    self.assertFalse(result["checkpoint_recorded"])
+                    self.assertEqual(len(result["services"]), len(CORE_SERVICES))
+                    services = {item["service"]: item for item in result["services"]}
+                    self.assertTrue(services["jellyfin"]["ready"])
+                    self.assertFalse(services["radarr"]["ready"])
+                    self.assertFalse((root / ".homeflix" / "setup.json").exists())
+                    rendered = json.dumps(result).casefold()
+                    for forbidden in ("hunter2", "password", "10.0.0.8", "192.168.1.10", "/private", ".env"):
+                        self.assertNotIn(forbidden, rendered)
+                finally:
+                    temporary.cleanup()
+
+    def test_cli_sanitizes_expected_orchestration_exception(self) -> None:
+        temporary, root = self.make_root()
+        self.addCleanup(temporary.cleanup)
+        stdout, stderr = io.StringIO(), io.StringIO()
+        failure = subprocess.TimeoutExpired(
+            ["docker", "compose", "--env-file", "/private/.env"],
+            300,
+            output="password=hunter2 10.0.0.8",
+        )
+        with patch("scripts.homeflix_setup.cli.deploy_core", side_effect=failure):
+            with redirect_stdout(stdout), redirect_stderr(stderr):
+                code = main(("--json", "deploy", "core"), repository_root=root)
+        self.assertEqual(code, 1)
+        self.assertEqual(stderr.getvalue(), "")
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload["error"]["code"], "deployment_refused")
+        rendered = json.dumps(payload).casefold()
+        for forbidden in ("hunter2", "password", "10.0.0.8", "/private", ".env"):
+            self.assertNotIn(forbidden, rendered)
 
     def test_partial_failure_is_sanitized_resumable_and_does_not_checkpoint(self) -> None:
         temporary, root = self.make_root()

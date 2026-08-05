@@ -195,7 +195,15 @@ def deploy_core(
             "services": _diagnostics(initial_states, readiness),
             "checkpoint_recorded": False,
         }
-    start = compose_up(root, CORE_SERVICES, command_runner)
+    startup_process_failed = False
+    start_returncode = 1
+    try:
+        start = compose_up(root, CORE_SERVICES, command_runner)
+        start_returncode = start.returncode
+    except (OSError, subprocess.SubprocessError):
+        # The command may have started some services before the local process failed.
+        # Reconcile live state below without exposing the exception, argv, or output.
+        startup_process_failed = True
 
     final_readiness: dict[str, ReadinessResult] = {}
     for service in CORE_SERVICES:
@@ -210,13 +218,22 @@ def deploy_core(
     except (OSError, RuntimeError, ValueError, subprocess.SubprocessError):
         final_states = {}
     diagnostics = _diagnostics(final_states, final_readiness)
-    succeeded = start.returncode == 0 and all(item["ready"] for item in diagnostics)
+    succeeded = (
+        not startup_process_failed
+        and start_returncode == 0
+        and all(item["ready"] for item in diagnostics)
+    )
     if succeeded:
         state.checkpoints["core_containers_started"] = True
         state.save(state_path)
     return {
-        "status": "ready" if succeeded else "partial_failure",
+        "status": (
+            "ready" if succeeded else
+            "startup_failed" if startup_process_failed else
+            "partial_failure"
+        ),
         "changed": True,
         "services": diagnostics,
         "checkpoint_recorded": succeeded,
+        **({"reason": "Compose startup command did not complete"} if startup_process_failed else {}),
     }
