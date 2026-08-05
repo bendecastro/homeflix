@@ -66,7 +66,9 @@ class JellyfinClient:
         if not isinstance(item, dict) or item.get("Name") != name or item.get("CollectionType") != collection_type:
             return False
         locations = item.get("Locations")
-        if not isinstance(locations, list) or not all(isinstance(value, str) and value.startswith("/") for value in locations):
+        if not isinstance(locations, list) or len(locations) != 1:
+            return False
+        if not all(isinstance(value, str) and value.startswith("/") for value in locations):
             return False
         normalized = {posixpath.normpath(value) for value in locations}
         return normalized == {posixpath.normpath(path)}

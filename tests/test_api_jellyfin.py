@@ -104,6 +104,9 @@ class JellyfinApiTests(unittest.TestCase):
             "jellyfin-libraries-duplicate.json",
             "jellyfin-libraries-wrong-type.json",
             "jellyfin-libraries-extra-location.json",
+            "jellyfin-libraries-duplicate-locations.json",
+            "jellyfin-libraries-empty-location.json",
+            "jellyfin-libraries-non-string-location.json",
         )
         for conflict in conflicts:
             with self.subTest(conflict=conflict):
