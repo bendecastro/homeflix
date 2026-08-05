@@ -47,7 +47,7 @@ class MountRunner:
 
 def configured(root: Path) -> dict[str, object]:
     data = root / "data"
-    for path in (data / "torrents", data / "media", root / "config", root / "cache"):
+    for path in (data / "torrents", data / "media", data / "usenet", root / "config", root / "cache"):
         path.mkdir(parents=True)
     env_file = root / ".env"
     env_file.touch()
@@ -108,6 +108,79 @@ class PreflightTests(unittest.TestCase):
                     self.assertFalse(failed.passed)
                     self.assertNotIn("sensitive", result.message)
 
+    def test_data_root_and_required_leaf_symlinks_are_rejected_before_probe(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            config = configured(root)
+            real_data = Path(config["DATA_ROOT"])
+            linked_data = root / "linked-data"
+            linked_data.symlink_to(real_data, target_is_directory=True)
+            config["DATA_ROOT"] = str(linked_data)
+            runner = MountRunner(linked_data)
+            root_report = run_preflight(config, "core", runner)
+            self.assertEqual(next(r for r in root_report.results if r.name == "data_root").status, "fail")
+            self.assertFalse(any(call[0][0] == "findmnt" for call in runner.calls))
+            self.assertFalse(any(result.name == "hardlink" for result in root_report.results))
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            real_parent = root / "real-parent"
+            real_parent.mkdir()
+            config = configured(real_parent)
+            linked_parent = root / "linked-parent"
+            linked_parent.symlink_to(real_parent, target_is_directory=True)
+            config["DATA_ROOT"] = str(linked_parent / "data")
+            runner = MountRunner(linked_parent / "data")
+            chained_report = run_preflight(config, "core", runner)
+            self.assertEqual(next(r for r in chained_report.results if r.name == "data_root").status, "fail")
+            self.assertFalse(any(call[0][0] == "findmnt" for call in runner.calls))
+
+        for leaf, phase in (("torrents", "core"), ("media", "core"), ("usenet", "acquisition")):
+            with self.subTest(leaf=leaf), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                config = configured(root)
+                data = Path(config["DATA_ROOT"])
+                real_leaf = root / f"real-{leaf}"
+                real_leaf.mkdir()
+                (data / leaf).rmdir()
+                (data / leaf).symlink_to(real_leaf, target_is_directory=True)
+                config["VPN_USER"] = "set"
+                config["VPN_PASSWORD"] = "set"
+                report = run_preflight(config, phase, MountRunner(data))
+                self.assertEqual(next(r for r in report.results if r.name == "data_layout").status, "fail")
+                self.assertFalse(any(result.name == "hardlink" for result in report.results))
+
+    def test_acquisition_requires_real_usenet_but_core_may_omit_it(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            config = configured(Path(directory))
+            data = Path(config["DATA_ROOT"])
+            (data / "usenet").rmdir()
+            config["VPN_USER"] = "set"
+            config["VPN_PASSWORD"] = "set"
+            core = run_preflight(config, "core", MountRunner(data))
+            acquisition = run_preflight(config, "acquisition", MountRunner(data))
+        self.assertTrue(core.passed)
+        self.assertFalse(acquisition.passed)
+        self.assertEqual(next(r for r in acquisition.results if r.name == "data_layout").status, "fail")
+        self.assertFalse(any(result.name == "hardlink" for result in acquisition.results))
+
+    def test_known_and_unknown_supported_filesystems_are_classified_but_probed(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            config = configured(Path(directory))
+            data = Path(config["DATA_ROOT"])
+            known_reports = {
+                filesystem: run_preflight(config, "core", MountRunner(data, filesystem))
+                for filesystem in ("ext2", "ext3", "ext4", "xfs", "btrfs", "zfs")
+            }
+            unknown = run_preflight(config, "core", MountRunner(data, "f2fs"))
+        for filesystem, known in known_reports.items():
+            with self.subTest(filesystem=filesystem):
+                self.assertEqual(next(r for r in known.results if r.name == "data_filesystem").status, "pass")
+                self.assertEqual(next(r for r in known.results if r.name == "hardlink").status, "pass")
+        self.assertEqual(next(r for r in unknown.results if r.name == "data_filesystem").status, "warn")
+        self.assertEqual(next(r for r in unknown.results if r.name == "hardlink").status, "pass")
+        self.assertTrue(unknown.passed)
+
     def test_hardlink_probe_verifies_inode_and_cleans_files(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             config = configured(Path(directory))
@@ -118,6 +191,44 @@ class PreflightTests(unittest.TestCase):
             self.assertIn("inode", hardlink.message)
             self.assertEqual(list((data / "torrents").glob(".homeflix-preflight-*")), [])
             self.assertEqual(list((data / "media").glob(".homeflix-preflight-*")), [])
+
+    def test_preexisting_probe_destination_is_never_deleted(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            config = configured(Path(directory))
+            data = Path(config["DATA_ROOT"])
+            destination = data / "media" / ".homeflix-preflight-collision"
+            destination.write_text("pre-existing", encoding="utf-8")
+            fake_uuid = mock.Mock(hex="collision")
+            with mock.patch("scripts.homeflix_setup.preflight.uuid.uuid4", return_value=fake_uuid):
+                report = run_preflight(config, "core", MountRunner(data))
+            self.assertEqual(destination.read_text(encoding="utf-8"), "pre-existing")
+            self.assertEqual(next(r for r in report.results if r.name == "hardlink").status, "fail")
+
+    def test_raced_probe_paths_are_not_deleted_and_cleanup_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            config = configured(Path(directory))
+            data = Path(config["DATA_ROOT"])
+            lstat_counts: dict[Path, int] = {}
+            original_lstat = Path.lstat
+
+            def replace_before_cleanup(path: Path):
+                if path.name.startswith(".homeflix-preflight-"):
+                    lstat_counts[path] = lstat_counts.get(path, 0) + 1
+                    cleanup_call = 1 if path.parent == data / "torrents" else 2
+                    if lstat_counts[path] == cleanup_call:
+                        os.unlink(path)
+                        path.write_text("replacement", encoding="utf-8")
+                return original_lstat(path)
+
+            with mock.patch.object(Path, "lstat", autospec=True, side_effect=replace_before_cleanup):
+                report = run_preflight(config, "core", MountRunner(data))
+
+            replacements = list(data.glob("*/.homeflix-preflight-*"))
+            self.assertEqual(len(replacements), 2)
+            self.assertEqual(set(lstat_counts.values()), {1, 2})
+            self.assertTrue(all(path.read_text(encoding="utf-8") == "replacement" for path in replacements))
+            self.assertEqual(next(r for r in report.results if r.name == "hardlink_cleanup").status, "fail")
+            self.assertFalse(report.passed)
 
     def test_remaining_probe_paths_make_successful_hardlink_cleanup_blocking(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -140,7 +251,7 @@ class PreflightTests(unittest.TestCase):
             self.assertFalse(report.passed)
             self.assertEqual(len(unlink_attempts), 2)
 
-    def test_hardlink_cleanup_failure_is_blocking_and_attempts_both_paths(self) -> None:
+    def test_source_cleanup_failure_preserves_primary_hardlink_failure(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             config = configured(Path(directory))
             data = Path(config["DATA_ROOT"])
@@ -163,8 +274,8 @@ class PreflightTests(unittest.TestCase):
             self.assertEqual([result.status for result in hardlink_results], ["fail"])
             self.assertEqual([result.status for result in cleanup_results], ["fail"])
             self.assertFalse(report.passed)
-            self.assertEqual(len(unlink_attempts), 2)
-            self.assertEqual({path.parent for path in unlink_attempts}, {data / "torrents", data / "media"})
+            self.assertEqual(len(unlink_attempts), 1)
+            self.assertEqual(unlink_attempts[0].parent, data / "torrents")
 
     def test_identity_mismatch_and_bool_types_fail(self) -> None:
         for key, wrong in (("PUID", os.getuid() + 1), ("PGID", os.getgid() + 1)):

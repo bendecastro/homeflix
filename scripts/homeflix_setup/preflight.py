@@ -14,6 +14,10 @@ from .envfile import EnvDocument
 
 
 _STATUSES = {"pass", "warn", "fail"}
+# These common Linux filesystems are recommended, but this set only controls whether
+# an otherwise permitted filesystem receives an informational warning. The real link
+# probe remains authoritative for both recommended and unrecognized filesystems.
+_RECOMMENDED_FILESYSTEMS = {"ext2", "ext3", "ext4", "xfs", "btrfs", "zfs"}
 _UNSUPPORTED_FILESYSTEMS = {
     "9p",
     "cifs",
@@ -87,7 +91,16 @@ def _path(config: EnvDocument | Mapping[str, object], key: str) -> Path | None:
     value = _value(config, key)
     if not isinstance(value, str) or not value.strip():
         return None
-    return Path(value).expanduser().resolve()
+    return Path(os.path.abspath(Path(value).expanduser()))
+
+
+def _is_real_directory(path: Path) -> bool:
+    """Reject a symlink at any point in a configured directory chain."""
+
+    try:
+        return path.is_dir() and path.resolve(strict=True) == path
+    except OSError:
+        return False
 
 
 def _environment_path(config: EnvDocument | Mapping[str, object]) -> Path | None:
@@ -142,6 +155,44 @@ def _result(results: list[CheckResult], name: str, status: str, message: str) ->
     results.append(CheckResult(name, status, message))
 
 
+def _file_identity(path: Path) -> tuple[int, int] | None:
+    try:
+        stat = path.lstat()
+    except OSError:
+        return None
+    return stat.st_dev, stat.st_ino
+
+
+def _cleanup_owned_probe(
+    path: Path, *, created: bool, identity: tuple[int, int] | None
+) -> bool:
+    """Remove only the exact probe inode created by this invocation."""
+
+    if not created:
+        return True
+    if identity is None:
+        return False
+    try:
+        current_stat = path.lstat()
+    except FileNotFoundError:
+        return True
+    except OSError:
+        return False
+    if (current_stat.st_dev, current_stat.st_ino) != identity:
+        return False
+    try:
+        path.unlink()
+    except OSError:
+        return False
+    try:
+        path.lstat()
+    except FileNotFoundError:
+        return True
+    except OSError:
+        return False
+    return False
+
+
 def run_preflight(
     config: EnvDocument | Mapping[str, object], phase: str, runner: Runner
 ) -> PreflightReport:
@@ -152,6 +203,7 @@ def run_preflight(
 
     results: list[CheckResult] = []
     roots: dict[str, Path | None] = {}
+    data_root_is_real = False
     for key in ("DATA_ROOT", "CONFIG_ROOT", "CACHE_ROOT"):
         path = _path(config, key)
         roots[key] = path
@@ -159,7 +211,11 @@ def run_preflight(
             _result(results, key.casefold(), "fail", f"{key} must be a non-empty path")
         elif not path.is_dir():
             _result(results, key.casefold(), "fail", f"{key} directory is absent")
+        elif key == "DATA_ROOT" and not _is_real_directory(path):
+            _result(results, "data_root", "fail", "DATA_ROOT must not contain symlinks")
         else:
+            if key == "DATA_ROOT":
+                data_root_is_real = True
             _result(results, key.casefold(), "pass", f"{key} directory exists")
 
     for key in ("VPN_USER", "VPN_PASSWORD"):
@@ -219,7 +275,7 @@ def run_preflight(
         _result(results, "pgid", "pass", "PGID is valid")
 
     data_root = roots["DATA_ROOT"]
-    if data_root is not None and data_root.is_dir():
+    if data_root is not None and data_root_is_real:
         filesystem_allows_probe = False
         mount_is_safe = False
         mount = _mount_fact(data_root, runner)
@@ -257,12 +313,20 @@ def run_preflight(
                 )
             else:
                 filesystem_allows_probe = mount_is_safe
-                _result(
-                    results,
-                    "data_filesystem",
-                    "pass",
-                    f"DATA_ROOT filesystem {filesystem} is not known to prevent hardlinks",
-                )
+                if filesystem in _RECOMMENDED_FILESYSTEMS:
+                    _result(
+                        results,
+                        "data_filesystem",
+                        "pass",
+                        f"DATA_ROOT filesystem {filesystem} is recommended",
+                    )
+                else:
+                    _result(
+                        results,
+                        "data_filesystem",
+                        "warn",
+                        f"DATA_ROOT filesystem {filesystem} is unrecognized; relying on the hardlink probe",
+                    )
 
         try:
             stat = data_root.stat()
@@ -276,41 +340,58 @@ def run_preflight(
 
         torrents = data_root / "torrents"
         media = data_root / "media"
-        missing = [name for name, path in (("torrents", torrents), ("media", media)) if not path.is_dir()]
-        if missing:
-            _result(results, "hardlink", "fail", "Required DATA_ROOT directories are absent: " + ", ".join(missing))
+        required_paths = [("torrents", torrents), ("media", media)]
+        if phase == "acquisition":
+            required_paths.append(("usenet", data_root / "usenet"))
+        absent = [name for name, path in required_paths if not path.is_dir()]
+        linked = [name for name, path in required_paths if path.is_dir() and not _is_real_directory(path)]
+        layout_is_real = not absent and not linked
+        if not layout_is_real:
+            details = []
+            if absent:
+                details.append("absent: " + ", ".join(absent))
+            if linked:
+                details.append("symlinked: " + ", ".join(linked))
+            _result(results, "data_layout", "fail", "Required DATA_ROOT directories are invalid (" + "; ".join(details) + ")")
         elif filesystem_allows_probe:
             token = uuid.uuid4().hex
             source = torrents / f".homeflix-preflight-{token}"
             link = media / f".homeflix-preflight-{token}"
+            source_created = False
+            link_created = False
+            source_identity: tuple[int, int] | None = None
+            link_identity: tuple[int, int] | None = None
             try:
                 with source.open("x", encoding="utf-8") as stream:
+                    source_created = True
+                    source_stat = os.fstat(stream.fileno())
+                    source_identity = (source_stat.st_dev, source_stat.st_ino)
                     stream.write("homeflix preflight\n")
                 os.link(source, link)
-                if source.stat().st_ino == link.stat().st_ino:
-                    _result(results, "hardlink", "pass", "Hardlink probe shares one inode")
+                link_created = True
+                observed_link_identity = _file_identity(link)
+                # A hardlink created from our source must have its recorded identity.
+                # Retain that expected identity so a raced replacement is never removed.
+                link_identity = source_identity
+                if source_identity is not None and source_identity == observed_link_identity:
+                    _result(results, "hardlink", "pass", "Hardlink probe shares one device and inode")
                 else:
-                    _result(results, "hardlink", "fail", "Hardlink probe did not share one inode")
+                    _result(results, "hardlink", "fail", "Hardlink probe did not share one device and inode")
             except OSError:
                 _result(results, "hardlink", "fail", "Hardlink probe failed")
             finally:
-                cleanup_failed = False
-                for probe_path in (link, source):
-                    try:
-                        probe_path.unlink(missing_ok=True)
-                    except OSError:
-                        cleanup_failed = True
-                for probe_path in (link, source):
-                    try:
-                        cleanup_failed = probe_path.exists() or cleanup_failed
-                    except OSError:
-                        cleanup_failed = True
-                if cleanup_failed:
+                link_clean = _cleanup_owned_probe(
+                    link, created=link_created, identity=link_identity
+                )
+                source_clean = _cleanup_owned_probe(
+                    source, created=source_created, identity=source_identity
+                )
+                if not link_clean or not source_clean:
                     _result(
                         results,
                         "hardlink_cleanup",
                         "fail",
-                        "Hardlink probe cleanup failed; remove remaining probe files",
+                        "Hardlink probe cleanup failed or found a replaced identity",
                     )
 
     return PreflightReport(phase, tuple(results))
