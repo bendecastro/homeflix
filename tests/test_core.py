@@ -122,7 +122,9 @@ class CoreDeploymentTests(unittest.TestCase):
         self.assertFalse((root / ".homeflix" / "setup.json").exists())
 
     def test_malformed_compose_identity_never_reaches_preflight_or_compose_up(self) -> None:
-        malformed_services = ("radarré", ".radarr", "-radarr", "radarr service")
+        malformed_services = (
+            "radarré", "radarrK", "ſonarr", ".radarr", "-radarr", "radarr service",
+        )
         for malformed_service in malformed_services:
             with self.subTest(service=malformed_service):
                 temporary, root = self.make_root()

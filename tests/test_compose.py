@@ -194,6 +194,8 @@ class ComposeExecutionTests(unittest.TestCase):
             json.dumps({"Service": "radarr", "State": "running", "Health": "   "}),
             json.dumps({"Service": "radarr", "State": "running", "Health": "mystery"}),
             json.dumps({"Service": "radarré", "State": "running"}),
+            json.dumps({"Service": "radarrK", "State": "running"}),
+            json.dumps({"Service": "ſonarr", "State": "running"}),
             json.dumps({"Service": ".radarr", "State": "running"}),
             json.dumps({"Service": "-radarr", "State": "running"}),
             json.dumps({"Service": "radarr service", "State": "running"}),

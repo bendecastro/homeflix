@@ -231,7 +231,10 @@ def compose_ps(
         health_value = record.get("Health", record.get("health", ""))
         if not all(isinstance(value, str) for value in (service_value, state_value, health_value)):
             raise ValueError("Compose service state was malformed")
-        service = service_value.strip().casefold()
+        raw_service = service_value.strip()
+        if not raw_service.isascii():
+            raise ValueError("Compose service state was malformed")
+        service = raw_service.casefold()
         state = state_value.strip().casefold()
         health = health_value.strip().casefold()
         if not service or not state or (health_value and not health):
