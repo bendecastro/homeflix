@@ -107,13 +107,13 @@ Updated: 2026-08-04
 
 ## Task 6: Deploy and reconcile the core containers
 
-- [ ] Add failing orchestration tests proving `deploy core` invokes only `traefik jellyfin jellyseerr radarr sonarr`, never Gluetun/download/indexer services, waits on explicit HTTP/container readiness conditions, and is a no-op when the desired healthy services already run.
-- [ ] Add failure tests ensuring partial startup returns per-service diagnostics with credentials and private IPs redacted.
-- [ ] Run `python3 -m unittest tests.test_core tests.test_compose -v`; expect failures.
-- [ ] Implement `CORE_SERVICES`, `compose_up(services)`, `compose_ps()`, `wait_for_http()`, `wait_for_container()`, and `deploy_core()`. Resolve the repository directory from the launcher, not the caller's current directory.
-- [ ] Record `core_containers_started` only after live reconciliation succeeds.
-- [ ] Run the unit tests and a dry-run command that prints the exact Compose invocation without changing containers.
-- [ ] Commit with `git add scripts/homeflix_setup/compose.py scripts/homeflix_setup/core.py scripts/homeflix_setup/cli.py tests/test_core.py tests/test_compose.py && git commit -m "Deploy resumable core services"`.
+- [x] Add failing orchestration tests proving `deploy core` invokes only `traefik jellyfin jellyseerr radarr sonarr`, never Gluetun/download/indexer services, waits on explicit HTTP/container readiness conditions, and is a no-op when the desired healthy services already run.
+- [x] Add failure tests ensuring partial startup returns per-service diagnostics with credentials and private IPs redacted.
+- [x] Run `python3 -m unittest tests.test_core tests.test_compose -v`; expect failures.
+- [x] Implement `CORE_SERVICES`, `compose_up(services)`, `compose_ps()`, `wait_for_http()`, `wait_for_container()`, and `deploy_core()`. Resolve the repository directory from the launcher, not the caller's current directory.
+- [x] Record `core_containers_started` only after live reconciliation succeeds.
+- [x] Run the unit tests and a dry-run command that prints the exact Compose invocation without changing containers.
+- [x] Commit with `git add scripts/homeflix_setup/compose.py scripts/homeflix_setup/core.py scripts/homeflix_setup/cli.py tests/test_core.py tests/test_compose.py && git commit -m "Deploy resumable core services"`.
 
 ## Task 7: Configure Jellyfin, Radarr, Sonarr, and Jellyseerr through APIs
 

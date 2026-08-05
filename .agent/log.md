@@ -244,3 +244,13 @@ cover mounted non-symlink storage, ownership, known filesystem risks, exact Comp
 and real torrent/media plus acquisition-only Usenet/media hardlinks with fail-closed cleanup.
 Every data bind now disables host-path creation. Ninety-eight tests and fresh spec/quality
 reviews passed; no real deployment paths or containers were touched.
+
+## [2026-08-05] implementation | Agent setup task 6 — resumable core deployment
+
+Added an immutable five-service core allowlist with `--no-deps`, exact Compose context,
+side-effect-free dry-run, live-state no-op reconciliation, container plus HTTP readiness,
+and sanitized partial-failure diagnostics. One global deadline bounds readiness. Exact env
+bytes, Compose/override files, and data mount identity are snapshot-checked across preflight
+immediately before mutation; checkpoints are evidence only and record after full readiness.
+One hundred twenty-one tests and fresh spec/quality reviews passed; no real container command
+was run.
