@@ -163,32 +163,43 @@ def configure(
     }
 
 
-def _project_name(root: Path) -> str:
-    value = EnvDocument.load(root / ".env").get("COMPOSE_PROJECT_NAME")
+def _validated_project_name(value: str | None) -> str:
     if not value or not value.replace("-", "").replace("_", "").isalnum():
         raise ValueError("COMPOSE_PROJECT_NAME must be a stable non-empty project name")
     return value
 
 
-def compose_command(repository_root: str | os.PathLike[str]) -> tuple[str, ...]:
+def compose_command(
+    repository_root: str | os.PathLike[str], *, project_name: str | None = None
+) -> tuple[str, ...]:
     """Return the explicit, cwd-independent Compose command prefix."""
 
     root = Path(repository_root).resolve()
     return (
         "docker", "compose", "--project-directory", str(root),
-        "--env-file", str(root / ".env"), "--project-name", _project_name(root),
+        "--env-file", str(root / ".env"), "--project-name",
+        _validated_project_name(
+            project_name if project_name is not None else EnvDocument.load(root / ".env").get("COMPOSE_PROJECT_NAME")
+        ),
     )
 
 
 def compose_up(
-    repository_root: str | os.PathLike[str], services: Sequence[str], runner: Runner
+    repository_root: str | os.PathLike[str],
+    services: Sequence[str],
+    runner: Runner,
+    *,
+    project_name: str | None = None,
 ) -> subprocess.CompletedProcess[str]:
     """Start exactly the named services; callers must perform preflight first."""
 
     selected = tuple(services)
     if not selected or any(service not in CORE_SERVICES for service in selected):
         raise ValueError("Compose core deployment services must come from CORE_SERVICES")
-    argv = (*compose_command(repository_root), "up", "--detach", "--no-deps", *selected)
+    argv = (
+        *compose_command(repository_root, project_name=project_name),
+        "up", "--detach", "--no-deps", *selected,
+    )
     return runner.run(argv, check=False, timeout=300)
 
 
@@ -210,14 +221,18 @@ def _json_records(text: str) -> list[object]:
 
 
 def compose_ps(
-    repository_root: str | os.PathLike[str], runner: Runner
+    repository_root: str | os.PathLike[str],
+    runner: Runner,
+    *,
+    project_name: str | None = None,
+    timeout: float = 30,
 ) -> dict[str, dict[str, str]]:
     """Read Compose v2 service state, accepting array and JSON-lines output."""
 
     result = runner.run(
-        (*compose_command(repository_root), "ps", "--format", "json"),
+        (*compose_command(repository_root, project_name=project_name), "ps", "--format", "json"),
         check=False,
-        timeout=30,
+        timeout=timeout,
     )
     if result.returncode:
         raise RuntimeError("Compose service state is unavailable")

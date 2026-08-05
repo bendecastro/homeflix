@@ -13,8 +13,6 @@ from unittest.mock import patch
 from scripts.homeflix_setup.cli import main
 from scripts.homeflix_setup.compose import CORE_SERVICES
 from scripts.homeflix_setup.core import (
-    ArtifactIdentity,
-    DeploymentSnapshot,
     ReadinessResult,
     _readiness_targets,
     capture_deployment_snapshot,
@@ -143,7 +141,7 @@ class ReadinessHelperTests(unittest.TestCase):
             {"radarr": {"state": "running", "health": "healthy"}},
         ))
         result = wait_for_container(
-            "radarr", lambda: next(states), timeout=4, interval=1,
+            "radarr", lambda timeout: next(states), timeout=4, interval=1,
             sleep=clock.sleep, clock=clock,
         )
         self.assertTrue(result.ready)
@@ -151,7 +149,7 @@ class ReadinessHelperTests(unittest.TestCase):
 
         clock = FakeClock()
         result = wait_for_container(
-            "radarr", lambda: {"radarr": {"state": "running", "health": "unhealthy"}},
+            "radarr", lambda timeout: {"radarr": {"state": "running", "health": "unhealthy"}},
             timeout=3, interval=2, sleep=clock.sleep, clock=clock,
         )
         self.assertFalse(result.ready)
@@ -343,36 +341,85 @@ class CoreDeploymentTests(unittest.TestCase):
         temporary2, root2 = self.make_root()
         self.addCleanup(temporary2.cleanup)
         clock2 = FakeClock()
-        runner2 = FakeRunner([{}, ready_records()])
 
-        def consume_container(service, probe, **kwargs):
-            clock2.advance(kwargs["timeout"])
-            return ReadinessResult(False, "container did not reach running state")
+        class BudgetRunner(FakeRunner):
+            def __init__(self):
+                super().__init__([{}])
+                self.ps_timeouts: list[float] = []
+                self.ps_calls = 0
+            def run(self, argv, **kwargs):
+                command = tuple(argv)
+                if "ps" in command:
+                    self.commands.append(command)
+                    self.ps_calls += 1
+                    requested = kwargs["timeout"]
+                    self.ps_timeouts.append(requested)
+                    clock2.advance(1 if self.ps_calls == 1 else requested)
+                    return subprocess.CompletedProcess(command, 0, "[]", "")
+                return super().run(argv, **kwargs)
+
+        runner2 = BudgetRunner()
+        def bounded_container(service, probe, **kwargs):
+            return wait_for_container(
+                service, probe, timeout=kwargs["timeout"], interval=1,
+                sleep=clock2.sleep, clock=clock2,
+            )
 
         result2 = deploy_core(
             root2, runner=runner2, readiness_timeout=25, clock=clock2,
-            preflight_runner=passing_preflight, container_waiter=consume_container,
+            preflight_runner=passing_preflight, container_waiter=bounded_container,
         )
         self.assertEqual(result2["status"], "partial_failure")
         self.assertLessEqual(clock2.now, 25.000001)
+        self.assertGreater(len(runner2.ps_timeouts), 1)
+        self.assertTrue(all(timeout <= 25 for timeout in runner2.ps_timeouts))
+
+    def test_env_change_before_first_snapshot_refuses_before_preflight_or_up(self) -> None:
+        temporary, root = self.make_root()
+        self.addCleanup(temporary.cleanup)
+        runner = FakeRunner([{}])
+        def mutate_before_snapshot(repository_root, config):
+            (root / ".env").write_text(
+                "COMPOSE_PROJECT_NAME=other\nDOMAIN=changed.test\n", encoding="utf-8"
+            )
+            return capture_deployment_snapshot(repository_root, config)
+        result = deploy_core(
+            root,
+            runner=runner,
+            snapshotter=mutate_before_snapshot,
+            preflight_runner=lambda *args: self.fail("config drift must precede preflight"),
+        )
+        self.assertEqual(result["status"], "config_drift")
+        self.assertEqual(runner.commands, [])
+        self.assertFalse((root / ".homeflix" / "setup.json").exists())
 
     def test_preflight_drift_in_each_snapshot_field_prevents_compose_up(self) -> None:
-        artifact = ArtifactIdentity(1, 2, 3, "a" * 64)
-        baseline = DeploymentSnapshot(
-            artifact, artifact, None, (4, 5), ("4:0", "/data", "ext4", "/dev/a")
-        )
-        variants = (
-            replace(baseline, environment=replace(artifact, sha256="b" * 64)),
-            replace(baseline, compose=replace(artifact, inode=9)),
-            replace(baseline, override=artifact),
-            replace(baseline, data_root_identity=(4, 6)),
-            replace(baseline, data_mount_record=("4:1", "/data", "ext4", "/dev/b")),
-        )
-        for changed in variants:
-            with self.subTest(changed=changed):
+        fields = ("environment", "compose", "override", "data_root_identity", "data_mount_record")
+        for field in fields:
+            with self.subTest(field=field):
                 temporary, root = self.make_root()
                 try:
                     runner = FakeRunner([{}])
+                    config = EnvDocument.load(root / ".env")
+                    baseline = capture_deployment_snapshot(root, config)
+                    if field == "environment":
+                        changed = replace(
+                            baseline,
+                            environment=replace(baseline.environment, sha256="b" * 64),
+                        )
+                    elif field == "compose":
+                        changed = replace(
+                            baseline, compose=replace(baseline.compose, inode=baseline.compose.inode + 1)
+                        )
+                    elif field == "override":
+                        changed = replace(baseline, override=baseline.compose)
+                    elif field == "data_root_identity":
+                        changed = replace(baseline, data_root_identity=(4, 6))
+                    else:
+                        changed = replace(
+                            baseline,
+                            data_mount_record=("4:1", "/data", "ext4", "/dev/b"),
+                        )
                     snapshots = iter((baseline, changed))
                     result = deploy_core(
                         root, runner=runner, preflight_runner=passing_preflight,
@@ -386,6 +433,7 @@ class CoreDeploymentTests(unittest.TestCase):
         temporary, root = self.make_root()
         self.addCleanup(temporary.cleanup)
         runner = FakeRunner([{}])
+        baseline = capture_deployment_snapshot(root, EnvDocument.load(root / ".env"))
         calls = 0
         def disappearing(*args):
             nonlocal calls
@@ -422,7 +470,7 @@ class CoreDeploymentTests(unittest.TestCase):
 
         runner = FinalFailureRunner()
         def container(service, probe, **kwargs):
-            probe()
+            probe(kwargs["timeout"])
             return ReadinessResult(True, "ready")
         result = deploy_core(
             root, runner=runner, preflight_runner=passing_preflight,

@@ -31,6 +31,7 @@ class ArtifactIdentity:
     inode: int
     size: int
     sha256: str
+    mtime_ns: int = 0
 
 
 @dataclass(frozen=True)
@@ -45,7 +46,7 @@ class DeploymentSnapshot:
 READINESS_TIMEOUT = 90.0
 
 HttpProbe = Callable[[str, Mapping[str, str], float], bool]
-StateProbe = Callable[[], Mapping[str, Mapping[str, str]]]
+StateProbe = Callable[[float], Mapping[str, Mapping[str, str]]]
 
 
 def _http_probe(url: str, headers: Mapping[str, str], timeout: float) -> bool:
@@ -102,7 +103,7 @@ def wait_for_container(
                 return ReadinessResult(False, "container health did not become ready")
             return ReadinessResult(False, "container did not reach running state")
         try:
-            observed = state_probe().get(service, {})
+            observed = state_probe(max(0.0, deadline - clock())).get(service, {})
         except (OSError, RuntimeError, ValueError, subprocess.SubprocessError):
             observed = {}
         state = observed.get("state", "unknown")
@@ -112,7 +113,9 @@ def wait_for_container(
         sleep(min(interval, max(0.0, deadline - clock())))
 
 
-def _artifact_identity(path: Path, *, optional: bool = False) -> ArtifactIdentity | None:
+def _read_artifact(
+    path: Path, *, optional: bool = False
+) -> tuple[bytes, ArtifactIdentity] | None:
     try:
         descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
     except FileNotFoundError:
@@ -126,16 +129,26 @@ def _artifact_identity(path: Path, *, optional: bool = False) -> ArtifactIdentit
         if not stat.S_ISREG(before.st_mode):
             raise ValueError("deployment artifact must be a regular file")
         digest = hashlib.sha256()
+        chunks: list[bytes] = []
         while chunk := os.read(descriptor, 128 * 1024):
+            chunks.append(chunk)
             digest.update(chunk)
         after = os.fstat(descriptor)
         if (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns) != (
             after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns
         ):
             raise ValueError("deployment artifact changed while being read")
-        return ArtifactIdentity(before.st_dev, before.st_ino, before.st_size, digest.hexdigest())
+        identity = ArtifactIdentity(
+            before.st_dev, before.st_ino, before.st_size, digest.hexdigest(), before.st_mtime_ns
+        )
+        return b"".join(chunks), identity
     finally:
         os.close(descriptor)
+
+
+def _artifact_identity(path: Path, *, optional: bool = False) -> ArtifactIdentity | None:
+    captured = _read_artifact(path, optional=optional)
+    return None if captured is None else captured[1]
 
 
 def _unescape_mount(value: str) -> str:
@@ -236,11 +249,19 @@ def _initial_readiness(
     targets: Mapping[str, tuple[str, dict[str, str]]],
     http_waiter: Callable[..., ReadinessResult],
     *,
-    timeout: float,
+    deadline: float,
     clock: Callable[[], float],
 ) -> dict[str, ReadinessResult]:
-    deadline = clock() + timeout
     readiness: dict[str, ReadinessResult] = {}
+    if not all(
+        states.get(service, {}).get("state") == "running"
+        and states.get(service, {}).get("health") in {"", "healthy"}
+        for service in CORE_SERVICES
+    ):
+        return {
+            service: ReadinessResult(False, "readiness was not observed")
+            for service in CORE_SERVICES
+        }
     remaining_services = len(CORE_SERVICES)
     for service in CORE_SERVICES:
         observed = states.get(service, {})
@@ -261,10 +282,9 @@ def _post_start_readiness(
     http_waiter: Callable[..., ReadinessResult],
     container_waiter: Callable[..., ReadinessResult],
     *,
-    timeout: float,
+    deadline: float,
     clock: Callable[[], float],
 ) -> dict[str, ReadinessResult]:
-    deadline = clock() + timeout
     readiness: dict[str, ReadinessResult] = {}
     remaining_calls = len(CORE_SERVICES) * 2
     for service in CORE_SERVICES:
@@ -296,12 +316,21 @@ def deploy_core(
     clock: Callable[[], float] = time.monotonic,
     snapshotter: Callable[[str | Path, EnvDocument], DeploymentSnapshot] = capture_deployment_snapshot,
 ) -> dict[str, object]:
-    """Reconcile core with one bounded budget for each initial and post-start readiness phase."""
+    """Reconcile core under one readiness deadline shared by initial and post-start checks."""
 
     root = Path(repository_root).resolve()
     command_runner = runner or CommandRunner()
-    config = EnvDocument.load(root / ".env")
-    prefix = compose_command(root)
+    environment_path = root / ".env"
+    captured_environment = _read_artifact(environment_path)
+    assert captured_environment is not None
+    environment_bytes, environment_identity = captured_environment
+    try:
+        config = EnvDocument.parse(environment_bytes.decode("utf-8"))
+    except UnicodeDecodeError as error:
+        raise ValueError("environment configuration is not valid UTF-8") from error
+    config.source_path = environment_path
+    project_name = config.get("COMPOSE_PROJECT_NAME")
+    prefix = compose_command(root, project_name=project_name)
     up_argv = [*prefix, "up", "--detach", "--no-deps", *CORE_SERVICES]
     ps_argv = [*prefix, "ps", "--format", "json"]
     if dry_run:
@@ -318,7 +347,37 @@ def deploy_core(
     state = SetupState.load(state_path)
     targets = _readiness_targets(config)
     try:
-        initial_states = compose_ps(root, command_runner)
+        baseline_snapshot = snapshotter(root, config)
+    except (OSError, ValueError):
+        return {
+            "status": "deployment_snapshot_failed",
+            "changed": False,
+            "services": _diagnostics({}, {}),
+            "checkpoint_recorded": False,
+            "reason": "Deployment inputs could not be verified",
+        }
+    if baseline_snapshot.environment != environment_identity:
+        return {
+            "status": "config_drift",
+            "changed": False,
+            "services": _diagnostics({}, {}),
+            "checkpoint_recorded": False,
+            "reason": "Environment configuration changed before reconciliation",
+        }
+    readiness_deadline = clock() + max(0.0, readiness_timeout)
+    initial_ps_timeout = max(0.0, readiness_deadline - clock())
+    if initial_ps_timeout <= 0:
+        return {
+            "status": "live_state_failed",
+            "changed": False,
+            "services": _diagnostics({}, {}),
+            "checkpoint_recorded": False,
+            "reason": "Compose service state could not be verified within the readiness deadline",
+        }
+    try:
+        initial_states = compose_ps(
+            root, command_runner, project_name=project_name, timeout=initial_ps_timeout
+        )
     except (OSError, RuntimeError, ValueError, subprocess.SubprocessError):
         return {
             "status": "live_state_failed",
@@ -329,7 +388,7 @@ def deploy_core(
         }
 
     readiness = _initial_readiness(
-        initial_states, targets, http_waiter, timeout=readiness_timeout, clock=clock
+        initial_states, targets, http_waiter, deadline=readiness_deadline, clock=clock
     )
     if all(result.ready for result in readiness.values()):
         diagnostics = _diagnostics(initial_states, readiness)
@@ -352,16 +411,6 @@ def deploy_core(
             "checkpoint_recorded": True,
         }
 
-    try:
-        before_preflight = snapshotter(root, config)
-    except (OSError, ValueError):
-        return {
-            "status": "deployment_snapshot_failed",
-            "changed": False,
-            "services": _diagnostics(initial_states, readiness),
-            "checkpoint_recorded": False,
-            "reason": "Deployment inputs could not be verified",
-        }
     report = preflight_runner(config, "core", command_runner)
     if not report.passed:
         return {
@@ -382,7 +431,7 @@ def deploy_core(
             "reason": "Deployment inputs changed or became unverifiable during preflight",
             "safety_note": "External mount changes after the final drift guard cannot be eliminated",
         }
-    if before_preflight != after_preflight:
+    if baseline_snapshot != after_preflight:
         return {
             "status": "deployment_drift",
             "changed": False,
@@ -395,7 +444,9 @@ def deploy_core(
     startup_process_failed = False
     start_returncode = 1
     try:
-        start = compose_up(root, CORE_SERVICES, command_runner)
+        start = compose_up(
+            root, CORE_SERVICES, command_runner, project_name=project_name
+        )
         start_returncode = start.returncode
     except (OSError, subprocess.SubprocessError):
         # The command may have started some services before the local process failed.
@@ -404,9 +455,13 @@ def deploy_core(
 
     last_states = initial_states
 
-    def state_probe() -> Mapping[str, Mapping[str, str]]:
+    def state_probe(timeout: float) -> Mapping[str, Mapping[str, str]]:
         nonlocal last_states
-        observed = compose_ps(root, command_runner)
+        if timeout <= 0:
+            raise RuntimeError("readiness deadline exhausted")
+        observed = compose_ps(
+            root, command_runner, project_name=project_name, timeout=timeout
+        )
         last_states = observed
         return observed
 
@@ -415,12 +470,17 @@ def deploy_core(
         state_probe,
         http_waiter,
         container_waiter,
-        timeout=readiness_timeout,
+        deadline=readiness_deadline,
         clock=clock,
     )
     state_verification_failed = False
     try:
-        final_states = compose_ps(root, command_runner)
+        final_timeout = max(0.0, readiness_deadline - clock())
+        if final_timeout <= 0:
+            raise RuntimeError("readiness deadline exhausted")
+        final_states = compose_ps(
+            root, command_runner, project_name=project_name, timeout=final_timeout
+        )
         last_states = final_states
     except (OSError, RuntimeError, ValueError, subprocess.SubprocessError):
         state_verification_failed = True

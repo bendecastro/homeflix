@@ -149,10 +149,12 @@ class ComposeExecutionTests(unittest.TestCase):
             self.stdout = stdout
             self.returncode = returncode
             self.commands: list[tuple[str, ...]] = []
+            self.timeouts: list[float | None] = []
 
         def run(self, argv, **kwargs):
             command = tuple(argv)
             self.commands.append(command)
+            self.timeouts.append(kwargs.get("timeout"))
             return subprocess.CompletedProcess(command, self.returncode, self.stdout, "secret raw error")
 
     def make_root(self) -> tuple[tempfile.TemporaryDirectory[str], Path]:
@@ -211,6 +213,13 @@ class ComposeExecutionTests(unittest.TestCase):
         for malformed in malformed_records:
             with self.subTest(malformed=malformed), self.assertRaises(ValueError):
                 compose_ps(root, self.Runner(malformed))
+
+    def test_compose_ps_uses_callers_remaining_timeout(self) -> None:
+        temporary, root = self.make_root()
+        self.addCleanup(temporary.cleanup)
+        runner = self.Runner("[]")
+        compose_ps(root, runner, timeout=1.25)
+        self.assertEqual(runner.timeouts, [1.25])
 
     def test_compose_up_rejects_non_core_service(self) -> None:
         temporary, root = self.make_root()
