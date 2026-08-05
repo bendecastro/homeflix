@@ -109,6 +109,18 @@ class ArrApiTests(unittest.TestCase):
         self.assertFalse(result["completed_handling_changed"])
         self.assertTrue(all(request.method == "GET" for request in transport.requests))
 
+    def test_inspection_is_get_only_and_checks_exact_root_and_owned_settings(self):
+        root = "/data/media/movies"
+        transport = RouteTransport({
+            ("GET", "/api/v3/qualityprofile"): [[{"id": 19, "name": "Fixture HD"}]],
+            ("GET", "/api/v3/rootfolder"): [[{"id": 4, "path": root}]],
+            ("GET", "/api/v3/config/mediamanagement"): [{"id": 1, "renameMovies": True, "copyUsingHardlinks": True}],
+            ("GET", "/api/v3/config/downloadclient"): [{"id": 2, "enableCompletedDownloadHandling": True}],
+        })
+        result = ArrClient("radarr", "http://127.0.0.1", FIXTURE_KEY, transport=transport).inspect("Fixture HD", root)
+        self.assertTrue(all(result[name] for name in ("profile_exact", "root_exact", "media_settings", "completed_handling")))
+        self.assertTrue(all(request.method == "GET" for request in transport.requests))
+
     def test_missing_profile_fails_safely_without_hardcoded_id(self):
         transport = RouteTransport({("GET", "/api/v3/qualityprofile"): [[{"id": 6, "name": "Unrelated"}]]})
         with self.assertRaises(ApiError) as raised:

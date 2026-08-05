@@ -249,6 +249,20 @@ class JellyfinApiTests(unittest.TestCase):
                 self.assertNotIn("/data", rendered)
                 self.assertNotIn("FIXTURE", rendered)
 
+    def test_inspection_uses_only_authentication_post_then_gets(self):
+        transport = FixtureTransport([
+            (200, fixture("jellyfin-startup-complete.json")),
+            (200, fixture("jellyfin-auth.json")),
+            (200, fixture("jellyfin-libraries-complete.json")),
+        ])
+        result = JellyfinClient(transport=transport).inspect("fixture-admin", "FIXTURE_PASSWORD_NOT_REAL")
+        self.assertEqual(result, {"initialized": True, "libraries_exact": True})
+        methods_paths = [(request.method, request.full_url) for request, _ in transport.requests]
+        posts = [(method, path) for method, path in methods_paths if method != "GET"]
+        self.assertEqual(len(posts), 1)
+        self.assertTrue(posts[0][1].endswith("/Users/AuthenticateByName"))
+        self.assertFalse(any("Startup/" in path or "Library/VirtualFolders?" in path for _, path in methods_paths))
+
     def test_non_idempotent_post_is_not_blindly_retried(self):
         transport = FixtureTransport([error.URLError("fixture secret")])
         client = JellyfinClient(transport=transport)

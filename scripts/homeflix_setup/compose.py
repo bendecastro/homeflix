@@ -222,6 +222,47 @@ def _json_records(text: str) -> list[object]:
     return value if isinstance(value, list) else [value]
 
 
+def compose_inventory(
+    repository_root: str | os.PathLike[str],
+    runner: Runner,
+    *,
+    project_name: str | None = None,
+    timeout: float = 30,
+) -> list[dict[str, str]]:
+    """Return validated live Compose records including their project identity."""
+    expected = _validated_project_name(project_name)
+    result = runner.run(
+        (*compose_command(repository_root, project_name=expected), "ps", "--all", "--format", "json"),
+        check=False, timeout=timeout,
+    )
+    if result.returncode:
+        raise RuntimeError("Compose service inventory is unavailable")
+    inventory: list[dict[str, str]] = []
+    for record in _json_records(result.stdout):
+        if not isinstance(record, Mapping):
+            raise ValueError("Compose service inventory was malformed")
+        values = {
+            "service": record.get("Service", record.get("service")),
+            "state": record.get("State", record.get("state")),
+            "health": record.get("Health", record.get("health", "")),
+            "project": record.get("Project", record.get("project")),
+        }
+        if not all(isinstance(value, str) for value in values.values()):
+            raise ValueError("Compose service inventory was malformed")
+        normalized = {key: value.strip().casefold() for key, value in values.items()}
+        if (
+            _COMPOSE_SERVICE_NAME.fullmatch(normalized["service"]) is None
+            or normalized["state"] not in _COMPOSE_STATES
+            or normalized["health"] not in _COMPOSE_HEALTH
+            or _COMPOSE_PROJECT_NAME.fullmatch(normalized["project"]) is None
+        ):
+            raise ValueError("Compose service inventory was malformed")
+        inventory.append(normalized)
+    if len({item["service"] for item in inventory}) != len(inventory):
+        raise ValueError("Compose service inventory was malformed")
+    return inventory
+
+
 def compose_ps(
     repository_root: str | os.PathLike[str],
     runner: Runner,

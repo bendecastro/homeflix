@@ -115,6 +115,33 @@ class JellyseerrClient:
         self.http.request("PUT", f"/api/v1/settings/{service}/{existing['id']}", operation=f"update {service} settings", payload=updated)
         return True
 
+    def inspect_arr(self, service: str, profile: dict[str, Any], root: dict[str, Any]) -> bool:
+        """Validate exactly one selected default non-4K server using GET only."""
+        current = self.http.request("GET", f"/api/v1/settings/{service}", operation=f"inspect {service} settings")
+        if not isinstance(current, list):
+            raise ApiError("jellyseerr", f"inspect {service} settings", None, "invalid_response")
+        expected: dict[str, object] = {
+            "hostname": service, "port": _INTERNAL[service], "useSsl": False,
+            "baseUrl": "", "activeProfileId": profile["id"],
+            "activeProfileName": profile["name"], "activeDirectory": root["path"],
+            "is4k": False, "isDefault": True, "syncEnabled": True, "preventSearch": False,
+        }
+        if service == "sonarr":
+            expected["enableSeasonFolders"] = True
+        matches = [item for item in current if isinstance(item, dict) and all(item.get(k) == v for k, v in expected.items())]
+        defaults = [item for item in current if isinstance(item, dict) and item.get("isDefault") is True and item.get("is4k") is False]
+        return len(matches) == 1 and len(defaults) == 1 and matches[0] is defaults[0]
+
+    def inspect(self, runtime: Mapping[str, tuple[dict[str, Any], dict[str, Any]]]) -> dict[str, bool]:
+        initialized = self.initialized()
+        jellyfin = self.verify_jellyfin()
+        return {
+            "initialized": initialized,
+            "jellyfin": jellyfin,
+            "radarr": self.inspect_arr("radarr", *runtime["radarr"]),
+            "sonarr": self.inspect_arr("sonarr", *runtime["sonarr"]),
+        }
+
     def finish(self) -> bool:
         if self.initialized():
             return False

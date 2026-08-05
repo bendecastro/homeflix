@@ -73,6 +73,24 @@ class JellyfinClient:
         normalized = {posixpath.normpath(value) for value in locations}
         return normalized == {posixpath.normpath(path)}
 
+    def inspect(self, username: str, password: str) -> dict[str, object]:
+        """Authenticate without retaining credentials and inspect exact live library state."""
+        if not self.startup_completed():
+            return {"initialized": False, "libraries_exact": False}
+        # Jellyfin exposes authentication as POST even though this credential exchange is
+        # semantically read-only. Verification performs no other non-GET request.
+        self.authenticate(username, password)
+        existing = self.http.request(
+            "GET", "/Library/VirtualFolders", operation="inspect libraries", headers=self._headers()
+        )
+        if not isinstance(existing, list):
+            raise ApiError("jellyfin", "inspect libraries", None, "invalid_response")
+        exact = len(existing) == len(LIBRARIES) and all(
+            sum(1 for item in existing if self._library_equivalent(item, name, kind, path)) == 1
+            for name, (kind, path) in LIBRARIES.items()
+        )
+        return {"initialized": True, "libraries_exact": exact}
+
     def ensure_libraries(self) -> list[str]:
         existing = self.http.request("GET", "/Library/VirtualFolders", operation="list libraries", headers=self._headers())
         if not isinstance(existing, list) or not all(isinstance(item, dict) and isinstance(item.get("Name"), str) for item in existing):

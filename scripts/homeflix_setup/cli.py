@@ -13,7 +13,7 @@ from typing import Sequence
 from .api import ApiError
 from .command import CommandRunner
 from .compose import configure
-from .core import configure_core, deploy_core
+from .core import configure_core, deploy_core, reconcile_core, verify_core
 from .discover import HostFacts, discover_host
 from .envfile import EnvDocument
 from .host import HostPreparationPlan, apply_host_preparation, plan_host_preparation
@@ -76,6 +76,16 @@ def build_parser() -> argparse.ArgumentParser:
     deploy_parser.add_argument(
         "--dry-run", action="store_true", help="print exact planned commands without probing or changing the host"
     )
+    verify_parser = subparsers.add_parser("verify", help="inspect a deployment phase without changing it")
+    verify_parser.add_argument("phase", choices=("core",))
+    setup_parser = subparsers.add_parser("setup", help="run a resumable convenience setup composition")
+    setup_parser.add_argument("phase", choices=("core",))
+    setup_parser.add_argument("--dry-run", action="store_true")
+    setup_parser.add_argument("--data-root")
+    setup_parser.add_argument("--config-root")
+    setup_parser.add_argument("--cache-root")
+    setup_parser.add_argument("--quality-profile", default="HD-1080p")
+    setup_parser.add_argument("--direct-setup-ports", action="store_true")
     secrets_parser = subparsers.add_parser("secrets", help="explicitly retrieve local credentials")
     secrets_subparsers = secrets_parser.add_subparsers(dest="secrets_command", required=True)
     reveal_parser = secrets_subparsers.add_parser("reveal", help="reveal credentials on /dev/tty only")
@@ -236,6 +246,51 @@ def main(argv: Sequence[str] | None = None, *, repository_root: Path | None = No
                 label="API initialization refused",
                 error=RuntimeError("core APIs could not be configured safely"),
             )
+    elif arguments.command == "verify" and arguments.phase == "core":
+        try:
+            result = verify_core(root)
+        except (OSError, RuntimeError, ValueError, subprocess.SubprocessError):
+            return _input_error(json_output=arguments.json_output, code="verification_refused", label="verification refused", error=RuntimeError("core state could not be verified safely"))
+    elif arguments.command == "setup" and arguments.phase == "core":
+        if arguments.dry_run:
+            result = {
+                "status": "planned", "state_written": False,
+                "phases": ["configure", "preflight:core", "deploy:core", "initialize:core", "verify:core"],
+                "services": ["traefik", "jellyfin", "jellyseerr", "radarr", "sonarr"],
+                "commands": [
+                    ["scripts/homeflix", "configure", "--data-root", "DATA_ROOT", "--config-root", "CONFIG_ROOT", "--cache-root", "CACHE_ROOT"],
+                    ["scripts/homeflix", "preflight", "--phase", "core"],
+                    ["docker", "compose", "--project-name", "homeflix", "up", "--detach", "--no-deps", "traefik", "jellyfin", "jellyseerr", "radarr", "sonarr"],
+                    ["scripts/homeflix", "initialize", "core"], ["scripts/homeflix", "verify", "core"],
+                ],
+                "required_human_inputs": ["DATA_ROOT", "CONFIG_ROOT", "CACHE_ROOT", "quality profile if the default is unsuitable"],
+                "acquisition_mutations": [],
+            }
+        else:
+            try:
+                phases: list[dict[str, object]] = []
+                roots = (arguments.data_root, arguments.config_root, arguments.cache_root)
+                if any(roots):
+                    if not all(roots):
+                        raise ValueError("all three root paths are required when configuring setup")
+                    discovered = discover_host(CommandRunner(), domain=_configured_domain(root))
+                    configured = configure(root, discovered, data_root=arguments.data_root, config_root=arguments.config_root, cache_root=arguments.cache_root, quality_profile=arguments.quality_profile, direct_setup_ports=arguments.direct_setup_ports)
+                    phases.append({"phase": "configure", "status": "complete"})
+                elif not (root / ".env").exists():
+                    raise ValueError("DATA_ROOT, CONFIG_ROOT, and CACHE_ROOT are required for a new setup")
+                else:
+                    phases.append({"phase": "configure", "status": "reused"})
+                config = EnvDocument.load(root / ".env")
+                preflight = run_preflight(config, "core", CommandRunner())
+                phases.append({"phase": "preflight:core", "status": "pass" if preflight.passed else "fail"})
+                if not preflight.passed:
+                    result = {"status": "preflight_failed", "phases": phases, "preflight": preflight.to_dict()}
+                else:
+                    reconciled = reconcile_core(root)
+                    phases.extend([{"phase": "deploy:core", "status": "complete"}, {"phase": "initialize:core", "status": "complete"}, {"phase": "verify:core", "status": "pass" if reconciled.get("status") == "verified" else "fail"}])
+                    result = {"status": reconciled.get("status"), "phases": phases, "result": reconciled}
+            except (ApiError, OSError, RuntimeError, ValueError, subprocess.SubprocessError):
+                return _input_error(json_output=arguments.json_output, code="setup_refused", label="setup refused", error=RuntimeError("core setup could not be completed safely"))
     elif arguments.command == "deploy" and arguments.phase == "core":
         try:
             result = deploy_core(root, dry_run=arguments.dry_run)
@@ -276,6 +331,11 @@ def main(argv: Sequence[str] | None = None, *, repository_root: Path | None = No
                     f"{item['service']}: state={item['current_state']} "
                     f"ready={str(item['ready']).lower()} reason={item['reason']}"
                 )
+    elif arguments.command in {"verify", "setup"}:
+        print(f"Core {arguments.command}: {result['status']}")
+        if arguments.command == "verify":
+            for item in result["checks"]:
+                print(f"{str(item['status']).upper()}: {item['domain']}: {item['reason']}")
     elif arguments.command == "configure":
         for item in result["environment"]["keys"]:
             print(f"{item['name']}: {item['status']}")
@@ -335,4 +395,8 @@ def main(argv: Sequence[str] | None = None, *, repository_root: Path | None = No
         return 0 if result["status"] in {"planned", "ready", "already_ready"} else 1
     if arguments.command == "initialize":
         return 0
+    if arguments.command == "verify":
+        return 0 if result.get("passed") is True else 1
+    if arguments.command == "setup":
+        return 0 if result.get("status") in {"planned", "verified"} else 1
     return 1 if discovered is not None and not discovered.supported else 0

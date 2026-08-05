@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import hashlib
+import json
 import os
 from pathlib import Path
 import re
@@ -13,10 +14,10 @@ import time
 from typing import Callable, Mapping, Sequence
 from urllib import error, request
 
-from .api import ArrClient, JellyfinClient, JellyseerrClient, read_api_key, read_settings_api_key
+from .api import ApiError, ArrClient, JellyfinClient, JellyseerrClient, read_api_key, read_settings_api_key
 from .api.client import Transport, urllib_transport
 from .command import CommandRunner
-from .compose import CORE_SERVICES, compose_command, compose_ps, compose_up
+from .compose import CORE_SERVICES, compose_command, compose_inventory, compose_ps, compose_up
 from .envfile import EnvDocument
 from .preflight import PreflightReport, run_preflight
 from .state import SetupState
@@ -47,6 +48,7 @@ class DeploymentSnapshot:
 
 
 READINESS_TIMEOUT = 90.0
+ACQUISITION_SERVICES = ("gluetun", "qbittorrent", "nzbget", "prowlarr")
 
 HttpProbe = Callable[[str, Mapping[str, str], float], bool]
 StateProbe = Callable[[float], Mapping[str, Mapping[str, str]]]
@@ -398,6 +400,161 @@ def configure_core(
         "sonarr": arr_results["sonarr"],
         "jellyseerr": {"radarr_changed": connected["radarr"], "sonarr_changed": connected["sonarr"], "initialized": was_initialized or initialized_now},
     }
+
+
+def _check(domain: str, passed: bool | None, reason: str) -> dict[str, object]:
+    return {"domain": domain, "status": "pass" if passed is True else "fail" if passed is False else "unknown", "reason": reason}
+
+
+def _inspect_quicksync(root: Path, runner: CommandRunner, project_name: str) -> bool:
+    prefix = compose_command(root, project_name=project_name)
+    rendered = runner.run((*prefix, "config", "--format", "json"), check=False, timeout=30)
+    if rendered.returncode:
+        raise RuntimeError("rendered Compose configuration is unavailable")
+    try:
+        config = json.loads(rendered.stdout)
+        devices = config["services"]["jellyfin"].get("devices", [])
+    except (json.JSONDecodeError, KeyError, TypeError):
+        raise ValueError("rendered Compose configuration was malformed") from None
+    rendered_ok = any(
+        isinstance(item, dict)
+        and item.get("source") == "/dev/dri"
+        and item.get("target") == "/dev/dri"
+        for item in devices
+    ) or "/dev/dri:/dev/dri" in json.dumps(devices, separators=(",", ":"))
+    container = runner.run((*prefix, "ps", "--quiet", "jellyfin"), check=False, timeout=30)
+    identifier = container.stdout.strip()
+    if container.returncode or re.fullmatch(r"[a-f0-9]{12,64}", identifier) is None:
+        return False
+    inspected = runner.run(
+        ("docker", "inspect", "--format", "{{json .HostConfig.Devices}}", identifier),
+        check=False, timeout=30,
+    )
+    if inspected.returncode:
+        raise RuntimeError("live container device mapping is unavailable")
+    try:
+        live_devices = json.loads(inspected.stdout)
+    except json.JSONDecodeError:
+        raise ValueError("live container device mapping was malformed") from None
+    live_ok = isinstance(live_devices, list) and any(
+        isinstance(item, dict)
+        and item.get("PathOnHost") == "/dev/dri"
+        and item.get("PathInContainer") == "/dev/dri"
+        for item in live_devices
+    )
+    return rendered_ok and live_ok
+
+
+def verify_core(
+    repository_root: str | Path,
+    *,
+    runner: CommandRunner | None = None,
+    transports: Mapping[str, Transport] | None = None,
+    api_key_reader: Callable[[str | Path, str, int], str] = read_api_key,
+    settings_key_reader: Callable[[str | Path, int], str] = read_settings_api_key,
+    http_waiter: Callable[..., ReadinessResult] = wait_for_http,
+    readiness_timeout: float = READINESS_TIMEOUT,
+    clock: Callable[[], float] = time.monotonic,
+    quicksync_inspector: Callable[[Path, CommandRunner, str], bool] = _inspect_quicksync,
+) -> dict[str, object]:
+    """Inspect live core state. Checkpoints are never consulted or changed."""
+    root = Path(repository_root).resolve()
+    command_runner = runner or CommandRunner()
+    checks: list[dict[str, object]] = []
+    try:
+        config = _load_private_environment(root / ".env")
+        project_name = config.get("COMPOSE_PROJECT_NAME")
+        project_ok = project_name == "homeflix"
+        inventory = compose_inventory(root, command_runner, project_name=project_name, timeout=readiness_timeout)
+        projects_ok = bool(inventory) and all(item["project"] == "homeflix" for item in inventory)
+        checks.append(_check("compose_project", project_ok and projects_ok, "expected project scope observed" if project_ok and projects_ok else "expected project scope was not observed"))
+    except (OSError, RuntimeError, ValueError, subprocess.SubprocessError):
+        checks = [_check("compose_project", None, "project scope could not be inspected")]
+        checks.extend(_check(f"service:{service}", None, "service readiness could not be inspected") for service in CORE_SERVICES)
+        checks.append(_check("acquisition_absent", None, "project service inventory could not be inspected"))
+        checks.extend(_check(domain, None, f"{domain} state could not be inspected") for domain in ("jellyfin", "radarr", "sonarr", "jellyseerr"))
+        checks.append(_check("quicksync", None, "device selection could not be inspected"))
+        return {"status": "failed", "passed": False, "checks": checks}
+
+    by_service = {item["service"]: item for item in inventory}
+    core_states = {name: by_service.get(name, {}) for name in CORE_SERVICES}
+    try:
+        targets = _readiness_targets(config)
+        deadline = clock() + max(0.0, readiness_timeout)
+        readiness = _initial_readiness(core_states, targets, http_waiter, deadline=deadline, clock=clock)
+        for service in CORE_SERVICES:
+            item = core_states[service]
+            known = item.get("state") == "running" and item.get("health") in {"", "healthy"}
+            passed = known and readiness[service].ready
+            checks.append(_check(f"service:{service}", passed, "service is healthy and ready" if passed else "service is not healthy and ready"))
+    except (OSError, RuntimeError, ValueError, subprocess.SubprocessError):
+        for service in CORE_SERVICES:
+            checks.append(_check(f"service:{service}", None, "service readiness could not be inspected"))
+
+    absent = all(name not in by_service for name in ACQUISITION_SERVICES)
+    checks.append(_check("acquisition_absent", absent, "acquisition services are absent" if absent else "an acquisition service exists in this project"))
+
+    values = {key: config.get(key) for key in ("JELLYFIN_ADMIN_USER", "JELLYFIN_ADMIN_PASSWORD", "CONFIG_ROOT", "PUID", "QUALITY_PROFILE")}
+    chosen = dict(transports or {})
+    runtime: dict[str, tuple[dict[str, object], dict[str, object]]] = {}
+    try:
+        if any(not value for value in values.values()) or re.fullmatch(r"[0-9]+", values["PUID"] or "") is None:
+            raise ValueError("required verification configuration is missing")
+        uid = int(values["PUID"] or "")
+        jf = JellyfinClient(transport=chosen.get("jellyfin", urllib_transport)).inspect(values["JELLYFIN_ADMIN_USER"] or "", values["JELLYFIN_ADMIN_PASSWORD"] or "")
+        jf_ok = jf["initialized"] is True and jf["libraries_exact"] is True
+        checks.append(_check("jellyfin", jf_ok, "initialized with exact libraries" if jf_ok else "initialization or exact libraries differ"))
+        for service, media_path in (("radarr", "/data/media/movies"), ("sonarr", "/data/media/tv")):
+            key = api_key_reader(values["CONFIG_ROOT"] or "", service, uid)
+            domain = config.get("DOMAIN") or ""
+            inspected = ArrClient(service, "http://127.0.0.1", key, headers={"Host": f"{service}.{domain}"}, transport=chosen.get(service, urllib_transport)).inspect(values["QUALITY_PROFILE"] or "", media_path)
+            ok = all(inspected[name] is True for name in ("profile_exact", "root_exact", "media_settings", "completed_handling"))
+            checks.append(_check(service, ok, "selected profile, root, and media settings match" if ok else "selected profile, root, or media settings differ"))
+            if inspected["runtime_root"] is not None:
+                runtime[service] = (inspected["runtime_profile"], inspected["runtime_root"])  # type: ignore[assignment]
+        seerr = JellyseerrClient(headers={"Host": f"jellyseerr.{config.get('DOMAIN') or ''}"}, transport=chosen.get("jellyseerr", urllib_transport))
+        seerr.authorize(settings_key_reader(values["CONFIG_ROOT"] or "", uid))
+        inspected_seerr = seerr.inspect(runtime)
+        seerr_ok = all(value is True for value in inspected_seerr.values())
+        checks.append(_check("jellyseerr", seerr_ok, "initialized with exact internal default services" if seerr_ok else "initialization or internal default services differ"))
+    except (ApiError, OSError, RuntimeError, ValueError, KeyError, TypeError):
+        existing = {item["domain"] for item in checks}
+        for domain in ("jellyfin", "radarr", "sonarr", "jellyseerr"):
+            if domain not in existing:
+                checks.append(_check(domain, None, f"{domain} state could not be inspected"))
+
+    override = root / "docker-compose.override.yml"
+    quicksync_selected = override.exists() and "/dev/dri:/dev/dri" in override.read_text(encoding="utf-8")
+    if quicksync_selected:
+        try:
+            quicksync_ok = quicksync_inspector(root, command_runner, "homeflix")
+            checks.append(_check("quicksync", quicksync_ok, "rendered and live device mappings match" if quicksync_ok else "rendered or live device mapping is missing"))
+        except (OSError, RuntimeError, ValueError, subprocess.SubprocessError):
+            checks.append(_check("quicksync", None, "device mapping could not be inspected"))
+    else:
+        checks.append(_check("quicksync", True, "not selected"))
+    passed = all(item["status"] == "pass" for item in checks)
+    return {"status": "verified" if passed else "failed", "passed": passed, "checks": checks}
+
+
+def reconcile_core(repository_root: str | Path, **kwargs: object) -> dict[str, object]:
+    """Repair safe core drift with existing idempotent primitives, then verify live state."""
+    root = Path(repository_root).resolve()
+    deploy = deploy_core(root, **{key: value for key, value in kwargs.items() if key in {"runner", "preflight_runner", "http_waiter", "container_waiter", "readiness_timeout", "clock", "snapshotter"}})
+    if deploy.get("status") not in {"ready", "already_ready"}:
+        return {"status": "deployment_failed", "deploy": deploy}
+    configured = configure_core(root, **{key: value for key, value in kwargs.items() if key in {"transports", "api_key_reader", "settings_key_reader"}})
+    verified = verify_core(root, **{key: value for key, value in kwargs.items() if key in {"runner", "transports", "api_key_reader", "settings_key_reader", "http_waiter", "readiness_timeout", "clock", "quicksync_inspector"}})
+    if not verified["passed"]:
+        return {"status": "verification_failed", "deploy": deploy, "configure": configured, "verify": verified}
+    state_path = root / ".homeflix" / "setup.json"
+    state = SetupState.load(state_path)
+    state.checkpoints.update({"core_containers_started": True, "core_api_configured": True, "core_verified": True})
+    try:
+        state.save(state_path)
+    except (OSError, ValueError):
+        return {"status": "checkpoint_failed", "deploy": deploy, "configure": configured, "verify": verified, "reason": "Verified core state could not be checkpointed"}
+    return {"status": "verified", "deploy": deploy, "configure": configured, "verify": verified}
 
 
 def deploy_core(

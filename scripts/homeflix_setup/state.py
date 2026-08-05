@@ -14,6 +14,7 @@ from typing import Any
 CURRENT_SCHEMA_VERSION = 1
 
 _CHECKPOINT_NAME = re.compile(r"^[a-z][a-z0-9]*(?:[_-][a-z0-9]+)*$")
+_CHECKPOINTS = {"configured", "core_containers_started", "core_api_configured", "core_verified"}
 _HOST_FACT_TYPES: dict[str, type[object]] = {
     "os_id": str,
     "os_version_id": str,
@@ -34,7 +35,7 @@ def _validate_checkpoints(checkpoints: object) -> None:
     if not isinstance(checkpoints, dict):
         raise ValueError("setup state checkpoints must be an object")
     for name, completed in checkpoints.items():
-        if not isinstance(name, str) or _CHECKPOINT_NAME.fullmatch(name) is None:
+        if not isinstance(name, str) or _CHECKPOINT_NAME.fullmatch(name) is None or name not in _CHECKPOINTS:
             raise ValueError(f"checkpoint name {name!r} is not permitted")
         if type(completed) is not bool:
             raise ValueError(f"checkpoint {name!r} must be boolean")

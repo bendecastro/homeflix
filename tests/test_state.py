@@ -176,6 +176,13 @@ class SetupStateTests(TemporaryDirectoryTestCase, unittest.TestCase):
                 with self.assertRaises(ValueError):
                     SetupState.load(path)
 
+    def test_secret_like_checkpoint_names_are_rejected(self) -> None:
+        path = self.temp_path / "setup.json"
+        for name in ("api_key", "password_saved", "jellyfin_token", "env_value", "credential"):
+            with self.subTest(name=name):
+                with self.assertRaisesRegex(ValueError, "not permitted"):
+                    SetupState(checkpoints={name: True}).save(path)
+
     def test_checkpoints_require_slug_names_and_boolean_values(self) -> None:
         path = self.temp_path / "setup.json"
         SetupState(checkpoints={"core_containers_started": True}).save(path)

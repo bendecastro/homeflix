@@ -36,6 +36,31 @@ class StatusCliTests(unittest.TestCase):
             self.assertFalse(status["state_exists"])
             self.assertFalse((repository_root / ".homeflix" / "setup.json").exists())
 
+    def test_status_never_reads_or_emits_environment_values(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            secret = "ENV_SECRET_MUST_NOT_APPEAR"
+            (root / ".env").write_text(f"JELLYFIN_ADMIN_PASSWORD={secret}\nDATA_ROOT=/private/root\n", encoding="utf-8")
+            code, stdout, stderr = run_main("--json", "status", repository_root=root)
+        self.assertEqual(code, 0)
+        self.assertNotIn(secret, stdout + stderr)
+        self.assertNotIn("/private/root", stdout + stderr)
+
+    def test_setup_core_dry_run_has_ordered_core_only_plan_and_no_calls_or_writes(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            with patch("scripts.homeflix_setup.cli.discover_host", side_effect=AssertionError("must not discover")), patch("scripts.homeflix_setup.cli.configure", side_effect=AssertionError("must not configure")), patch("scripts.homeflix_setup.cli.run_preflight", side_effect=AssertionError("must not preflight")), patch("scripts.homeflix_setup.cli.reconcile_core", side_effect=AssertionError("must not reconcile")):
+                code, stdout, stderr = run_main("--json", "setup", "core", "--dry-run", repository_root=root)
+            payload = parse_single_json(stdout)
+            self.assertEqual(code, 0, stderr)
+            self.assertEqual(payload["phases"], ["configure", "preflight:core", "deploy:core", "initialize:core", "verify:core"])
+            self.assertEqual(payload["acquisition_mutations"], [])
+            self.assertFalse(payload["state_written"])
+            self.assertEqual(list(root.iterdir()), [])
+            rendered = json.dumps(payload).casefold()
+            for forbidden in ("gluetun", "qbittorrent", "nzbget", "prowlarr"):
+                self.assertNotIn(forbidden, rendered)
+
     def test_json_status_reports_corrupt_and_future_state_as_one_error_object(self) -> None:
         invalid_contents = (
             "not json",

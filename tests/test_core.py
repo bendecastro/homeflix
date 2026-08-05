@@ -17,11 +17,14 @@ from scripts.homeflix_setup.core import (
     _readiness_targets,
     capture_deployment_snapshot,
     deploy_core,
+    reconcile_core,
+    verify_core,
     wait_for_container,
     wait_for_http,
 )
 from scripts.homeflix_setup.envfile import EnvDocument
 from scripts.homeflix_setup.preflight import CheckResult, PreflightReport
+from scripts.homeflix_setup.state import SetupState
 
 
 class FakeRunner:
@@ -539,6 +542,112 @@ class CoreDeploymentTests(unittest.TestCase):
             result["commands"][-1][-8:], ["up", "--detach", "--no-deps", *CORE_SERVICES]
         )
         self.assertFalse((root / ".homeflix" / "setup.json").exists())
+
+
+class CoreVerificationAndResumeTests(unittest.TestCase):
+    def make_root(self):
+        temporary = tempfile.TemporaryDirectory()
+        root = Path(temporary.name)
+        (root / ".env").write_text(
+            "COMPOSE_PROJECT_NAME=homeflix\nDOMAIN=fixture.test\n"
+            "JELLYFIN_ADMIN_USER=fixture\nJELLYFIN_ADMIN_PASSWORD=NOT_REAL\n"
+            "CONFIG_ROOT=/fixture/config\nPUID=1000\nQUALITY_PROFILE=Fixture HD\n",
+            encoding="utf-8",
+        )
+        (root / ".env").chmod(0o600)
+        return temporary, root
+
+    def test_verify_uses_live_project_readiness_and_exact_api_inspection_without_state_write(self):
+        temporary, root = self.make_root(); self.addCleanup(temporary.cleanup)
+        state_path = root / ".homeflix" / "setup.json"
+        SetupState(checkpoints={"core_verified": False}).save(state_path)
+        before = state_path.read_bytes()
+
+        class Runner:
+            def run(self, argv, **kwargs):
+                records = [
+                    {"Service": service, "State": "running", "Health": "healthy", "Project": "homeflix"}
+                    for service in CORE_SERVICES
+                ]
+                return subprocess.CompletedProcess(argv, 0, json.dumps(records), "")
+        class Jellyfin:
+            def __init__(self, **kwargs): pass
+            def inspect(self, username, password): return {"initialized": True, "libraries_exact": True}
+        class Arr:
+            def __init__(self, service, *args, **kwargs): self.service = service
+            def inspect(self, profile, path):
+                return {"profile_exact": True, "root_exact": True, "media_settings": True,
+                        "completed_handling": True, "runtime_profile": {"id": 4, "name": profile},
+                        "runtime_root": {"id": 8, "path": path}}
+        class Seerr:
+            def __init__(self, **kwargs): pass
+            def authorize(self, key): pass
+            def inspect(self, runtime): return {"initialized": True, "jellyfin": True, "radarr": True, "sonarr": True}
+        with patch("scripts.homeflix_setup.core.JellyfinClient", Jellyfin), patch("scripts.homeflix_setup.core.ArrClient", Arr), patch("scripts.homeflix_setup.core.JellyseerrClient", Seerr):
+            result = verify_core(
+                root, runner=Runner(), api_key_reader=lambda *args: "FIXTURE_API_KEY_1234567890ABCDE",
+                settings_key_reader=lambda *args: "FIXTURE_API_KEY_1234567890ABCDE",
+                http_waiter=lambda *args, **kwargs: ReadinessResult(True, "ready"),
+            )
+        self.assertTrue(result["passed"])
+        self.assertEqual(state_path.read_bytes(), before)
+        self.assertEqual({item["domain"] for item in result["checks"]}, {
+            "compose_project", "service:traefik", "service:jellyfin", "service:jellyseerr",
+            "service:radarr", "service:sonarr", "acquisition_absent", "jellyfin", "radarr",
+            "sonarr", "jellyseerr", "quicksync",
+        })
+
+    def test_verify_requires_rendered_and_live_quicksync_mapping_when_selected(self):
+        temporary, root = self.make_root(); self.addCleanup(temporary.cleanup)
+        (root / "docker-compose.override.yml").write_text("services:\n  jellyfin:\n    devices:\n      - /dev/dri:/dev/dri\n", encoding="utf-8")
+        class Runner:
+            def run(self, argv, **kwargs):
+                records = [{"Service": service, "State": "running", "Health": "healthy", "Project": "homeflix"} for service in CORE_SERVICES]
+                return subprocess.CompletedProcess(argv, 0, json.dumps(records), "")
+        inspected = []
+        class Jellyfin:
+            def __init__(self, **kwargs): pass
+            def inspect(self, *args): return {"initialized": True, "libraries_exact": True}
+        class Arr:
+            def __init__(self, service, *args, **kwargs): self.service = service
+            def inspect(self, profile, path): return {"profile_exact": True, "root_exact": True, "media_settings": True, "completed_handling": True, "runtime_profile": {"id": 1, "name": profile}, "runtime_root": {"id": 2, "path": path}}
+        class Seerr:
+            def __init__(self, **kwargs): pass
+            def authorize(self, key): pass
+            def inspect(self, runtime): return {"initialized": True, "jellyfin": True, "radarr": True, "sonarr": True}
+        with patch("scripts.homeflix_setup.core.JellyfinClient", Jellyfin), patch("scripts.homeflix_setup.core.ArrClient", Arr), patch("scripts.homeflix_setup.core.JellyseerrClient", Seerr):
+            result = verify_core(root, runner=Runner(), api_key_reader=lambda *args: "FIXTURE_API_KEY_1234567890ABCDE", settings_key_reader=lambda *args: "FIXTURE_API_KEY_1234567890ABCDE", http_waiter=lambda *args, **kwargs: ReadinessResult(True, "ready"), quicksync_inspector=lambda *args: inspected.append(args) or True)
+        self.assertTrue(inspected)
+        self.assertEqual(next(item for item in result["checks"] if item["domain"] == "quicksync")["status"], "pass")
+
+    def test_verify_fails_when_acquisition_service_exists_in_project(self):
+        temporary, root = self.make_root(); self.addCleanup(temporary.cleanup)
+        class Runner:
+            def run(self, argv, **kwargs):
+                records = [{"Service": service, "State": "running", "Health": "healthy", "Project": "homeflix"} for service in (*CORE_SERVICES, "gluetun")]
+                return subprocess.CompletedProcess(argv, 0, json.dumps(records), "")
+        result = verify_core(root, runner=Runner(), http_waiter=lambda *args, **kwargs: ReadinessResult(True, "ready"))
+        check = next(item for item in result["checks"] if item["domain"] == "acquisition_absent")
+        self.assertEqual(check["status"], "fail")
+
+    def test_reconcile_repairs_from_each_checkpoint_without_trusting_it(self):
+        checkpoints = ({}, {"configured": True}, {"core_containers_started": True},
+                       {"core_api_configured": True}, {"core_verified": True})
+        for initial in checkpoints:
+            with self.subTest(initial=initial):
+                temporary, root = self.make_root()
+                try:
+                    SetupState(checkpoints=dict(initial)).save(root / ".homeflix" / "setup.json")
+                    with patch("scripts.homeflix_setup.core.deploy_core", return_value={"status": "already_ready"}) as deploy, patch("scripts.homeflix_setup.core.configure_core", return_value={"status": "configured"}) as configure_api, patch("scripts.homeflix_setup.core.verify_core", return_value={"status": "verified", "passed": True, "checks": []}) as verify:
+                        result = reconcile_core(root)
+                    self.assertEqual(result["status"], "verified")
+                    deploy.assert_called_once(); configure_api.assert_called_once(); verify.assert_called_once()
+                    saved = SetupState.load(root / ".homeflix" / "setup.json")
+                    self.assertTrue(saved.checkpoints["core_containers_started"])
+                    self.assertTrue(saved.checkpoints["core_api_configured"])
+                    self.assertTrue(saved.checkpoints["core_verified"])
+                finally:
+                    temporary.cleanup()
 
 
 if __name__ == "__main__":

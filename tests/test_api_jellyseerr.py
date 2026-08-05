@@ -112,6 +112,22 @@ class JellyseerrApiTests(unittest.TestCase):
         self.assertTrue(all(request.headers.get("X-api-key") == KEY for request in transport.requests))
         self.assertTrue(all("apikey=" not in request.full_url.casefold() for request in transport.requests))
 
+    def test_inspection_is_authorized_get_only_and_validates_exact_defaults(self):
+        seed = JellyseerrClient()
+        runtime = {service: profile_root(service) for service in ("radarr", "sonarr")}
+        radarr = seed._payload("radarr", KEY, *runtime["radarr"]); radarr["id"] = 3
+        sonarr = seed._payload("sonarr", KEY, *runtime["sonarr"]); sonarr["id"] = 4
+        transport = QueueTransport([
+            (200, fixture("jellyseerr-public-complete.json")),
+            (200, fixture("jellyseerr-jellyfin-correct.json")),
+            (200, [radarr]), (200, [sonarr]),
+        ])
+        client = JellyseerrClient(transport=transport); client.authorize(KEY)
+        result = client.inspect(runtime)
+        self.assertTrue(all(result.values()))
+        self.assertTrue(all(request.method == "GET" for request in transport.requests))
+        self.assertTrue(all(request.headers.get("X-api-key") == KEY for request in transport.requests))
+
     def test_equivalent_servers_and_initialized_state_are_rerun_noops(self):
         profile, root = profile_root("radarr")
         seed = JellyseerrClient()

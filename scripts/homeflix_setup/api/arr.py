@@ -84,6 +84,27 @@ class ArrClient:
         self.http.request("PUT", endpoint, operation=f"update {operation}", payload=updated)
         return True
 
+    def inspect(self, profile_name: str, root_path: str) -> dict[str, object]:
+        """Inspect setup-owned Arr state using GET requests only."""
+        profile = self.profile(profile_name)
+        roots = self.http.request("GET", "/api/v3/rootfolder", operation="inspect root folders")
+        root_matches = [
+            item for item in roots
+            if isinstance(item, dict) and item.get("path") == root_path and type(item.get("id")) is int
+        ] if isinstance(roots, list) else []
+        media = self.http.request("GET", "/api/v3/config/mediamanagement", operation="inspect media management")
+        completed = self.http.request("GET", "/api/v3/config/downloadclient", operation="inspect completed handling")
+        rename = "renameMovies" if self.service == "radarr" else "renameEpisodes"
+        return {
+            "profile": profile["name"],
+            "profile_exact": True,
+            "root_exact": len(root_matches) == 1,
+            "media_settings": isinstance(media, dict) and media.get(rename) is True and media.get("copyUsingHardlinks") is True,
+            "completed_handling": isinstance(completed, dict) and completed.get("enableCompletedDownloadHandling") is True,
+            "runtime_profile": profile,
+            "runtime_root": ({"id": root_matches[0]["id"], "path": root_path} if len(root_matches) == 1 else None),
+        }
+
     def configure(self, profile_name: str, root_path: str) -> dict[str, object]:
         profile = self.profile(profile_name)
         root = self.ensure_root(root_path)
