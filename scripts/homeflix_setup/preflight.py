@@ -90,6 +90,15 @@ def _path(config: EnvDocument | Mapping[str, object], key: str) -> Path | None:
     return Path(value).expanduser().resolve()
 
 
+def _environment_path(config: EnvDocument | Mapping[str, object]) -> Path | None:
+    if isinstance(config, EnvDocument):
+        return config.source_path
+    value = config.get("_ENV_FILE")
+    if not isinstance(value, (str, os.PathLike)):
+        return None
+    return Path(value).expanduser().resolve()
+
+
 def _identity(value: object) -> int | None:
     if isinstance(value, bool):
         return None
@@ -174,6 +183,29 @@ def run_preflight(
             _result(results, name, "pass", name.replace("_", " ") + " is available")
         else:
             _result(results, name, "fail", name.replace("_", " ") + " is unavailable")
+
+    environment_path = _environment_path(config)
+    if environment_path is None:
+        _result(results, "compose_config", "fail", "Compose configuration location is unavailable")
+    else:
+        compose_command = (
+            "docker",
+            "compose",
+            "--project-directory",
+            str(environment_path.parent),
+            "--env-file",
+            str(environment_path),
+            "config",
+            "--quiet",
+        )
+        try:
+            compose_result = runner.run(compose_command, check=False, timeout=30)
+        except (FileNotFoundError, OSError, subprocess.TimeoutExpired):
+            compose_result = None
+        if compose_result is not None and compose_result.returncode == 0:
+            _result(results, "compose_config", "pass", "Compose configuration is valid")
+        else:
+            _result(results, "compose_config", "fail", "Compose configuration validation failed")
 
     puid = _identity(_value(config, "PUID"))
     pgid = _identity(_value(config, "PGID"))
@@ -262,10 +294,23 @@ def run_preflight(
             except OSError:
                 _result(results, "hardlink", "fail", "Hardlink probe failed")
             finally:
+                cleanup_failed = False
                 for probe_path in (link, source):
                     try:
                         probe_path.unlink(missing_ok=True)
                     except OSError:
-                        pass
+                        cleanup_failed = True
+                for probe_path in (link, source):
+                    try:
+                        cleanup_failed = probe_path.exists() or cleanup_failed
+                    except OSError:
+                        cleanup_failed = True
+                if cleanup_failed:
+                    _result(
+                        results,
+                        "hardlink_cleanup",
+                        "fail",
+                        "Hardlink probe cleanup failed; remove remaining probe files",
+                    )
 
     return PreflightReport(phase, tuple(results))

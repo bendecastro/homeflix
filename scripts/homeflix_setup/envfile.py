@@ -78,6 +78,7 @@ class EnvDocument:
     """A line-preserving dotenv document with unique-key updates."""
 
     lines: list[str]
+    source_path: Path | None = None
 
     @classmethod
     def parse(cls, contents: str) -> "EnvDocument":
@@ -85,7 +86,8 @@ class EnvDocument:
 
     @classmethod
     def load(cls, path: str | os.PathLike[str]) -> "EnvDocument":
-        return cls.parse(Path(path).read_text(encoding="utf-8"))
+        source_path = Path(path).resolve()
+        return cls(source_path.read_text(encoding="utf-8").splitlines(keepends=True), source_path)
 
     def get(self, key: str) -> str | None:
         found: str | None = None
@@ -121,7 +123,7 @@ class EnvDocument:
                 output[-1] += "\n"
             for key, value in remaining.items():
                 output.append(f"{key}={_quote(str(value))}\n")
-        return EnvDocument(output)
+        return EnvDocument(output, self.source_path)
 
     def render(self) -> str:
         return "".join(self.lines)
