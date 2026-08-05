@@ -6,6 +6,9 @@ import json
 import tempfile
 from pathlib import Path
 import unittest
+from unittest.mock import patch
+
+from scripts.homeflix_setup.api import ApiError
 
 from scripts.homeflix_setup.cli import main
 from tests.helpers import REPOSITORY_ROOT, parse_single_json, run_cli
@@ -111,6 +114,27 @@ class StatusCliTests(unittest.TestCase):
                     self.assertEqual(set(error), {"error"})
                     self.assertIn(error["error"]["code"], {"discovery_refused", "configuration_refused"})
                     self.assertEqual(error["error"]["message"], "LAN DNS domain is invalid")
+
+    def test_initialize_core_renders_structured_secret_free_results_and_errors(self) -> None:
+        result = {
+            "status": "configured",
+            "jellyfin": {"administrator_created": True, "libraries": ["Movies", "Shows", "Music"]},
+            "radarr": {"profile": "Fixture HD", "root": "/data/media/movies"},
+            "sonarr": {"profile": "Fixture HD", "root": "/data/media/tv"},
+            "jellyseerr": {"initialized": True},
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            with patch("scripts.homeflix_setup.cli.configure_core", return_value=result):
+                code, stdout, stderr = run_main("--json", "initialize", "core", repository_root=root)
+            self.assertEqual(code, 0)
+            self.assertEqual(stderr, "")
+            self.assertEqual(json.loads(stdout)["status"], "configured")
+            with patch("scripts.homeflix_setup.cli.configure_core", side_effect=ApiError("radarr", "select quality profile", None, "profile_not_found")):
+                code, stdout, stderr = run_main("--json", "initialize", "core", repository_root=root)
+            self.assertEqual(code, 1)
+            self.assertEqual(stderr, "")
+            self.assertEqual(json.loads(stdout)["error"]["code"], "profile_not_found")
 
     def test_launcher_works_cross_cwd_without_changing_repository_state(self) -> None:
         state_path = REPOSITORY_ROOT / ".homeflix" / "setup.json"

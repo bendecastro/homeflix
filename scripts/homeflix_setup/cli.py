@@ -10,9 +10,10 @@ import subprocess
 import sys
 from typing import Sequence
 
+from .api import ApiError
 from .command import CommandRunner
 from .compose import configure
-from .core import deploy_core
+from .core import configure_core, deploy_core
 from .discover import HostFacts, discover_host
 from .envfile import EnvDocument
 from .host import HostPreparationPlan, apply_host_preparation, plan_host_preparation
@@ -64,6 +65,10 @@ def build_parser() -> argparse.ArgumentParser:
         "preflight", help="validate configuration and storage without starting containers"
     )
     preflight_parser.add_argument("--phase", choices=("core", "acquisition"), default="core")
+    initialize_parser = subparsers.add_parser(
+        "initialize", help="reconcile application APIs after core deployment"
+    )
+    initialize_parser.add_argument("phase", choices=("core",))
     deploy_parser = subparsers.add_parser(
         "deploy", help="reconcile an explicit deployment phase allowlist"
     )
@@ -214,6 +219,23 @@ def main(argv: Sequence[str] | None = None, *, repository_root: Path | None = No
                 label="preflight refused",
                 error=error,
             )
+    elif arguments.command == "initialize" and arguments.phase == "core":
+        try:
+            result = configure_core(root)
+        except ApiError as error:
+            return _input_error(
+                json_output=arguments.json_output,
+                code=error.code,
+                label="API initialization refused",
+                error=error,
+            )
+        except (OSError, RuntimeError, ValueError):
+            return _input_error(
+                json_output=arguments.json_output,
+                code="initialization_refused",
+                label="API initialization refused",
+                error=RuntimeError("core APIs could not be configured safely"),
+            )
     elif arguments.command == "deploy" and arguments.phase == "core":
         try:
             result = deploy_core(root, dry_run=arguments.dry_run)
@@ -234,6 +256,12 @@ def main(argv: Sequence[str] | None = None, *, repository_root: Path | None = No
         if preparation.refusal:
             print(f"homeflix: {preparation.refusal['message']}", file=sys.stderr)
             print(f"Action: {preparation.refusal['action']}", file=sys.stderr)
+    elif arguments.command == "initialize":
+        print("Core API initialization: " + str(result["status"]))
+        print("Jellyfin libraries: " + " ".join(result["jellyfin"]["libraries"]))
+        for service in ("radarr", "sonarr"):
+            print(f"{service}: profile={result[service]['profile']} root={result[service]['root']}")
+        print("Jellyseerr initialized: " + str(result["jellyseerr"]["initialized"]).lower())
     elif arguments.command == "deploy":
         if result["status"] == "planned":
             print("Core services: " + " ".join(result["services"]))
@@ -305,4 +333,6 @@ def main(argv: Sequence[str] | None = None, *, repository_root: Path | None = No
         return 0 if preflight.passed else 1
     if arguments.command == "deploy":
         return 0 if result["status"] in {"planned", "ready", "already_ready"} else 1
+    if arguments.command == "initialize":
+        return 0
     return 1 if discovered is not None and not discovered.supported else 0

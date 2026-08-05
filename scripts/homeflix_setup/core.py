@@ -6,12 +6,15 @@ from dataclasses import dataclass
 import hashlib
 import os
 from pathlib import Path
+import re
 import stat
 import subprocess
 import time
 from typing import Callable, Mapping, Sequence
 from urllib import error, request
 
+from .api import ArrClient, JellyfinClient, JellyseerrClient, read_api_key, read_settings_api_key
+from .api.client import Transport, urllib_transport
 from .command import CommandRunner
 from .compose import CORE_SERVICES, compose_command, compose_ps, compose_up
 from .envfile import EnvDocument
@@ -302,6 +305,90 @@ def _post_start_readiness(
         url, headers = targets[service]
         readiness[service] = http_waiter(url, headers=headers, timeout=http_timeout)
     return readiness
+
+
+def _load_private_environment(path: Path) -> EnvDocument:
+    captured = _read_artifact(path)
+    assert captured is not None
+    raw, identity = captured
+    try:
+        metadata = path.stat(follow_symlinks=False)
+        if (metadata.st_dev, metadata.st_ino) != (identity.device, identity.inode):
+            raise ValueError("environment file changed while being read")
+        if metadata.st_mode & stat.S_IROTH:
+            raise ValueError("environment file permissions are unsafe")
+        document = EnvDocument.parse(raw.decode("utf-8"))
+    except UnicodeDecodeError:
+        raise ValueError("environment configuration is not valid UTF-8") from None
+    document.source_path = path
+    return document
+
+
+def configure_core(
+    repository_root: str | Path,
+    *,
+    transports: Mapping[str, Transport] | None = None,
+    api_key_reader: Callable[[str | Path], str] = read_api_key,
+    settings_key_reader: Callable[[str | Path], str] = read_settings_api_key,
+) -> dict[str, object]:
+    """Reconcile core application APIs after the explicit container checkpoint."""
+
+    root = Path(repository_root).resolve()
+    state = SetupState.load(root / ".homeflix" / "setup.json")
+    if state.checkpoints.get("core_containers_started") is not True:
+        raise ValueError("core containers must be live before API configuration")
+    config = _load_private_environment(root / ".env")
+    required = ("JELLYFIN_ADMIN_USER", "JELLYFIN_ADMIN_PASSWORD", "CONFIG_ROOT", "QUALITY_PROFILE", "DOMAIN")
+    values = {key: config.get(key) for key in required}
+    if any(not value for value in values.values()):
+        raise ValueError("required core API configuration is missing")
+    config_root = Path(values["CONFIG_ROOT"] or "")
+    if not config_root.is_absolute():
+        raise ValueError("CONFIG_ROOT must be absolute")
+    domain = values["DOMAIN"] or ""
+    if not re.fullmatch(r"[A-Za-z0-9](?:[A-Za-z0-9.-]{0,251}[A-Za-z0-9])?", domain):
+        raise ValueError("DOMAIN is invalid")
+    selected = values["QUALITY_PROFILE"] or ""
+    chosen_transports = dict(transports or {})
+    jellyfin = JellyfinClient(transport=chosen_transports.get("jellyfin", urllib_transport))
+    created_admin = jellyfin.initialize(values["JELLYFIN_ADMIN_USER"] or "", values["JELLYFIN_ADMIN_PASSWORD"] or "")
+    libraries = jellyfin.ensure_libraries()
+
+    arr_results: dict[str, dict[str, object]] = {}
+    runtime: dict[str, tuple[str, dict[str, object], dict[str, object]]] = {}
+    for service, media_path in (("radarr", "/data/media/movies"), ("sonarr", "/data/media/tv")):
+        key = api_key_reader(config_root / service / "config.xml")
+        client = ArrClient(
+            service, "http://127.0.0.1", key,
+            headers={"Host": f"{service}.{domain}"},
+            transport=chosen_transports.get(service, urllib_transport),
+        )
+        result = client.configure(selected, media_path)
+        arr_results[service] = result
+        if client.selected_profile is None or client.selected_root is None:
+            raise RuntimeError("Arr configuration did not produce runtime selections")
+        runtime[service] = (key, client.selected_profile, client.selected_root)
+
+    jellyseerr = JellyseerrClient(
+        headers={"Host": f"jellyseerr.{domain}"},
+        transport=chosen_transports.get("jellyseerr", urllib_transport),
+    )
+    was_initialized = jellyseerr.initialized()
+    if not was_initialized:
+        jellyseerr.authenticate_jellyfin(values["JELLYFIN_ADMIN_USER"] or "", values["JELLYFIN_ADMIN_PASSWORD"] or "")
+    jellyseerr.authorize(settings_key_reader(config_root / "jellyseerr" / "settings.json"))
+    connected: dict[str, bool] = {}
+    for service in ("radarr", "sonarr"):
+        key, profile, media_root = runtime[service]
+        connected[service] = jellyseerr.ensure_arr(service, key, profile, media_root)
+    initialized_now = jellyseerr.finish()
+    return {
+        "status": "configured",
+        "jellyfin": {"administrator_created": created_admin, "libraries": libraries},
+        "radarr": arr_results["radarr"],
+        "sonarr": arr_results["sonarr"],
+        "jellyseerr": {"radarr_changed": connected["radarr"], "sonarr_changed": connected["sonarr"], "initialized": was_initialized or initialized_now},
+    }
 
 
 def deploy_core(
