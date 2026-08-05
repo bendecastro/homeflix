@@ -116,7 +116,11 @@ services:
       TORRENTING_PORT: ${TORRENT_PORT:-6881}
     volumes:
       - ${CONFIG_ROOT}/qbittorrent:/config
-      - ${DATA_ROOT}/torrents:/data/torrents
+      - type: bind
+        source: ${DATA_ROOT}/torrents
+        target: /data/torrents
+        bind:
+          create_host_path: false
     restart: unless-stopped
 
   nzbget:
@@ -129,7 +133,11 @@ services:
     environment: *common-env
     volumes:
       - ${CONFIG_ROOT}/nzbget:/config
-      - ${DATA_ROOT}/usenet:/data/usenet
+      - type: bind
+        source: ${DATA_ROOT}/usenet
+        target: /data/usenet
+        bind:
+          create_host_path: false
     restart: unless-stopped
 
   prowlarr:
@@ -153,7 +161,11 @@ services:
     environment: *common-env
     volumes:
       - ${CONFIG_ROOT}/radarr:/config
-      - ${DATA_ROOT}:/data
+      - type: bind
+        source: ${DATA_ROOT}
+        target: /data
+        bind:
+          create_host_path: false
     networks:
       - traefik-network
     restart: unless-stopped
@@ -168,7 +180,11 @@ services:
     environment: *common-env
     volumes:
       - ${CONFIG_ROOT}/sonarr:/config
-      - ${DATA_ROOT}:/data
+      - type: bind
+        source: ${DATA_ROOT}
+        target: /data
+        bind:
+          create_host_path: false
     networks:
       - traefik-network
     restart: unless-stopped
@@ -183,7 +199,11 @@ services:
     environment: *common-env
     volumes:
       - ${CONFIG_ROOT}/lidarr:/config
-      - ${DATA_ROOT}:/data
+      - type: bind
+        source: ${DATA_ROOT}
+        target: /data
+        bind:
+          create_host_path: false
     networks:
       - traefik-network
     restart: unless-stopped
@@ -199,7 +219,11 @@ services:
     environment: *common-env
     volumes:
       - ${CONFIG_ROOT}/bazarr:/config
-      - ${DATA_ROOT}/media:/data/media
+      - type: bind
+        source: ${DATA_ROOT}/media
+        target: /data/media
+        bind:
+          create_host_path: false
     networks:
       - traefik-network
     restart: unless-stopped
@@ -220,7 +244,12 @@ services:
     volumes:
       - ${CONFIG_ROOT}/jellyfin:/config
       - ${CACHE_ROOT}/jellyfin:/cache
-      - ${DATA_ROOT}/media:/data/media:ro
+      - type: bind
+        source: ${DATA_ROOT}/media
+        target: /data/media
+        read_only: true
+        bind:
+          create_host_path: false
     # Hardware transcoding (Intel QuickSync): uncomment once verified on the host.
     # devices:
     #   - /dev/dri:/dev/dri

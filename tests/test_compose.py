@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+import json
 import os
 from pathlib import Path
 import subprocess
@@ -138,6 +139,39 @@ class ComposeOverrideTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "not under"):
                 configure(root, facts(mount=str(outside_mount)), data_root=str(existing), config_root=str(existing), cache_root=str(existing))
             self.assertFalse((root / ".env").exists())
+
+
+class StorageBindTests(unittest.TestCase):
+    def test_data_binds_fail_closed_and_arr_services_share_one_root(self) -> None:
+        repository_root = Path(__file__).resolve().parents[1]
+        result = subprocess.run(
+            ["docker", "compose", "--env-file", str(repository_root / ".env.example"), "config", "--format", "json"],
+            cwd=repository_root,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        rendered = json.loads(result.stdout)
+        document = EnvDocument.load(repository_root / ".env.example")
+        data_root = document.get("DATA_ROOT")
+        self.assertIsNotNone(data_root)
+        data_binds = [
+            volume
+            for service in rendered["services"].values()
+            for volume in service.get("volumes", [])
+            if volume.get("type") == "bind"
+            and (volume.get("source") == data_root or volume.get("source", "").startswith(data_root + "/"))
+        ]
+        self.assertTrue(data_binds)
+        for volume in data_binds:
+            self.assertIs(volume.get("bind", {}).get("create_host_path"), False, volume)
+        for service_name in ("radarr", "sonarr", "lidarr"):
+            volumes = rendered["services"][service_name]["volumes"]
+            roots = [volume for volume in volumes if volume.get("source") == data_root]
+            self.assertEqual(len(roots), 1, service_name)
+            self.assertEqual(roots[0]["target"], "/data")
+            self.assertFalse(any(volume.get("target") in {"/data/media", "/data/torrents", "/data/usenet"} for volume in volumes))
 
 
 if __name__ == "__main__":

@@ -14,6 +14,7 @@ from .compose import configure
 from .discover import HostFacts, discover_host
 from .envfile import EnvDocument
 from .host import HostPreparationPlan, apply_host_preparation, plan_host_preparation
+from .preflight import PreflightReport, run_preflight
 from .secrets import reveal_jellyfin
 from .state import SetupState
 
@@ -57,6 +58,10 @@ def build_parser() -> argparse.ArgumentParser:
     configure_parser.add_argument("--cache-root", required=True)
     configure_parser.add_argument("--quality-profile", default="HD-1080p")
     configure_parser.add_argument("--direct-setup-ports", action="store_true")
+    preflight_parser = subparsers.add_parser(
+        "preflight", help="validate configuration and storage without starting containers"
+    )
+    preflight_parser.add_argument("--phase", choices=("core", "acquisition"), default="core")
     secrets_parser = subparsers.add_parser("secrets", help="explicitly retrieve local credentials")
     secrets_subparsers = secrets_parser.add_subparsers(dest="secrets_command", required=True)
     reveal_parser = secrets_subparsers.add_parser("reveal", help="reveal credentials on /dev/tty only")
@@ -103,6 +108,7 @@ def main(argv: Sequence[str] | None = None, *, repository_root: Path | None = No
 
     discovered: HostFacts | None = None
     preparation: HostPreparationPlan | None = None
+    preflight: PreflightReport | None = None
     if arguments.command == "secrets":
         if arguments.json_output:
             print("homeflix: secret reveal does not support JSON output", file=sys.stderr)
@@ -187,6 +193,18 @@ def main(argv: Sequence[str] | None = None, *, repository_root: Path | None = No
                 label="configuration refused",
                 error=error,
             )
+    elif arguments.command == "preflight":
+        try:
+            config = EnvDocument.load(root / ".env")
+            preflight = run_preflight(config, arguments.phase, CommandRunner())
+            result = preflight.to_dict()
+        except (OSError, ValueError) as error:
+            return _input_error(
+                json_output=arguments.json_output,
+                code="preflight_refused",
+                label="preflight refused",
+                error=error,
+            )
     else:  # pragma: no cover - argparse limits command values
         raise AssertionError(f"unhandled command {arguments.command}")
 
@@ -203,6 +221,11 @@ def main(argv: Sequence[str] | None = None, *, repository_root: Path | None = No
         for item in result["credentials"]:
             print(f"{item['name']}: {item['status']}")
         print(f"Compose override: {result['override']['status']}")
+    elif preflight is not None:
+        for item in preflight.results:
+            print(f"{item.status.upper()}: {item.message}")
+        counts = preflight.counts
+        print(f"Result: {counts['pass']} passed, {counts['warn']} warnings, {counts['fail']} failures")
     elif discovered is not None:
         if discovered.refusal:
             print(f"homeflix: {discovered.refusal['message']}", file=sys.stderr)
@@ -245,4 +268,6 @@ def main(argv: Sequence[str] | None = None, *, repository_root: Path | None = No
         print(f"Setup state: {state_description} (schema {result['schema_version']})")
     if preparation is not None:
         return 1 if preparation.refusal is not None else 0
+    if preflight is not None:
+        return 0 if preflight.passed else 1
     return 1 if discovered is not None and not discovered.supported else 0
