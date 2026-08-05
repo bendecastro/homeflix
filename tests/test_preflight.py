@@ -12,6 +12,7 @@ from unittest import mock
 from unittest.mock import patch
 
 from scripts.homeflix_setup.cli import main
+from scripts.homeflix_setup import preflight as preflight_module
 from scripts.homeflix_setup.preflight import run_preflight
 from tests.helpers import parse_single_json
 
@@ -204,30 +205,66 @@ class PreflightTests(unittest.TestCase):
             self.assertEqual(destination.read_text(encoding="utf-8"), "pre-existing")
             self.assertEqual(next(r for r in report.results if r.name == "hardlink").status, "fail")
 
-    def test_raced_probe_paths_are_not_deleted_and_cleanup_fails(self) -> None:
+    def test_cleanup_boundary_replacement_survives_for_source_and_destination(self) -> None:
+        for leaf in ("torrents", "media"):
+            with self.subTest(leaf=leaf), tempfile.TemporaryDirectory() as directory:
+                config = configured(Path(directory))
+                data = Path(config["DATA_ROOT"])
+                original_rename = preflight_module._rename_noreplace
+                raced = False
+
+                def replace_at_rename(source: Path, quarantine: Path) -> None:
+                    nonlocal raced
+                    if source.parent == data / leaf and not raced:
+                        raced = True
+                        os.unlink(source)
+                        source.write_text(f"foreign-{leaf}", encoding="utf-8")
+                    original_rename(source, quarantine)
+
+                with mock.patch(
+                    "scripts.homeflix_setup.preflight._rename_noreplace",
+                    side_effect=replace_at_rename,
+                ):
+                    report = run_preflight(config, "core", MountRunner(data))
+
+                foreign = list((data / leaf).glob(".homeflix-preflight-*"))
+                self.assertEqual(len(foreign), 1)
+                self.assertEqual(foreign[0].read_text(encoding="utf-8"), f"foreign-{leaf}")
+                cleanup = next(r for r in report.results if r.name == "hardlink_cleanup")
+                self.assertEqual(cleanup.status, "fail")
+                self.assertIn(str(foreign[0]), cleanup.message)
+                self.assertFalse(report.passed)
+
+    def test_cleanup_boundary_replacement_with_reoccupied_original_leaves_quarantine(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             config = configured(Path(directory))
             data = Path(config["DATA_ROOT"])
-            lstat_counts: dict[Path, int] = {}
-            original_lstat = Path.lstat
+            original_rename = preflight_module._rename_noreplace
+            raced = False
 
-            def replace_before_cleanup(path: Path):
-                if path.name.startswith(".homeflix-preflight-"):
-                    lstat_counts[path] = lstat_counts.get(path, 0) + 1
-                    cleanup_call = 1 if path.parent == data / "torrents" else 2
-                    if lstat_counts[path] == cleanup_call:
-                        os.unlink(path)
-                        path.write_text("replacement", encoding="utf-8")
-                return original_lstat(path)
+            def replace_and_reoccupy(source: Path, quarantine: Path) -> None:
+                nonlocal raced
+                if source.parent == data / "media" and not raced:
+                    raced = True
+                    os.unlink(source)
+                    source.write_text("captured-foreign", encoding="utf-8")
+                    original_rename(source, quarantine)
+                    source.write_text("reoccupied-foreign", encoding="utf-8")
+                    return
+                original_rename(source, quarantine)
 
-            with mock.patch.object(Path, "lstat", autospec=True, side_effect=replace_before_cleanup):
+            with mock.patch(
+                "scripts.homeflix_setup.preflight._rename_noreplace",
+                side_effect=replace_and_reoccupy,
+            ):
                 report = run_preflight(config, "core", MountRunner(data))
 
-            replacements = list(data.glob("*/.homeflix-preflight-*"))
-            self.assertEqual(len(replacements), 2)
-            self.assertEqual(set(lstat_counts.values()), {1, 2})
-            self.assertTrue(all(path.read_text(encoding="utf-8") == "replacement" for path in replacements))
-            self.assertEqual(next(r for r in report.results if r.name == "hardlink_cleanup").status, "fail")
+            original = next((data / "media").glob(".homeflix-preflight-*"))
+            quarantine = next((data / "media").glob(".homeflix-quarantine-*"))
+            self.assertEqual(original.read_text(encoding="utf-8"), "reoccupied-foreign")
+            self.assertEqual(quarantine.read_text(encoding="utf-8"), "captured-foreign")
+            cleanup = next(r for r in report.results if r.name == "hardlink_cleanup")
+            self.assertIn(str(quarantine), cleanup.message)
             self.assertFalse(report.passed)
 
     def test_remaining_probe_paths_make_successful_hardlink_cleanup_blocking(self) -> None:
@@ -238,7 +275,7 @@ class PreflightTests(unittest.TestCase):
             original_unlink = Path.unlink
 
             def leave_probe_files(path: Path, *args, **kwargs):
-                if path.name.startswith(".homeflix-preflight-"):
+                if path.name.startswith(".homeflix-quarantine-"):
                     unlink_attempts.append(path)
                     return None
                 return original_unlink(path, *args, **kwargs)
@@ -259,7 +296,7 @@ class PreflightTests(unittest.TestCase):
             original_unlink = Path.unlink
 
             def fail_probe_cleanup(path: Path, *args, **kwargs):
-                if path.name.startswith(".homeflix-preflight-"):
+                if path.name.startswith(".homeflix-quarantine-"):
                     unlink_attempts.append(path)
                     raise OSError("forced cleanup failure")
                 return original_unlink(path, *args, **kwargs)

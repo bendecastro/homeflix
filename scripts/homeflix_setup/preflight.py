@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import ctypes
 from dataclasses import dataclass
+import errno
 import json
 import os
 from pathlib import Path
@@ -163,34 +165,81 @@ def _file_identity(path: Path) -> tuple[int, int] | None:
     return stat.st_dev, stat.st_ino
 
 
+def _rename_noreplace(source: Path, destination: Path) -> None:
+    """Atomically rename without replacing a destination on supported Linux hosts."""
+
+    try:
+        renameat2 = ctypes.CDLL(None, use_errno=True).renameat2
+    except AttributeError as error:
+        raise OSError(errno.ENOSYS, "renameat2 is unavailable") from error
+    renameat2.argtypes = (
+        ctypes.c_int,
+        ctypes.c_char_p,
+        ctypes.c_int,
+        ctypes.c_char_p,
+        ctypes.c_uint,
+    )
+    renameat2.restype = ctypes.c_int
+    result = renameat2(
+        -100,
+        os.fsencode(source),
+        -100,
+        os.fsencode(destination),
+        1,
+    )
+    if result != 0:
+        error_number = ctypes.get_errno()
+        raise OSError(
+            error_number,
+            os.strerror(error_number),
+            str(source),
+            str(destination),
+        )
+
+
 def _cleanup_owned_probe(
     path: Path, *, created: bool, identity: tuple[int, int] | None
-) -> bool:
-    """Remove only the exact probe inode created by this invocation."""
+) -> tuple[bool, str | None]:
+    """Atomically quarantine a live name before deciding whether it is ours."""
 
     if not created:
-        return True
+        return True, None
     if identity is None:
-        return False
+        return False, f"probe identity unavailable at {path}"
+
+    quarantine: Path | None = None
+    for _attempt in range(3):
+        candidate = path.parent / f".homeflix-quarantine-{uuid.uuid4().hex}"
+        try:
+            _rename_noreplace(path, candidate)
+        except FileNotFoundError:
+            return True, None
+        except FileExistsError:
+            continue
+        except OSError:
+            return False, f"could not quarantine probe path {path}"
+        quarantine = candidate
+        break
+    if quarantine is None:
+        return False, f"could not allocate quarantine path for {path}"
+
+    captured_identity = _file_identity(quarantine)
+    if captured_identity != identity:
+        try:
+            _rename_noreplace(quarantine, path)
+        except FileExistsError:
+            return False, f"foreign probe inode retained at {quarantine}; original path is occupied"
+        except OSError:
+            return False, f"foreign probe inode retained at {quarantine}; restore failed"
+        return False, f"foreign probe inode restored at {path}"
+
     try:
-        current_stat = path.lstat()
-    except FileNotFoundError:
-        return True
+        quarantine.unlink()
     except OSError:
-        return False
-    if (current_stat.st_dev, current_stat.st_ino) != identity:
-        return False
-    try:
-        path.unlink()
-    except OSError:
-        return False
-    try:
-        path.lstat()
-    except FileNotFoundError:
-        return True
-    except OSError:
-        return False
-    return False
+        return False, f"owned probe quarantine could not be removed at {quarantine}"
+    if quarantine.exists():
+        return False, f"owned probe quarantine remains at {quarantine}"
+    return True, None
 
 
 def run_preflight(
@@ -380,18 +429,23 @@ def run_preflight(
             except OSError:
                 _result(results, "hardlink", "fail", "Hardlink probe failed")
             finally:
-                link_clean = _cleanup_owned_probe(
+                link_clean, link_cleanup_error = _cleanup_owned_probe(
                     link, created=link_created, identity=link_identity
                 )
-                source_clean = _cleanup_owned_probe(
+                source_clean, source_cleanup_error = _cleanup_owned_probe(
                     source, created=source_created, identity=source_identity
                 )
                 if not link_clean or not source_clean:
+                    cleanup_errors = [
+                        error
+                        for error in (link_cleanup_error, source_cleanup_error)
+                        if error is not None
+                    ]
                     _result(
                         results,
                         "hardlink_cleanup",
                         "fail",
-                        "Hardlink probe cleanup failed or found a replaced identity",
+                        "Hardlink probe cleanup failed: " + "; ".join(cleanup_errors),
                     )
 
     return PreflightReport(phase, tuple(results))
