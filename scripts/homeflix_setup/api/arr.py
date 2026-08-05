@@ -2,40 +2,25 @@
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 import re
-import stat
 from typing import Any, Mapping
 import xml.etree.ElementTree as ET
 
 from .client import ApiError, JsonClient, Transport, urllib_transport
+from .securepath import read_config_file
 
 
 _KEY = re.compile(r"^[A-Za-z0-9_-]{16,128}$")
 
 
-def read_api_key(path: str | Path) -> str:
-    """Read one API key from a protected, regular, non-symlink config XML."""
+def read_api_key(config_root: str | Path, service: str, expected_uid: int) -> str:
+    """Read one API key through verified CONFIG_ROOT and service components."""
+    if service not in {"radarr", "sonarr"}:
+        raise ValueError("service API key location is invalid")
+    raw = read_config_file(config_root, (service, "config.xml"), expected_uid)
     try:
-        descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
-    except OSError:
-        raise ValueError("service API key file cannot be opened safely") from None
-    try:
-        metadata = os.fstat(descriptor)
-        if not stat.S_ISREG(metadata.st_mode) or metadata.st_mode & stat.S_IROTH:
-            raise ValueError("service API key file permissions are unsafe")
-        chunks: list[bytes] = []
-        total = 0
-        while chunk := os.read(descriptor, 65536):
-            total += len(chunk)
-            if total > 1024 * 1024:
-                raise ValueError("service API key file is too large")
-            chunks.append(chunk)
-    finally:
-        os.close(descriptor)
-    try:
-        root = ET.fromstring(b"".join(chunks))
+        root = ET.fromstring(raw)
     except ET.ParseError:
         raise ValueError("service API key file is invalid") from None
     nodes = root.findall("./ApiKey")

@@ -3,35 +3,20 @@
 from __future__ import annotations
 
 import json
-import os
 from pathlib import Path
 import re
-import stat
 from typing import Any, Mapping
 
 from .client import ApiError, JsonClient, Transport, urllib_transport
+from .securepath import read_config_file
 
 
 _KEY = re.compile(r"^[A-Za-z0-9_-]{16,256}$")
 _INTERNAL = {"jellyfin": 8096, "radarr": 7878, "sonarr": 8989}
 
 
-def read_settings_api_key(path: str | Path) -> str:
-    try:
-        descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
-    except OSError:
-        raise ValueError("Jellyseerr settings cannot be opened safely") from None
-    try:
-        metadata = os.fstat(descriptor)
-        if not stat.S_ISREG(metadata.st_mode) or metadata.st_mode & stat.S_IROTH or metadata.st_size > 1024 * 1024:
-            raise ValueError("Jellyseerr settings permissions are unsafe")
-        raw = b""
-        while chunk := os.read(descriptor, 65536):
-            raw += chunk
-            if len(raw) > 1024 * 1024:
-                raise ValueError("Jellyseerr settings are too large")
-    finally:
-        os.close(descriptor)
+def read_settings_api_key(config_root: str | Path, expected_uid: int) -> str:
+    raw = read_config_file(config_root, ("jellyseerr", "settings.json"), expected_uid)
     try:
         settings = json.loads(raw.decode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError):
@@ -65,6 +50,21 @@ class JellyseerrClient:
         if type(value) is not bool:
             raise ApiError("jellyseerr", "read initialization state", None, "invalid_response")
         return value
+
+    def verify_jellyfin(self) -> bool:
+        current = self.http.request("GET", "/api/v1/settings/jellyfin", operation="read Jellyfin settings")
+        if not isinstance(current, dict):
+            raise ApiError("jellyseerr", "reconcile Jellyfin settings", None, "jellyfin_connection_conflict")
+        equivalent = (
+            current.get("hostname") == "jellyfin"
+            and current.get("port") == 8096
+            and current.get("useSsl") is False
+            and current.get("urlBase") == ""
+            and ("serverType" not in current or current.get("serverType") == 2)
+        )
+        if not equivalent:
+            raise ApiError("jellyseerr", "reconcile Jellyfin settings", None, "jellyfin_connection_conflict")
+        return True
 
     def _payload(self, service: str, api_key: str, profile: dict[str, Any], root: dict[str, Any]) -> dict[str, Any]:
         if service not in {"radarr", "sonarr"} or not _KEY.fullmatch(api_key):

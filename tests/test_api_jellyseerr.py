@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 import tempfile
 import unittest
@@ -46,6 +47,40 @@ class JellyseerrApiTests(unittest.TestCase):
             "hostname": "jellyfin", "port": 8096, "urlBase": "", "useSsl": False,
             "email": "", "serverType": 2,
         })
+
+    def test_authorized_jellyfin_connection_must_be_exact_internal_plain_http(self):
+        for fixture_name, accepted in (
+            ("jellyseerr-jellyfin-correct.json", True),
+            ("jellyseerr-jellyfin-wrong.json", False),
+            ("jellyseerr-jellyfin-missing.json", False),
+        ):
+            with self.subTest(fixture=fixture_name):
+                transport = QueueTransport([
+                    (200, fixture("jellyseerr-public-complete.json")),
+                    (200, fixture(fixture_name)),
+                ])
+                client = JellyseerrClient(transport=transport)
+                self.assertTrue(client.initialized())
+                client.authorize(KEY)
+                if accepted:
+                    self.assertTrue(client.verify_jellyfin())
+                else:
+                    with self.assertRaises(ApiError) as raised:
+                        client.verify_jellyfin()
+                    self.assertEqual(raised.exception.code, "jellyfin_connection_conflict")
+                self.assertEqual(transport.requests[1].full_url, "http://127.0.0.1/api/v1/settings/jellyfin")
+                self.assertEqual(transport.requests[1].headers.get("X-api-key"), KEY)
+
+    def test_jellyfin_connection_rejects_each_owned_field_conflict(self):
+        correct = fixture("jellyseerr-jellyfin-correct.json")
+        for field, value in (("hostname", "external.invalid"), ("port", 443), ("useSsl", True), ("urlBase", "/proxy"), ("serverType", 1)):
+            with self.subTest(field=field):
+                current = dict(correct); current[field] = value
+                client = JellyseerrClient(transport=QueueTransport([(200, current)]))
+                client.authorize(KEY)
+                with self.assertRaises(ApiError) as raised:
+                    client.verify_jellyfin()
+                self.assertEqual(raised.exception.code, "jellyfin_connection_conflict")
 
     def test_arr_tests_and_defaults_use_internal_services_and_required_flags(self):
         transport = QueueTransport([(200, {"success": True}), (200, []), (200, {}), (200, {"success": True}), (200, []), (200, {})])
@@ -108,19 +143,30 @@ class JellyseerrApiTests(unittest.TestCase):
             client.ensure_arr("radarr", KEY, *profile_root("radarr"))
         self.assertEqual(raised.exception.code, "multiple_defaults")
 
-    def test_settings_key_reader_rejects_symlink_and_world_readable(self):
+    def test_settings_key_reader_accepts_0644_and_rejects_unsafe_traversal_permissions_and_owner(self):
         with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / "settings.json"
+            root = Path(directory) / "config"
+            service = root / "jellyseerr"
+            service.mkdir(parents=True)
+            path = service / "settings.json"
             path.write_text(json.dumps({"main": {"apiKey": KEY}}), encoding="utf-8")
-            path.chmod(0o600)
-            self.assertEqual(read_settings_api_key(path), KEY)
-            link = path.with_name("linked.json")
-            link.symlink_to(path)
+            root.chmod(0o755); service.chmod(0o755); path.chmod(0o644)
+            uid = os.getuid()
+            self.assertEqual(read_settings_api_key(root, uid), KEY)
+            for unsafe in (root, service, path):
+                with self.subTest(unsafe=unsafe.name):
+                    original = unsafe.stat().st_mode & 0o777
+                    unsafe.chmod(original | 0o002)
+                    with self.assertRaises(ValueError):
+                        read_settings_api_key(root, uid)
+                    unsafe.chmod(original)
             with self.assertRaises(ValueError):
-                read_settings_api_key(link)
-            path.chmod(0o604)
+                read_settings_api_key(root, uid + 100000)
+            moved = service.with_name("real")
+            service.rename(moved)
+            service.symlink_to(moved, target_is_directory=True)
             with self.assertRaises(ValueError):
-                read_settings_api_key(path)
+                read_settings_api_key(root, uid)
 
 
 class ConfigureCoreTests(unittest.TestCase):
@@ -131,7 +177,7 @@ class ConfigureCoreTests(unittest.TestCase):
             (root / ".env").write_text(
                 "JELLYFIN_ADMIN_USER=old\nJELLYFIN_ADMIN_USER=fixture-admin\n"
                 "JELLYFIN_ADMIN_PASSWORD=FIXTURE_PASSWORD_NOT_REAL\n"
-                f"CONFIG_ROOT={config_root}\nQUALITY_PROFILE=Fixture HD\nDOMAIN=fixture.test\n",
+                f"CONFIG_ROOT={config_root}\nPUID=99999\nPUID={os.getuid()}\nQUALITY_PROFILE=Fixture HD\nDOMAIN=fixture.test\n",
                 encoding="utf-8",
             )
             (root / ".env").chmod(0o600)
@@ -156,13 +202,20 @@ class ConfigureCoreTests(unittest.TestCase):
                 def initialized(self): return False
                 def authenticate_jellyfin(self, username, password): calls.append(("seerr-auth", username, password))
                 def authorize(self, key): calls.append(("seerr-key", key))
+                def verify_jellyfin(self): calls.append(("verify-jellyfin",)); return True
                 def ensure_arr(self, service, key, profile, media_root): calls.append(("connect", service, profile["name"], media_root["path"])); return True
                 def finish(self): return True
+            reader_uids = []
+            def arr_key(config_root, service, uid): reader_uids.append(uid); return KEY
+            def seerr_key(config_root, uid): reader_uids.append(uid); return KEY
             with patch("scripts.homeflix_setup.core.JellyfinClient", FakeJellyfin), patch("scripts.homeflix_setup.core.ArrClient", FakeArr), patch("scripts.homeflix_setup.core.JellyseerrClient", FakeSeerr):
-                result = configure_core(root, api_key_reader=lambda path: KEY, settings_key_reader=lambda path: KEY)
+                result = configure_core(root, api_key_reader=arr_key, settings_key_reader=seerr_key)
+            self.assertEqual(reader_uids, [os.getuid()] * 3)
             self.assertEqual(calls[0][1], "fixture-admin")
             self.assertEqual(calls[1][1], "http://127.0.0.1")
             self.assertEqual(calls[1][3], {"Host": "radarr.fixture.test"})
+            self.assertLess(calls.index(("seerr-auth", "fixture-admin", "FIXTURE_PASSWORD_NOT_REAL")), calls.index(("seerr-key", KEY)))
+            self.assertLess(calls.index(("seerr-key", KEY)), calls.index(("verify-jellyfin",)))
             self.assertIn(("connect", "sonarr", "Fixture HD", "/data/media/tv"), calls)
             rendered = json.dumps(result)
             self.assertNotIn(KEY, rendered)

@@ -328,8 +328,8 @@ def configure_core(
     repository_root: str | Path,
     *,
     transports: Mapping[str, Transport] | None = None,
-    api_key_reader: Callable[[str | Path], str] = read_api_key,
-    settings_key_reader: Callable[[str | Path], str] = read_settings_api_key,
+    api_key_reader: Callable[[str | Path, str, int], str] = read_api_key,
+    settings_key_reader: Callable[[str | Path, int], str] = read_settings_api_key,
 ) -> dict[str, object]:
     """Reconcile core application APIs after the explicit container checkpoint."""
 
@@ -338,17 +338,25 @@ def configure_core(
     if state.checkpoints.get("core_containers_started") is not True:
         raise ValueError("core containers must be live before API configuration")
     config = _load_private_environment(root / ".env")
-    required = ("JELLYFIN_ADMIN_USER", "JELLYFIN_ADMIN_PASSWORD", "CONFIG_ROOT", "QUALITY_PROFILE", "DOMAIN")
+    required = ("JELLYFIN_ADMIN_USER", "JELLYFIN_ADMIN_PASSWORD", "CONFIG_ROOT", "PUID", "QUALITY_PROFILE", "DOMAIN")
     values = {key: config.get(key) for key in required}
     if any(not value for value in values.values()):
         raise ValueError("required core API configuration is missing")
     config_root = Path(values["CONFIG_ROOT"] or "")
     if not config_root.is_absolute():
         raise ValueError("CONFIG_ROOT must be absolute")
+    puid_text = values["PUID"] or ""
+    if re.fullmatch(r"[0-9]+", puid_text) is None or int(puid_text) > 2**32 - 1:
+        raise ValueError("PUID is invalid")
+    expected_uid = int(puid_text)
     domain = values["DOMAIN"] or ""
     if not re.fullmatch(r"[A-Za-z0-9](?:[A-Za-z0-9.-]{0,251}[A-Za-z0-9])?", domain):
         raise ValueError("DOMAIN is invalid")
     selected = values["QUALITY_PROFILE"] or ""
+    runtime_keys = {
+        service: api_key_reader(config_root, service, expected_uid)
+        for service in ("radarr", "sonarr")
+    }
     chosen_transports = dict(transports or {})
     jellyfin = JellyfinClient(transport=chosen_transports.get("jellyfin", urllib_transport))
     created_admin = jellyfin.initialize(values["JELLYFIN_ADMIN_USER"] or "", values["JELLYFIN_ADMIN_PASSWORD"] or "")
@@ -357,7 +365,7 @@ def configure_core(
     arr_results: dict[str, dict[str, object]] = {}
     runtime: dict[str, tuple[str, dict[str, object], dict[str, object]]] = {}
     for service, media_path in (("radarr", "/data/media/movies"), ("sonarr", "/data/media/tv")):
-        key = api_key_reader(config_root / service / "config.xml")
+        key = runtime_keys[service]
         client = ArrClient(
             service, "http://127.0.0.1", key,
             headers={"Host": f"{service}.{domain}"},
@@ -376,7 +384,8 @@ def configure_core(
     was_initialized = jellyseerr.initialized()
     if not was_initialized:
         jellyseerr.authenticate_jellyfin(values["JELLYFIN_ADMIN_USER"] or "", values["JELLYFIN_ADMIN_PASSWORD"] or "")
-    jellyseerr.authorize(settings_key_reader(config_root / "jellyseerr" / "settings.json"))
+    jellyseerr.authorize(settings_key_reader(config_root, expected_uid))
+    jellyseerr.verify_jellyfin()
     connected: dict[str, bool] = {}
     for service in ("radarr", "sonarr"):
         key, profile, media_root = runtime[service]
