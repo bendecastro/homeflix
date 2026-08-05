@@ -73,7 +73,6 @@ class JsonClient:
         operation: str,
         payload: Any = None,
         headers: Mapping[str, str] | None = None,
-        retry: bool | None = None,
     ) -> Any:
         if not path.startswith("/") or path.startswith("//"):
             raise ValueError("API path must be absolute and local")
@@ -82,7 +81,7 @@ class JsonClient:
         outgoing_headers = {"Accept": "application/json", **self.headers, **dict(headers or {})}
         if encoded is not None:
             outgoing_headers["Content-Type"] = "application/json"
-        safe_retry = method in {"GET", "HEAD", "PUT", "DELETE"} if retry is None else retry
+        safe_retry = method in {"GET", "HEAD", "OPTIONS", "PUT", "DELETE"}
         count = self.attempts if safe_retry else 1
         deadline = self.clock() + self.timeout * count
         for attempt in range(count):

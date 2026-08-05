@@ -39,6 +39,13 @@ class JsonClientTests(unittest.TestCase):
             with self.subTest(base=base), self.assertRaises(ValueError):
                 JsonClient("fixture", base)
 
+    def test_post_cannot_override_retry_policy(self):
+        transport = FixtureTransport([error.URLError("fixture secret"), (200, {})])
+        client = JsonClient("fixture", "http://127.0.0.1", transport=transport, attempts=2)
+        with self.assertRaises(TypeError):
+            client.request("POST", "/create", operation="create object", payload={}, retry=True)
+        self.assertEqual(len(transport.requests), 0)
+
 
 class JellyfinApiTests(unittest.TestCase):
     def test_startup_uses_official_sequence_authenticates_and_creates_libraries(self):
@@ -92,20 +99,28 @@ class JellyfinApiTests(unittest.TestCase):
         self.assertFalse(any(request.full_url.endswith("/Startup/User") for request, _ in transport.requests))
         self.assertFalse(any(request.method == "POST" and "/Library/VirtualFolders?" in request.full_url for request, _ in transport.requests))
 
-    def test_same_library_name_with_different_path_fails_and_errors_are_redacted(self):
-        transport = FixtureTransport([
-            (200, fixture("jellyfin-startup-complete.json")),
-            (200, fixture("jellyfin-auth.json")),
-            (200, [{"Name": "Movies", "Locations": ["/unrelated/private"]}]),
-        ])
-        client = JellyfinClient(transport=transport)
-        client.initialize("fixture-admin", "FIXTURE_PASSWORD_NOT_REAL")
-        with self.assertRaises(ApiError) as raised:
-            client.ensure_libraries()
-        rendered = str(raised.exception)
-        self.assertEqual(raised.exception.code, "library_conflict")
-        self.assertNotIn("private", rendered)
-        self.assertNotIn("FIXTURE", rendered)
+    def test_library_duplicates_wrong_types_and_extra_locations_conflict_before_writes(self):
+        conflicts = (
+            "jellyfin-libraries-duplicate.json",
+            "jellyfin-libraries-wrong-type.json",
+            "jellyfin-libraries-extra-location.json",
+        )
+        for conflict in conflicts:
+            with self.subTest(conflict=conflict):
+                transport = FixtureTransport([
+                    (200, fixture("jellyfin-startup-complete.json")),
+                    (200, fixture("jellyfin-auth.json")),
+                    (200, fixture(conflict)),
+                ])
+                client = JellyfinClient(transport=transport)
+                client.initialize("fixture-admin", "FIXTURE_PASSWORD_NOT_REAL")
+                with self.assertRaises(ApiError) as raised:
+                    client.ensure_libraries()
+                self.assertEqual(raised.exception.code, "library_conflict")
+                self.assertFalse(any(request.method == "POST" and "/Library/VirtualFolders?" in request.full_url for request, _ in transport.requests))
+                rendered = str(raised.exception)
+                self.assertNotIn("/data", rendered)
+                self.assertNotIn("FIXTURE", rendered)
 
     def test_non_idempotent_post_is_not_blindly_retried(self):
         transport = FixtureTransport([error.URLError("fixture secret")])

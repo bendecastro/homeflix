@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import posixpath
 from typing import Mapping
 from urllib.parse import urlencode
 
@@ -60,25 +61,31 @@ class JellyfinClient:
             raise ApiError("jellyfin", "authorized request", None, "authentication_required")
         return {"X-Emby-Token": self.token}
 
+    @staticmethod
+    def _library_equivalent(item: object, name: str, collection_type: str, path: str) -> bool:
+        if not isinstance(item, dict) or item.get("Name") != name or item.get("CollectionType") != collection_type:
+            return False
+        locations = item.get("Locations")
+        if not isinstance(locations, list) or not all(isinstance(value, str) and value.startswith("/") for value in locations):
+            return False
+        normalized = {posixpath.normpath(value) for value in locations}
+        return normalized == {posixpath.normpath(path)}
+
     def ensure_libraries(self) -> list[str]:
         existing = self.http.request("GET", "/Library/VirtualFolders", operation="list libraries", headers=self._headers())
-        if not isinstance(existing, list):
+        if not isinstance(existing, list) or not all(isinstance(item, dict) and isinstance(item.get("Name"), str) for item in existing):
             raise ApiError("jellyfin", "list libraries", None, "invalid_response")
-        by_name: dict[str, list[str]] = {}
-        for item in existing:
-            if not isinstance(item, dict) or not isinstance(item.get("Name"), str) or not isinstance(item.get("Locations", []), list):
-                raise ApiError("jellyfin", "list libraries", None, "invalid_response")
-            locations = item.get("Locations", [])
-            if not all(isinstance(value, str) for value in locations):
-                raise ApiError("jellyfin", "list libraries", None, "invalid_response")
-            if item["Name"] in by_name and by_name[item["Name"]] != locations:
-                raise ApiError("jellyfin", "reconcile libraries", None, "library_conflict")
-            by_name[item["Name"]] = locations
+
+        missing: list[tuple[str, str, str]] = []
         for name, (collection_type, path) in LIBRARIES.items():
-            if name in by_name:
-                if by_name[name] != [path]:
-                    raise ApiError("jellyfin", "reconcile libraries", None, "library_conflict")
+            matches = [item for item in existing if item.get("Name") == name]
+            if not matches:
+                missing.append((name, collection_type, path))
                 continue
+            if len(matches) != 1 or not self._library_equivalent(matches[0], name, collection_type, path):
+                raise ApiError("jellyfin", "reconcile libraries", None, "library_conflict")
+
+        for name, collection_type, path in missing:
             query = urlencode({"name": name, "collectionType": collection_type, "paths": path, "refreshLibrary": "false"})
             try:
                 self.http.request("POST", f"/Library/VirtualFolders?{query}", operation="create library", payload={}, headers=self._headers())
@@ -86,6 +93,7 @@ class JellyfinClient:
                 if caught.code != "transport_error":
                     raise
                 current = self.http.request("GET", "/Library/VirtualFolders", operation="reconcile library creation", headers=self._headers())
-                if not any(isinstance(item, dict) and item.get("Name") == name and item.get("Locations") == [path] for item in current):
+                matches = [item for item in current if isinstance(item, dict) and item.get("Name") == name] if isinstance(current, list) else []
+                if len(matches) != 1 or not self._library_equivalent(matches[0], name, collection_type, path):
                     raise
         return list(LIBRARIES)
