@@ -254,3 +254,14 @@ bytes, Compose/override files, and data mount identity are snapshot-checked acro
 immediately before mutation; checkpoints are evidence only and record after full readiness.
 One hundred twenty-one tests and fresh spec/quality reviews passed; no real container command
 was run.
+
+## [2026-08-05] implementation | Agent setup task 7 — API initialization
+
+Added bounded, redacted clients for Jellyfin, Radarr/Sonarr, and Jellyseerr. Setup follows
+Jellyfin's startup/auth/library sequence, discovers *arr profiles by name, creates exact roots,
+preserves unowned settings while enabling rename/hardlinks/completed handling, and connects
+Jellyseerr over Docker DNS with non-4K defaults. Loopback API transport rejects proxies,
+redirects, and URL escapes; app secrets are read through owner-checked no-follow traversal,
+including normal read-only 0644 files. Initialized Jellyseerr must verify its internal
+Jellyfin connection. One hundred forty-eight fixture/localhost tests and fresh spec/security
+reviews passed; no live APIs or appdata were accessed.

@@ -117,15 +117,15 @@ Updated: 2026-08-04
 
 ## Task 7: Configure Jellyfin, Radarr, Sonarr, and Jellyseerr through APIs
 
-- [ ] Add redacted fixture tests for Jellyfin's startup-state check, administrator creation, authentication, and idempotent Movies/Shows/Music virtual-folder creation.
-- [ ] Add Radarr/Sonarr tests for reading API keys from their config XML, discovering quality profiles by name rather than numeric ID, creating `/data/media/movies` and `/data/media/tv` roots, enabling rename/hardlinks/completed handling, and accepting an already-equivalent configuration.
-- [ ] Add Jellyseerr tests for Jellyfin authentication, plain-HTTP Docker service addresses, Radarr/Sonarr connection tests, default non-4K profile/root selection, season folders, sync/search flags, initialization, and rerun reconciliation.
-- [ ] Run `python3 -m unittest tests.test_api_jellyfin tests.test_api_arr tests.test_api_jellyseerr -v`; expect failures.
-- [ ] Implement `JsonClient` with bounded retry/backoff and redacted `ApiError`; implement `JellyfinClient`, `ArrClient`, and `JellyseerrClient` with the tested operations.
-- [ ] Implement `configure_core()` using credentials from `.env`, runtime-discovered API keys/profiles, internal addresses `http://jellyfin:8096`, `radarr:7878`, and `sonarr:8989`, and the selected quality profile name.
-- [ ] Never return or log administrator passwords, tokens, or API keys; return only configured object names and booleans.
-- [ ] Run all API fixture tests and `python3 -m unittest discover -s tests -v`; expect green.
-- [ ] Commit with `git add scripts/homeflix_setup/api scripts/homeflix_setup/core.py scripts/homeflix_setup/cli.py tests/test_api_jellyfin.py tests/test_api_arr.py tests/test_api_jellyseerr.py tests/fixtures && git commit -m "Automate core service initialization"`.
+- [x] Add redacted fixture tests for Jellyfin's startup-state check, administrator creation, authentication, and idempotent Movies/Shows/Music virtual-folder creation.
+- [x] Add Radarr/Sonarr tests for reading API keys from their config XML, discovering quality profiles by name rather than numeric ID, creating `/data/media/movies` and `/data/media/tv` roots, enabling rename/hardlinks/completed handling, and accepting an already-equivalent configuration.
+- [x] Add Jellyseerr tests for Jellyfin authentication, plain-HTTP Docker service addresses, Radarr/Sonarr connection tests, default non-4K profile/root selection, season folders, sync/search flags, initialization, and rerun reconciliation.
+- [x] Run `python3 -m unittest tests.test_api_jellyfin tests.test_api_arr tests.test_api_jellyseerr -v`; expect failures.
+- [x] Implement `JsonClient` with bounded retry/backoff and redacted `ApiError`; implement `JellyfinClient`, `ArrClient`, and `JellyseerrClient` with the tested operations.
+- [x] Implement `configure_core()` using credentials from `.env`, runtime-discovered API keys/profiles, internal addresses `http://jellyfin:8096`, `radarr:7878`, and `sonarr:8989`, and the selected quality profile name.
+- [x] Never return or log administrator passwords, tokens, or API keys; return only configured object names and booleans.
+- [x] Run all API fixture tests and `python3 -m unittest discover -s tests -v`; expect green.
+- [x] Commit with `git add scripts/homeflix_setup/api scripts/homeflix_setup/core.py scripts/homeflix_setup/cli.py tests/test_api_jellyfin.py tests/test_api_arr.py tests/test_api_jellyseerr.py tests/fixtures && git commit -m "Automate core service initialization"`.
 
 ## Task 8: Add live verification and interruption-safe resume
 
