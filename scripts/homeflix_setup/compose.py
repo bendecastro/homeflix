@@ -15,7 +15,7 @@ DIRECT_PORTS = (("jellyseerr", 5055), ("radarr", 7878), ("sonarr", 8989))
 
 
 def _quicksync_usable(facts: HostFacts) -> bool:
-    return facts.graphics.status == "ok" and bool(facts.graphics.render_devices)
+    return facts.graphics.quicksync_usable
 
 
 def build_override(facts: HostFacts, direct_setup_ports: bool) -> str:
@@ -24,7 +24,7 @@ def build_override(facts: HostFacts, direct_setup_ports: bool) -> str:
     services: list[tuple[str, list[str]]] = []
     if _quicksync_usable(facts):
         services.append(("jellyfin", ["    devices:", "      - /dev/dri:/dev/dri"]))
-    ports_enabled = direct_setup_ports or facts.host_dns_status != "ok"
+    ports_enabled = direct_setup_ports or facts.lan_dns_status != "resolved"
     if ports_enabled:
         for service, port in DIRECT_PORTS:
             services.append((service, ["    ports:", f'      - "{port}:{port}"']))
@@ -135,6 +135,6 @@ def configure(
         "credentials": credentials_result["credentials"],
         "override": {"status": override_status, "adaptations": {
             "quicksync": _quicksync_usable(facts),
-            "direct_setup_ports": direct_setup_ports or facts.host_dns_status != "ok",
+            "direct_setup_ports": direct_setup_ports or facts.lan_dns_status != "resolved",
         }},
     }

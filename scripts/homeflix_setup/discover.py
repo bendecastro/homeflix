@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 import json
 import os
+from pathlib import Path
 import re
 import subprocess
 from typing import Mapping, Protocol, Sequence
@@ -47,24 +48,68 @@ class MountFact:
 
 
 @dataclass(frozen=True)
+class GraphicsDeviceFact:
+    path: str
+    vendor: str | None
+    vendor_status: str
+    readable: bool | None
+    writable: bool | None
+
+    @property
+    def quicksync_usable(self) -> bool:
+        return (
+            self.vendor_status == "ok"
+            and (self.vendor or "").casefold() == "0x8086"
+            and self.readable is True
+            and self.writable is True
+        )
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "path": self.path,
+            "vendor": self.vendor,
+            "vendor_status": self.vendor_status,
+            "readable": self.readable,
+            "writable": self.writable,
+            "quicksync_usable": self.quicksync_usable,
+        }
+
+
+@dataclass(frozen=True)
 class GraphicsFact:
     render_devices: tuple[str, ...] = ()
     status: str = "ok"
     reason: str | None = None
+    devices: tuple[GraphicsDeviceFact, ...] = ()
 
     @property
     def available(self) -> bool | None:
         return bool(self.render_devices) if self.status == "ok" else None
+
+    @property
+    def quicksync_usable(self) -> bool:
+        return self.status == "ok" and any(device.quicksync_usable for device in self.devices)
 
     def to_dict(self) -> dict[str, object]:
         result: dict[str, object] = {
             "status": self.status,
             "render_devices": list(self.render_devices),
             "available": self.available,
+            "quicksync_usable": self.quicksync_usable,
+            "devices": [device.to_dict() for device in self.devices],
         }
         if self.reason is not None:
             result["reason"] = self.reason
         return result
+
+
+@dataclass(frozen=True)
+class LanDnsServiceFact:
+    hostname: str
+    status: str
+
+    def to_dict(self) -> dict[str, str]:
+        return {"hostname": self.hostname, "status": self.status}
 
 
 @dataclass(frozen=True)
@@ -100,6 +145,9 @@ class HostFacts:
     host_dns_status: str
     host_dns_reason: str | None
     ssh_context: bool
+    lan_dns_domain: str = "local"
+    lan_dns_status: str = "unknown"
+    lan_dns_services: tuple[LanDnsServiceFact, ...] = ()
     os_codename: str = ""
     deployment_user: str | None = None
     user_groups: tuple[str, ...] = ()
@@ -149,6 +197,11 @@ class HostFacts:
             "status": self.host_dns_status,
             "nameservers": list(self.host_nameservers),
             "search": list(self.host_search_domains),
+        }
+        lan_dns: dict[str, object] = {
+            "domain": self.lan_dns_domain,
+            "status": self.lan_dns_status,
+            "services": [service.to_dict() for service in self.lan_dns_services],
         }
         if self.host_dns_reason is not None:
             host_dns["reason"] = self.host_dns_reason
@@ -204,6 +257,7 @@ class HostFacts:
             "mounts": mounts,
             "docker": docker,
             "host_dns": host_dns,
+            "lan_dns": lan_dns,
             "docker_dns": docker_dns,
             "execution_context": {"ssh": self.ssh_context},
             "probe_errors": self.probe_errors,
@@ -395,9 +449,12 @@ def _environment(runner: Runner) -> Mapping[str, str]:
     return environment if isinstance(environment, Mapping) else os.environ
 
 
-def discover_host(runner: Runner) -> HostFacts:
+def discover_host(runner: Runner, *, domain: str = "local") -> HostFacts:
     """Collect host facts without creating files, containers, or setup state."""
 
+    normalized_domain = domain.strip().strip(".").casefold()
+    if not normalized_domain or re.fullmatch(r"[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?", normalized_domain) is None:
+        raise ValueError("LAN DNS domain is invalid")
     os_result = _run(runner, "cat", "/etc/os-release")
     os_release = _parse_os_release(os_result.stdout if os_result.returncode == 0 else "")
     os_id = os_release.get("ID", "unknown").lower()
@@ -477,9 +534,25 @@ def discover_host(runner: Runner) -> HostFacts:
         sorted(
             line
             for line in graphics_result.stdout.splitlines()
-            if graphics_reason is None and line.startswith("/dev/dri/renderD")
+            if graphics_reason is None and re.fullmatch(r"/dev/dri/renderD[0-9]+", line)
         )
     )
+    graphics_devices: list[GraphicsDeviceFact] = []
+    for device in render_devices:
+        device_name = Path(device).name
+        vendor_result = _run(runner, "cat", f"/sys/class/drm/{device_name}/device/vendor")
+        readable_result = _run(runner, "test", "-r", device)
+        writable_result = _run(runner, "test", "-w", device)
+        vendor = _value(vendor_result)
+        graphics_devices.append(
+            GraphicsDeviceFact(
+                path=device,
+                vendor=vendor.casefold() if vendor is not None else None,
+                vendor_status="ok" if vendor_result.returncode == 0 and vendor is not None else "error",
+                readable=True if readable_result.returncode == 0 else (False if readable_result.returncode == 1 else None),
+                writable=True if writable_result.returncode == 0 else (False if writable_result.returncode == 1 else None),
+            )
+        )
     ports_result = _run(runner, "ss", "-H", "-lntu")
     ports_reason = _probe_failure_reason(ports_result, "listening-port")
     mounts_result = _run(
@@ -500,6 +573,23 @@ def discover_host(runner: Runner) -> HostFacts:
     nameservers, search_domains = _parse_resolver(
         resolver_result.stdout if dns_reason is None else ""
     )
+    lan_dns_services: list[LanDnsServiceFact] = []
+    for service in ("jellyseerr", "radarr", "sonarr"):
+        hostname = f"{service}.{normalized_domain}"
+        resolution = _run(runner, "getent", "ahosts", hostname)
+        if resolution.returncode == 0 and resolution.stdout.strip():
+            resolution_status = "resolved"
+        elif resolution.returncode in {1, 2}:
+            resolution_status = "unresolved"
+        else:
+            resolution_status = "error"
+        lan_dns_services.append(LanDnsServiceFact(hostname, resolution_status))
+    if any(item.status == "error" for item in lan_dns_services):
+        lan_dns_status = "error"
+    elif any(item.status == "unresolved" for item in lan_dns_services):
+        lan_dns_status = "unresolved"
+    else:
+        lan_dns_status = "resolved"
 
     gaps: list[dict[str, str]] = []
     if docker_status == "missing":
@@ -595,6 +685,7 @@ def discover_host(runner: Runner) -> HostFacts:
             render_devices,
             status="ok" if graphics_reason is None else "error",
             reason=graphics_reason,
+            devices=tuple(graphics_devices),
         ),
         listening_ports=_parse_ports(ports_result.stdout) if ports_reason is None else (),
         listening_ports_status="ok" if ports_reason is None else "error",
@@ -618,6 +709,9 @@ def discover_host(runner: Runner) -> HostFacts:
         ssh_context=any(
             name in _environment(runner) for name in ("SSH_CONNECTION", "SSH_CLIENT", "SSH_TTY")
         ),
+        lan_dns_domain=normalized_domain,
+        lan_dns_status=lan_dns_status,
+        lan_dns_services=tuple(lan_dns_services),
         os_codename=os_release.get("VERSION_CODENAME", ""),
         deployment_user=deployment_user,
         user_groups=user_groups,

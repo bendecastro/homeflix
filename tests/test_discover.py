@@ -66,6 +66,15 @@ class HostDiscoveryTests(unittest.TestCase):
                 "status": "ok",
                 "render_devices": ["/dev/dri/renderD128"],
                 "available": True,
+                "quicksync_usable": True,
+                "devices": [{
+                    "path": "/dev/dri/renderD128",
+                    "vendor": "0x8086",
+                    "vendor_status": "ok",
+                    "readable": True,
+                    "writable": True,
+                    "quicksync_usable": True,
+                }],
             },
         )
         self.assertEqual(result["listening_ports"], {"status": "ok", "ports": [80, 8096]})
@@ -101,6 +110,18 @@ class HostDiscoveryTests(unittest.TestCase):
                 "search": ["lan.example"],
             },
         )
+        self.assertEqual(
+            result["lan_dns"],
+            {
+                "domain": "local",
+                "status": "resolved",
+                "services": [
+                    {"hostname": "jellyseerr.local", "status": "resolved"},
+                    {"hostname": "radarr.local", "status": "resolved"},
+                    {"hostname": "sonarr.local", "status": "resolved"},
+                ],
+            },
+        )
         self.assertEqual(result["docker_dns"]["status"], "not_tested")
         self.assertIn("non-mutating", result["docker_dns"]["reason"])
         self.assertEqual(result["execution_context"], {"ssh": True})
@@ -124,7 +145,7 @@ class HostDiscoveryTests(unittest.TestCase):
         self.assertTrue(facts["os"]["supported"])
         self.assertEqual(facts["cpu"]["architecture"], "aarch64")
         self.assertEqual(
-            facts["graphics"], {"status": "ok", "render_devices": [], "available": False}
+            facts["graphics"], {"status": "ok", "render_devices": [], "available": False, "quicksync_usable": False, "devices": []}
         )
         self.assertEqual(facts["listening_ports"], {"status": "ok", "ports": [53]})
         self.assertFalse(facts["docker"]["present"])
@@ -198,6 +219,44 @@ class HostDiscoveryTests(unittest.TestCase):
         self.assertEqual(facts["refusal"]["code"], "unsupported_distribution")
         self.assertIn("Debian and Ubuntu", facts["refusal"]["action"])
 
+    def test_amd_unknown_and_inaccessible_render_devices_are_not_quicksync_usable(self) -> None:
+        cases = (
+            ([0, "0x1002\n", ""], [0, "", ""], [0, "", ""]),
+            ([1, "", "private sysfs failure"], [0, "", ""], [0, "", ""]),
+            ([0, "0x8086\n", ""], [0, "", ""], [1, "", "permission denied"]),
+        )
+        for vendor, readable, writable in cases:
+            with self.subTest(vendor=vendor, writable=writable):
+                runner = FixtureRunner("discovery-debian.json")
+                runner.commands["cat /sys/class/drm/renderD128/device/vendor"] = vendor
+                runner.commands["test -r /dev/dri/renderD128"] = readable
+                runner.commands["test -w /dev/dri/renderD128"] = writable
+                graphics = discover_host(runner).to_dict()["graphics"]
+                self.assertFalse(graphics["quicksync_usable"])
+                self.assertFalse(graphics["devices"][0]["quicksync_usable"])
+
+    def test_service_dns_unresolved_despite_healthy_resolver_is_structured(self) -> None:
+        runner = FixtureRunner("discovery-debian.json")
+        runner.commands["getent ahosts jellyseerr.local"] = [2, "", ""]
+        runner.commands["getent ahosts radarr.local"] = [0, "192.0.2.22 STREAM radarr.local\n", ""]
+        runner.commands["getent ahosts sonarr.local"] = [2, "", ""]
+        result = discover_host(runner).to_dict()
+        self.assertEqual(result["host_dns"]["status"], "ok")
+        self.assertEqual(result["lan_dns"]["status"], "unresolved")
+        self.assertEqual(
+            [item["status"] for item in result["lan_dns"]["services"]],
+            ["unresolved", "resolved", "unresolved"],
+        )
+
+    def test_service_dns_probe_error_is_distinct_from_unresolved(self) -> None:
+        runner = TimeoutRunner("discovery-debian.json", ("getent", "ahosts", "sonarr.example.test"))
+        runner.commands["getent ahosts jellyseerr.example.test"] = [0, "192.0.2.21 STREAM jellyseerr.example.test\n", ""]
+        runner.commands["getent ahosts radarr.example.test"] = [0, "192.0.2.22 STREAM radarr.example.test\n", ""]
+        facts = discover_host(runner, domain="example.test").to_dict()
+        self.assertEqual(facts["lan_dns"]["domain"], "example.test")
+        self.assertEqual(facts["lan_dns"]["status"], "error")
+        self.assertEqual(facts["lan_dns"]["services"][2]["status"], "error")
+
     def test_failed_graphics_probe_is_not_reported_as_confirmed_absence(self) -> None:
         runner = FixtureRunner("discovery-debian.json")
         runner.commands["find /dev/dri -maxdepth 1 -name renderD* -type c -print"] = [
@@ -266,7 +325,7 @@ class HostDiscoveryTests(unittest.TestCase):
         result = discover_host(runner).to_dict()
 
         self.assertEqual(
-            result["graphics"], {"status": "ok", "render_devices": [], "available": False}
+            result["graphics"], {"status": "ok", "render_devices": [], "available": False, "quicksync_usable": False, "devices": []}
         )
         self.assertEqual(result["listening_ports"], {"status": "ok", "ports": []})
         self.assertEqual(result["mounts"], {"status": "ok", "items": []})

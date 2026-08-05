@@ -12,6 +12,7 @@ from typing import Sequence
 from .command import CommandRunner
 from .compose import configure
 from .discover import HostFacts, discover_host
+from .envfile import EnvDocument
 from .host import HostPreparationPlan, apply_host_preparation, plan_host_preparation
 from .secrets import reveal_jellyfin
 from .state import SetupState
@@ -63,6 +64,19 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _configured_domain(repository_root: Path) -> str:
+    for candidate in (repository_root / ".env", repository_root / ".env.example"):
+        if not candidate.exists():
+            continue
+        try:
+            domain = EnvDocument.load(candidate).get("DOMAIN")
+        except OSError:
+            continue
+        if domain:
+            return domain
+    return "local"
+
+
 def _status(repository_root: Path) -> dict[str, object]:
     state_path = repository_root / ".homeflix" / "setup.json"
     exists = state_path.exists()
@@ -109,11 +123,11 @@ def main(argv: Sequence[str] | None = None, *, repository_root: Path | None = No
                 print(f"homeflix: invalid setup state: {error}", file=sys.stderr)
             return 1
     elif arguments.command == "discover":
-        discovered = discover_host(CommandRunner())
+        discovered = discover_host(CommandRunner(), domain=_configured_domain(root))
         result = discovered.to_dict()
     elif arguments.command == "host" and arguments.host_command == "prepare":
         runner = CommandRunner()
-        discovered = discover_host(runner)
+        discovered = discover_host(runner, domain=_configured_domain(root))
         preparation = plan_host_preparation(discovered)
         if arguments.apply and preparation.refusal is None:
             if not arguments.confirm_plan:
@@ -131,7 +145,7 @@ def main(argv: Sequence[str] | None = None, *, repository_root: Path | None = No
                 )
         result = preparation.to_dict()
     elif arguments.command == "configure":
-        discovered = discover_host(CommandRunner())
+        discovered = discover_host(CommandRunner(), domain=_configured_domain(root))
         try:
             result = configure(
                 root,

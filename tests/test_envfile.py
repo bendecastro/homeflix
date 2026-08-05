@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+import subprocess
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -19,10 +20,42 @@ class EnvDocumentTests(unittest.TestCase):
             "# heading\nFIRST='changed value'\n# middle\nUNKNOWN=keep\nLAST=three\n",
         )
 
-    def test_shell_quotes_spaces_and_single_quotes_and_rejects_injection(self) -> None:
-        rendered = EnvDocument.parse("").updated({"VALUE": "some 'safe' value"}).render()
-        self.assertEqual(rendered, "VALUE='some '\\''safe'\\'' value'\n")
-        for bad in ("line\nbreak", "line\rbreak", "nul\0byte"):
+    def test_values_round_trip_through_shell_and_compose_dotenv(self) -> None:
+        values = (
+            "value with spaces",
+            "some 'safe' value",
+            "$HOME `literal` C:\\path",
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            compose_path = root / "compose.yml"
+            compose_path.write_text(
+                "services:\n  fixture:\n    image: busybox\n    environment:\n      VALUE: ${VALUE}\n",
+                encoding="utf-8",
+            )
+            env_path = root / ".env"
+            for value in values:
+                with self.subTest(value=value):
+                    update_env(env_path, {"VALUE": value})
+                    shell = subprocess.run(
+                        ["bash", "-c", '. "$1"; printf "%s" "$VALUE"', "bash", str(env_path)],
+                        text=True, capture_output=True, check=False,
+                    )
+                    self.assertEqual(shell.returncode, 0, shell.stderr)
+                    self.assertEqual(shell.stdout, value)
+                    composed = subprocess.run(
+                        ["docker", "compose", "--env-file", str(env_path), "-f", str(compose_path), "config", "--environment"],
+                        text=True, capture_output=True, check=False,
+                    )
+                    self.assertEqual(composed.returncode, 0, composed.stderr)
+                    environment = dict(line.split("=", 1) for line in composed.stdout.splitlines() if "=" in line)
+                    self.assertEqual(environment["VALUE"], value)
+
+    def test_rejects_values_not_portably_representable(self) -> None:
+        for bad in (
+            "line\nbreak", "line\rbreak", "nul\0byte",
+            "apostrophe '$dollar", "apostrophe '`command", "apostrophe '\\path", 'apostrophe \'"quote',
+        ):
             with self.subTest(value=bad), self.assertRaises(ValueError):
                 EnvDocument.parse("").updated({"VALUE": bad})
 

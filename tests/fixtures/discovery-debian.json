@@ -17,6 +17,12 @@
     "uname -m": [0, "x86_64\n", ""],
     "cat /proc/cpuinfo": [0, "processor : 0\nmodel name : Fixture Intel CPU\n", ""],
     "find /dev/dri -maxdepth 1 -name renderD* -type c -print": [0, "/dev/dri/renderD128\n", ""],
+    "cat /sys/class/drm/renderD128/device/vendor": [0, "0x8086\n", ""],
+    "test -r /dev/dri/renderD128": [0, "", ""],
+    "test -w /dev/dri/renderD128": [0, "", ""],
+    "getent ahosts jellyseerr.local": [0, "192.0.2.21 STREAM jellyseerr.local\n", ""],
+    "getent ahosts radarr.local": [0, "192.0.2.22 STREAM radarr.local\n", ""],
+    "getent ahosts sonarr.local": [0, "192.0.2.23 STREAM sonarr.local\n", ""],
     "ss -H -lntu": [0, "tcp LISTEN 0 4096 0.0.0.0:80 0.0.0.0:*\ntcp LISTEN 0 4096 [::]:8096 [::]:*\n", ""],
     "findmnt --list --json --bytes --output TARGET,SOURCE,FSTYPE,AVAIL": [0, "{\"filesystems\":[{\"target\":\"/\",\"source\":\"/dev/vda1\",\"fstype\":\"ext4\",\"avail\":\"53687091200\"},{\"target\":\"/srv/media\",\"source\":\"/dev/mapper/media\",\"fstype\":\"ext4\",\"avail\":\"1099511627776\"}]}\n", ""],
     "cat /etc/resolv.conf": [0, "search lan.example\nnameserver 192.0.2.53\n", ""]

@@ -17,7 +17,7 @@ _ASSIGNMENT = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)=(.*)$")
 def _decode(value: str) -> str:
     value = value.strip()
     if len(value) >= 2 and value[0] == value[-1] == "'":
-        return value[1:-1].replace("'\\''", "'")
+        return value[1:-1]
     if len(value) >= 2 and value[0] == value[-1] == '"':
         return value[1:-1].replace(r"\"", '"').replace(r"\\", "\\")
     return value
@@ -30,7 +30,13 @@ def _quote(value: str) -> str:
         return ""
     if re.fullmatch(r"[A-Za-z0-9_./:@,+-]+", value):
         return value
-    return "'" + value.replace("'", "'\\''") + "'"
+    if "'" not in value:
+        return "'" + value + "'"
+    if not any(character in value for character in ('"', "$", "`", "\\")):
+        return '"' + value + '"'
+    raise ValueError(
+        "environment value cannot be represented identically for shell and Compose dotenv"
+    )
 
 
 @dataclass
