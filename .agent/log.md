@@ -225,3 +225,13 @@ state and conflicting distro packages, stages apt repository files atomically, b
 privileged child processes, verifies identity/group/service state, and reports partial or
 cleanup failures structurally. Fifty-eight fixture tests pass and fresh spec/safety reviews
 passed. No real apt, systemd, group, repository, or Docker mutation was run.
+
+## [2026-08-05] implementation | Agent setup task 4 — secure host configuration
+
+Added atomic mode-0600 dotenv updates with real Bash/Compose-compatible encoding, effective
+last-assignment semantics, inline-comment preservation, generated-once Jellyfin credentials,
+and controlling-terminal-only reveal. Configuration verifies mounted storage, derives host
+identity, pins the Compose project, probes actual LAN service resolution, and renders a
+byte-stable ignored override. QuickSync is enabled only for accessible Intel render devices.
+Seventy-nine tests and fresh spec/security reviews passed; no real deployment files were
+created.

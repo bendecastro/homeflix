@@ -84,15 +84,15 @@ Updated: 2026-08-04
 
 ## Task 4: Generate secure configuration and host overrides
 
-- [ ] Add failing tests proving `.env.example` comments and ordering survive updates, values containing spaces are quoted safely, unknown existing keys survive, writes are mode 0600 and atomic, and rendered/logged results contain key names but not secret values.
-- [ ] Add failing tests for `configure` requiring `DATA_ROOT`, `CONFIG_ROOT`, and `CACHE_ROOT`, deriving PUID/PGID/timezone, setting `COMPOSE_PROJECT_NAME=homeflix`, generating a Jellyfin password with `secrets.token_urlsafe`, and refusing paths under a missing mount.
-- [ ] Add override tests: QuickSync adds `/dev/dri:/dev/dri`; unresolved LAN DNS adds direct Jellyseerr/Radarr/Sonarr setup ports; rerunning produces byte-identical YAML.
-- [ ] Run `python3 -m unittest tests.test_envfile tests.test_compose -v`; expect failures.
-- [ ] Implement `EnvDocument`, `update_env(path, updates, secret_keys)`, `ensure_service_credentials()`, `build_override(facts, direct_setup_ports)`, and `configure` with `--data-root`, `--config-root`, `--cache-root`, `--quality-profile`, and `--direct-setup-ports`. Use `JELLYFIN_ADMIN_USER` and `JELLYFIN_ADMIN_PASSWORD` as the canonical generated keys.
-- [ ] Implement `secrets reveal jellyfin` as an explicit controlling-terminal-only credential retrieval command; refuse pipes and JSON output so setup never exposes the generated password incidentally.
-- [ ] Add `.homeflix/` and `docker-compose.override.yml` to `.gitignore`; add non-secret defaults and empty generated credential keys to `.env.example`.
-- [ ] Run the two test modules, `docker compose --env-file .env.example config --quiet`, and `git check-ignore .env .homeflix/setup.json docker-compose.override.yml`; expect all green/ignored.
-- [ ] Commit with `git add .gitignore .env.example scripts/homeflix_setup/envfile.py scripts/homeflix_setup/secrets.py scripts/homeflix_setup/compose.py scripts/homeflix_setup/cli.py tests/test_envfile.py tests/test_compose.py && git commit -m "Generate secure host configuration"`.
+- [x] Add failing tests proving `.env.example` comments and ordering survive updates, values containing spaces are quoted safely, unknown existing keys survive, writes are mode 0600 and atomic, and rendered/logged results contain key names but not secret values.
+- [x] Add failing tests for `configure` requiring `DATA_ROOT`, `CONFIG_ROOT`, and `CACHE_ROOT`, deriving PUID/PGID/timezone, setting `COMPOSE_PROJECT_NAME=homeflix`, generating a Jellyfin password with `secrets.token_urlsafe`, and refusing paths under a missing mount.
+- [x] Add override tests: QuickSync adds `/dev/dri:/dev/dri`; unresolved LAN DNS adds direct Jellyseerr/Radarr/Sonarr setup ports; rerunning produces byte-identical YAML.
+- [x] Run `python3 -m unittest tests.test_envfile tests.test_compose -v`; expect failures.
+- [x] Implement `EnvDocument`, `update_env(path, updates, secret_keys)`, `ensure_service_credentials()`, `build_override(facts, direct_setup_ports)`, and `configure` with `--data-root`, `--config-root`, `--cache-root`, `--quality-profile`, and `--direct-setup-ports`. Use `JELLYFIN_ADMIN_USER` and `JELLYFIN_ADMIN_PASSWORD` as the canonical generated keys.
+- [x] Implement `secrets reveal jellyfin` as an explicit controlling-terminal-only credential retrieval command; refuse pipes and JSON output so setup never exposes the generated password incidentally.
+- [x] Add `.homeflix/` and `docker-compose.override.yml` to `.gitignore`; add non-secret defaults and empty generated credential keys to `.env.example`.
+- [x] Run the two test modules, `docker compose --env-file .env.example config --quiet`, and `git check-ignore .env .homeflix/setup.json docker-compose.override.yml`; expect all green/ignored.
+- [x] Commit with `git add .gitignore .env.example scripts/homeflix_setup/envfile.py scripts/homeflix_setup/secrets.py scripts/homeflix_setup/compose.py scripts/homeflix_setup/cli.py tests/test_envfile.py tests/test_compose.py && git commit -m "Generate secure host configuration"`.
 
 ## Task 5: Make preflight phase-aware and harden storage binds
 
