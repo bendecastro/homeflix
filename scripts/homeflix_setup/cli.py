@@ -11,6 +11,7 @@ from typing import Sequence
 
 from .command import CommandRunner
 from .compose import configure
+from .core import deploy_core
 from .discover import HostFacts, discover_host
 from .envfile import EnvDocument
 from .host import HostPreparationPlan, apply_host_preparation, plan_host_preparation
@@ -62,6 +63,13 @@ def build_parser() -> argparse.ArgumentParser:
         "preflight", help="validate configuration and storage without starting containers"
     )
     preflight_parser.add_argument("--phase", choices=("core", "acquisition"), default="core")
+    deploy_parser = subparsers.add_parser(
+        "deploy", help="reconcile an explicit deployment phase allowlist"
+    )
+    deploy_parser.add_argument("phase", choices=("core",))
+    deploy_parser.add_argument(
+        "--dry-run", action="store_true", help="print exact planned commands without probing or changing the host"
+    )
     secrets_parser = subparsers.add_parser("secrets", help="explicitly retrieve local credentials")
     secrets_subparsers = secrets_parser.add_subparsers(dest="secrets_command", required=True)
     reveal_parser = secrets_subparsers.add_parser("reveal", help="reveal credentials on /dev/tty only")
@@ -205,6 +213,16 @@ def main(argv: Sequence[str] | None = None, *, repository_root: Path | None = No
                 label="preflight refused",
                 error=error,
             )
+    elif arguments.command == "deploy" and arguments.phase == "core":
+        try:
+            result = deploy_core(root, dry_run=arguments.dry_run)
+        except (OSError, RuntimeError, ValueError) as error:
+            return _input_error(
+                json_output=arguments.json_output,
+                code="deployment_refused",
+                label="deployment refused",
+                error=error,
+            )
     else:  # pragma: no cover - argparse limits command values
         raise AssertionError(f"unhandled command {arguments.command}")
 
@@ -215,6 +233,20 @@ def main(argv: Sequence[str] | None = None, *, repository_root: Path | None = No
         if preparation.refusal:
             print(f"homeflix: {preparation.refusal['message']}", file=sys.stderr)
             print(f"Action: {preparation.refusal['action']}", file=sys.stderr)
+    elif arguments.command == "deploy":
+        if result["status"] == "planned":
+            print("Core services: " + " ".join(result["services"]))
+            for command in result["read_only_commands"]:
+                print("Read-only command: " + " ".join(command))
+            for command in result["mutation_commands"]:
+                print("Mutation command: " + " ".join(command))
+        else:
+            print(f"Core deployment: {result['status']}")
+            for item in result["services"]:
+                print(
+                    f"{item['service']}: state={item['current_state']} "
+                    f"ready={str(item['ready']).lower()} reason={item['reason']}"
+                )
     elif arguments.command == "configure":
         for item in result["environment"]["keys"]:
             print(f"{item['name']}: {item['status']}")
@@ -270,4 +302,6 @@ def main(argv: Sequence[str] | None = None, *, repository_root: Path | None = No
         return 1 if preparation.refusal is not None else 0
     if preflight is not None:
         return 0 if preflight.passed else 1
+    if arguments.command == "deploy":
+        return 0 if result["status"] in {"planned", "ready", "already_ready"} else 1
     return 1 if discovered is not None and not discovered.supported else 0

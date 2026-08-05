@@ -10,7 +10,9 @@ import unittest
 from unittest import mock
 from unittest.mock import patch
 
-from scripts.homeflix_setup.compose import _atomic_write, build_override, configure
+from scripts.homeflix_setup.compose import (
+    CORE_SERVICES, _atomic_write, build_override, compose_ps, compose_up, configure,
+)
 from scripts.homeflix_setup.discover import GraphicsDeviceFact, GraphicsFact, HostFacts, MountFact
 from scripts.homeflix_setup.envfile import EnvDocument
 
@@ -139,6 +141,58 @@ class ComposeOverrideTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "not under"):
                 configure(root, facts(mount=str(outside_mount)), data_root=str(existing), config_root=str(existing), cache_root=str(existing))
             self.assertFalse((root / ".env").exists())
+
+
+class ComposeExecutionTests(unittest.TestCase):
+    class Runner:
+        def __init__(self, stdout: str = "", returncode: int = 0) -> None:
+            self.stdout = stdout
+            self.returncode = returncode
+            self.commands: list[tuple[str, ...]] = []
+
+        def run(self, argv, **kwargs):
+            command = tuple(argv)
+            self.commands.append(command)
+            return subprocess.CompletedProcess(command, self.returncode, self.stdout, "secret raw error")
+
+    def make_root(self) -> tuple[tempfile.TemporaryDirectory[str], Path]:
+        temporary = tempfile.TemporaryDirectory()
+        root = Path(temporary.name)
+        (root / ".env").write_text("COMPOSE_PROJECT_NAME=homeflix\n", encoding="utf-8")
+        return temporary, root
+
+    def test_compose_up_has_explicit_context_project_and_services(self) -> None:
+        temporary, root = self.make_root()
+        self.addCleanup(temporary.cleanup)
+        runner = self.Runner()
+        compose_up(root, CORE_SERVICES, runner)
+        self.assertEqual(runner.commands, [(
+            "docker", "compose", "--project-directory", str(root),
+            "--env-file", str(root / ".env"), "--project-name", "homeflix",
+            "up", "--detach", *CORE_SERVICES,
+        )])
+
+    def test_compose_ps_accepts_array_and_json_lines_and_rejects_malformed(self) -> None:
+        records = [
+            {"Service": "traefik", "State": "running", "Health": "healthy"},
+            {"Service": "radarr", "State": "exited", "Health": ""},
+        ]
+        temporary, root = self.make_root()
+        self.addCleanup(temporary.cleanup)
+        for stdout in (json.dumps(records), "\n".join(json.dumps(item) for item in records)):
+            with self.subTest(stdout=stdout):
+                states = compose_ps(root, self.Runner(stdout))
+                self.assertEqual(states["traefik"], {"state": "running", "health": "healthy"})
+                self.assertEqual(states["radarr"]["state"], "exited")
+        for malformed in ("not-json", json.dumps({"State": "running"}), json.dumps([1])):
+            with self.subTest(malformed=malformed), self.assertRaises(ValueError):
+                compose_ps(root, self.Runner(malformed))
+
+    def test_compose_up_rejects_non_core_service(self) -> None:
+        temporary, root = self.make_root()
+        self.addCleanup(temporary.cleanup)
+        with self.assertRaises(ValueError):
+            compose_up(root, ("gluetun",), self.Runner())
 
 
 class StorageBindTests(unittest.TestCase):

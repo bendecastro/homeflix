@@ -1,17 +1,32 @@
-"""Deterministic local Compose configuration generation."""
+"""Deterministic local Compose configuration and execution helpers."""
 
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
+import subprocess
 import tempfile
+from typing import Mapping, Protocol, Sequence
 
 from .discover import HostFacts
-from .envfile import update_env
+from .envfile import EnvDocument, update_env
 from .secrets import ensure_service_credentials
 
 
 DIRECT_PORTS = (("jellyseerr", 5055), ("radarr", 7878), ("sonarr", 8989))
+CORE_SERVICES = ("traefik", "jellyfin", "jellyseerr", "radarr", "sonarr")
+
+
+class Runner(Protocol):
+    def run(
+        self,
+        argv: Sequence[str],
+        *,
+        input_text: str | None = None,
+        check: bool = False,
+        timeout: float | None = None,
+    ) -> subprocess.CompletedProcess[str]: ...
 
 
 def _quicksync_usable(facts: HostFacts) -> bool:
@@ -47,7 +62,7 @@ def _atomic_write(path: Path, contents: str, mode: int) -> None:
         )
         os.fchmod(descriptor, mode)
         temporary = os.fdopen(descriptor, "w", encoding="utf-8", newline="")
-        descriptor = None  # fdopen owns the descriptor after a successful call.
+        descriptor = None
         with temporary:
             temporary.write(contents)
             temporary.flush()
@@ -142,3 +157,77 @@ def configure(
             "direct_setup_ports": direct_setup_ports or facts.lan_dns_status != "resolved",
         }},
     }
+
+
+def _project_name(root: Path) -> str:
+    value = EnvDocument.load(root / ".env").get("COMPOSE_PROJECT_NAME")
+    if not value or not value.replace("-", "").replace("_", "").isalnum():
+        raise ValueError("COMPOSE_PROJECT_NAME must be a stable non-empty project name")
+    return value
+
+
+def compose_command(repository_root: str | os.PathLike[str]) -> tuple[str, ...]:
+    """Return the explicit, cwd-independent Compose command prefix."""
+
+    root = Path(repository_root).resolve()
+    return (
+        "docker", "compose", "--project-directory", str(root),
+        "--env-file", str(root / ".env"), "--project-name", _project_name(root),
+    )
+
+
+def compose_up(
+    repository_root: str | os.PathLike[str], services: Sequence[str], runner: Runner
+) -> subprocess.CompletedProcess[str]:
+    """Start exactly the named services; callers must perform preflight first."""
+
+    selected = tuple(services)
+    if not selected or any(service not in CORE_SERVICES for service in selected):
+        raise ValueError("Compose core deployment services must come from CORE_SERVICES")
+    argv = (*compose_command(repository_root), "up", "--detach", *selected)
+    return runner.run(argv, check=False, timeout=300)
+
+
+def _json_records(text: str) -> list[object]:
+    stripped = text.strip()
+    if not stripped:
+        return []
+    try:
+        value = json.loads(stripped)
+    except json.JSONDecodeError:
+        records: list[object] = []
+        for line in stripped.splitlines():
+            try:
+                records.append(json.loads(line))
+            except json.JSONDecodeError as error:
+                raise ValueError("Compose service state was malformed") from error
+        return records
+    return value if isinstance(value, list) else [value]
+
+
+def compose_ps(
+    repository_root: str | os.PathLike[str], runner: Runner
+) -> dict[str, dict[str, str]]:
+    """Read Compose v2 service state, accepting array and JSON-lines output."""
+
+    result = runner.run(
+        (*compose_command(repository_root), "ps", "--format", "json"),
+        check=False,
+        timeout=30,
+    )
+    if result.returncode:
+        raise RuntimeError("Compose service state is unavailable")
+    records = _json_records(result.stdout)
+    states: dict[str, dict[str, str]] = {}
+    for record in records:
+        if not isinstance(record, Mapping):
+            raise ValueError("Compose service state was malformed")
+        service = record.get("Service") or record.get("service")
+        state = record.get("State") or record.get("state")
+        health = record.get("Health") or record.get("health") or ""
+        if not isinstance(service, str) or not service or not isinstance(state, str):
+            raise ValueError("Compose service state was malformed")
+        if not isinstance(health, str) or service in states:
+            raise ValueError("Compose service state was malformed")
+        states[service] = {"state": state.casefold(), "health": health.casefold()}
+    return states
