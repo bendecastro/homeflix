@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from contextlib import redirect_stderr, redirect_stdout
+from dataclasses import replace
 import io
 import json
 from pathlib import Path
@@ -11,7 +12,17 @@ from unittest.mock import patch
 
 from scripts.homeflix_setup.cli import main
 from scripts.homeflix_setup.compose import CORE_SERVICES
-from scripts.homeflix_setup.core import ReadinessResult, deploy_core
+from scripts.homeflix_setup.core import (
+    ArtifactIdentity,
+    DeploymentSnapshot,
+    ReadinessResult,
+    _readiness_targets,
+    capture_deployment_snapshot,
+    deploy_core,
+    wait_for_container,
+    wait_for_http,
+)
+from scripts.homeflix_setup.envfile import EnvDocument
 from scripts.homeflix_setup.preflight import CheckResult, PreflightReport
 
 
@@ -55,6 +66,99 @@ def passing_preflight(config, phase, runner):
     return PreflightReport("core", (CheckResult("fixture", "pass", "passed"),))
 
 
+class FakeClock:
+    def __init__(self) -> None:
+        self.now = 0.0
+
+    def __call__(self) -> float:
+        return self.now
+
+    def sleep(self, seconds: float) -> None:
+        self.now += seconds
+
+    def advance(self, seconds: float) -> None:
+        self.now += seconds
+
+
+class ReadinessHelperTests(unittest.TestCase):
+    def test_targets_use_direct_safe_endpoints_and_expected_host_headers(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            env = Path(directory) / ".env"
+            env.write_text("DOMAIN=homeflix.test\n", encoding="utf-8")
+            targets = _readiness_targets(EnvDocument.load(env))
+        self.assertEqual(targets["traefik"], ("http://127.0.0.1:8080/api/rawdata", {}))
+        self.assertEqual(targets["jellyfin"], ("http://127.0.0.1:8096/System/Info/Public", {}))
+        self.assertEqual(targets["jellyseerr"][1], {"Host": "jellyseerr.homeflix.test"})
+        self.assertEqual(targets["radarr"], ("http://127.0.0.1/ping", {"Host": "radarr.homeflix.test"}))
+        self.assertEqual(targets["sonarr"], ("http://127.0.0.1/ping", {"Host": "sonarr.homeflix.test"}))
+
+    def test_snapshot_hashes_artifacts_mount_identity_and_rejects_symlinks(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            env = root / ".env"
+            compose = root / "docker-compose.yml"
+            env.write_text(f"DATA_ROOT={root}\n", encoding="utf-8")
+            compose.write_text("services: {}\n", encoding="utf-8")
+            first = capture_deployment_snapshot(root, EnvDocument.load(env))
+            self.assertIsNotNone(first.data_root_identity)
+            self.assertIsNotNone(first.data_mount_record)
+            self.assertIsNone(first.override)
+            compose.write_text("services:\n  fixture: {}\n", encoding="utf-8")
+            (root / "docker-compose.override.yml").write_text("services: {}\n", encoding="utf-8")
+            second = capture_deployment_snapshot(root, EnvDocument.load(env))
+            self.assertNotEqual(first.compose.sha256, second.compose.sha256)
+            self.assertIsNotNone(second.override)
+            compose.unlink()
+            compose.symlink_to(root / "docker-compose.override.yml")
+            with self.assertRaises(ValueError):
+                capture_deployment_snapshot(root, EnvDocument.load(env))
+
+    def test_wait_for_http_retries_and_obeys_one_deadline(self) -> None:
+        clock = FakeClock()
+        attempts: list[float] = []
+        def eventual(url, headers, timeout):
+            attempts.append(timeout)
+            return len(attempts) == 3
+        result = wait_for_http(
+            "http://fixture", timeout=5, interval=1, probe=eventual,
+            sleep=clock.sleep, clock=clock,
+        )
+        self.assertTrue(result.ready)
+        self.assertEqual(len(attempts), 3)
+        self.assertEqual(clock.now, 2)
+
+        clock = FakeClock()
+        result = wait_for_http(
+            "http://fixture", timeout=3, interval=2,
+            probe=lambda *args: False, sleep=clock.sleep, clock=clock,
+        )
+        self.assertFalse(result.ready)
+        self.assertEqual(result.reason, "HTTP readiness timed out")
+        self.assertEqual(clock.now, 3)
+
+    def test_wait_for_container_retries_and_reports_unhealthy_at_deadline(self) -> None:
+        clock = FakeClock()
+        states = iter((
+            {"radarr": {"state": "restarting", "health": ""}},
+            {"radarr": {"state": "running", "health": "healthy"}},
+        ))
+        result = wait_for_container(
+            "radarr", lambda: next(states), timeout=4, interval=1,
+            sleep=clock.sleep, clock=clock,
+        )
+        self.assertTrue(result.ready)
+        self.assertEqual(clock.now, 1)
+
+        clock = FakeClock()
+        result = wait_for_container(
+            "radarr", lambda: {"radarr": {"state": "running", "health": "unhealthy"}},
+            timeout=3, interval=2, sleep=clock.sleep, clock=clock,
+        )
+        self.assertFalse(result.ready)
+        self.assertEqual(result.reason, "container reported unhealthy")
+        self.assertEqual(clock.now, 3)
+
+
 class CoreDeploymentTests(unittest.TestCase):
     def make_root(self) -> tuple[tempfile.TemporaryDirectory[str], Path]:
         temporary = tempfile.TemporaryDirectory()
@@ -62,6 +166,7 @@ class CoreDeploymentTests(unittest.TestCase):
         (root / ".env").write_text(
             "COMPOSE_PROJECT_NAME=homeflix\nDOMAIN=homeflix.test\n", encoding="utf-8"
         )
+        (root / "docker-compose.yml").write_text("services: {}\n", encoding="utf-8")
         return temporary, root
 
     def test_deploy_invokes_only_immutable_core_allowlist_and_waits_for_both_conditions(self) -> None:
@@ -71,7 +176,7 @@ class CoreDeploymentTests(unittest.TestCase):
         container_calls: list[str] = []
         http_calls: list[str] = []
 
-        def containers(service, probe):
+        def containers(service, probe, **kwargs):
             container_calls.append(service)
             return ReadinessResult(True, "ready")
 
@@ -84,7 +189,7 @@ class CoreDeploymentTests(unittest.TestCase):
             container_waiter=containers, http_waiter=http,
         )
         up = next(command for command in runner.commands if "up" in command)
-        self.assertEqual(up[-7:], ("up", "--detach", *CORE_SERVICES))
+        self.assertEqual(up[-8:], ("up", "--detach", "--no-deps", *CORE_SERVICES))
         self.assertEqual(container_calls, list(CORE_SERVICES))
         self.assertEqual(len(http_calls), len(CORE_SERVICES))
         self.assertEqual(result["status"], "ready")
@@ -216,6 +321,141 @@ class CoreDeploymentTests(unittest.TestCase):
         for forbidden in ("hunter2", "password", "10.0.0.8", "/private", ".env"):
             self.assertNotIn(forbidden, rendered)
 
+    def test_one_readiness_budget_prevents_per_service_timeout_accumulation(self) -> None:
+        temporary, root = self.make_root()
+        self.addCleanup(temporary.cleanup)
+        clock = FakeClock()
+        runner = FakeRunner([ready_records()])
+
+        def consume_http(url, **kwargs):
+            clock.advance(kwargs["timeout"])
+            return ReadinessResult(True, "ready")
+
+        result = deploy_core(
+            root, runner=runner, readiness_timeout=25, clock=clock,
+            http_waiter=consume_http,
+            preflight_runner=lambda *args: self.fail("healthy no-op must not preflight"),
+        )
+        self.assertEqual(result["status"], "already_ready")
+        self.assertLessEqual(clock.now, 25.000001)
+        self.assertFalse(any("up" in command for command in runner.commands))
+
+        temporary2, root2 = self.make_root()
+        self.addCleanup(temporary2.cleanup)
+        clock2 = FakeClock()
+        runner2 = FakeRunner([{}, ready_records()])
+
+        def consume_container(service, probe, **kwargs):
+            clock2.advance(kwargs["timeout"])
+            return ReadinessResult(False, "container did not reach running state")
+
+        result2 = deploy_core(
+            root2, runner=runner2, readiness_timeout=25, clock=clock2,
+            preflight_runner=passing_preflight, container_waiter=consume_container,
+        )
+        self.assertEqual(result2["status"], "partial_failure")
+        self.assertLessEqual(clock2.now, 25.000001)
+
+    def test_preflight_drift_in_each_snapshot_field_prevents_compose_up(self) -> None:
+        artifact = ArtifactIdentity(1, 2, 3, "a" * 64)
+        baseline = DeploymentSnapshot(
+            artifact, artifact, None, (4, 5), ("4:0", "/data", "ext4", "/dev/a")
+        )
+        variants = (
+            replace(baseline, environment=replace(artifact, sha256="b" * 64)),
+            replace(baseline, compose=replace(artifact, inode=9)),
+            replace(baseline, override=artifact),
+            replace(baseline, data_root_identity=(4, 6)),
+            replace(baseline, data_mount_record=("4:1", "/data", "ext4", "/dev/b")),
+        )
+        for changed in variants:
+            with self.subTest(changed=changed):
+                temporary, root = self.make_root()
+                try:
+                    runner = FakeRunner([{}])
+                    snapshots = iter((baseline, changed))
+                    result = deploy_core(
+                        root, runner=runner, preflight_runner=passing_preflight,
+                        snapshotter=lambda *args: next(snapshots),
+                    )
+                    self.assertEqual(result["status"], "deployment_drift")
+                    self.assertFalse(any("up" in command for command in runner.commands))
+                finally:
+                    temporary.cleanup()
+
+        temporary, root = self.make_root()
+        self.addCleanup(temporary.cleanup)
+        runner = FakeRunner([{}])
+        calls = 0
+        def disappearing(*args):
+            nonlocal calls
+            calls += 1
+            if calls == 2:
+                raise ValueError("private vanished path")
+            return baseline
+        result = deploy_core(
+            root, runner=runner, preflight_runner=passing_preflight,
+            snapshotter=disappearing,
+        )
+        self.assertEqual(result["status"], "deployment_drift")
+        self.assertNotIn("private", json.dumps(result))
+        self.assertFalse(any("up" in command for command in runner.commands))
+
+    def test_final_state_failure_preserves_last_known_diagnostics(self) -> None:
+        temporary, root = self.make_root()
+        self.addCleanup(temporary.cleanup)
+
+        class FinalFailureRunner(FakeRunner):
+            def __init__(self):
+                super().__init__([{}])
+                self.ps_calls = 0
+            def run(self, argv, **kwargs):
+                command = tuple(argv)
+                if "ps" in command:
+                    self.commands.append(command)
+                    self.ps_calls += 1
+                    if self.ps_calls == 7:
+                        raise OSError("private final state failure 10.0.0.8")
+                    payload = [] if self.ps_calls == 1 else list(ready_records().values())
+                    return subprocess.CompletedProcess(command, 0, json.dumps(payload), "")
+                return super().run(argv, **kwargs)
+
+        runner = FinalFailureRunner()
+        def container(service, probe, **kwargs):
+            probe()
+            return ReadinessResult(True, "ready")
+        result = deploy_core(
+            root, runner=runner, preflight_runner=passing_preflight,
+            container_waiter=container,
+            http_waiter=lambda *args, **kwargs: ReadinessResult(True, "ready"),
+        )
+        self.assertEqual(result["status"], "state_verification_failed")
+        services = {item["service"]: item for item in result["services"]}
+        self.assertEqual(services["jellyfin"]["current_state"], "running")
+        self.assertTrue(services["jellyfin"]["ready"])
+        self.assertFalse(result["checkpoint_recorded"])
+        self.assertNotIn("10.0.0.8", json.dumps(result))
+
+    def test_checkpoint_save_failures_return_verified_diagnostics(self) -> None:
+        for initially_ready in (True, False):
+            with self.subTest(initially_ready=initially_ready):
+                temporary, root = self.make_root()
+                try:
+                    states = [ready_records()] if initially_ready else [{}, ready_records()]
+                    runner = FakeRunner(states)
+                    with patch("scripts.homeflix_setup.core.SetupState.save", side_effect=OSError("private path")):
+                        result = deploy_core(
+                            root, runner=runner, preflight_runner=passing_preflight,
+                            container_waiter=lambda *args, **kwargs: ReadinessResult(True, "ready"),
+                            http_waiter=lambda *args, **kwargs: ReadinessResult(True, "ready"),
+                        )
+                    self.assertEqual(result["status"], "checkpoint_failed")
+                    self.assertFalse(result["checkpoint_recorded"])
+                    self.assertTrue(all(item["ready"] for item in result["services"]))
+                    self.assertNotIn("private", json.dumps(result))
+                finally:
+                    temporary.cleanup()
+
     def test_partial_failure_is_sanitized_resumable_and_does_not_checkpoint(self) -> None:
         temporary, root = self.make_root()
         self.addCleanup(temporary.cleanup)
@@ -247,7 +487,9 @@ class CoreDeploymentTests(unittest.TestCase):
         )
         self.assertEqual(runner.commands, [])
         self.assertEqual(result["services"], list(CORE_SERVICES))
-        self.assertEqual(result["commands"][-1][-7:], ["up", "--detach", *CORE_SERVICES])
+        self.assertEqual(
+            result["commands"][-1][-8:], ["up", "--detach", "--no-deps", *CORE_SERVICES]
+        )
         self.assertFalse((root / ".homeflix" / "setup.json").exists())
 
 

@@ -188,7 +188,7 @@ def compose_up(
     selected = tuple(services)
     if not selected or any(service not in CORE_SERVICES for service in selected):
         raise ValueError("Compose core deployment services must come from CORE_SERVICES")
-    argv = (*compose_command(repository_root), "up", "--detach", *selected)
+    argv = (*compose_command(repository_root), "up", "--detach", "--no-deps", *selected)
     return runner.run(argv, check=False, timeout=300)
 
 

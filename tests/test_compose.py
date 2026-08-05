@@ -169,8 +169,12 @@ class ComposeExecutionTests(unittest.TestCase):
         self.assertEqual(runner.commands, [(
             "docker", "compose", "--project-directory", str(root),
             "--env-file", str(root / ".env"), "--project-name", "homeflix",
-            "up", "--detach", *CORE_SERVICES,
+            "up", "--detach", "--no-deps", *CORE_SERVICES,
         )])
+        rendered = " ".join(runner.commands[0])
+        self.assertIn("--no-deps", rendered)
+        for forbidden_dependency in ("gluetun", "qbittorrent", "prowlarr", "nzbget"):
+            self.assertNotIn(forbidden_dependency, rendered)
 
     def test_compose_ps_accepts_array_and_json_lines_and_rejects_malformed(self) -> None:
         records = [

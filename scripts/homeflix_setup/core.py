@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import hashlib
+import os
 from pathlib import Path
+import stat
 import subprocess
 import time
 from typing import Callable, Mapping, Sequence
@@ -21,6 +24,25 @@ class ReadinessResult:
     ready: bool
     reason: str
 
+
+@dataclass(frozen=True)
+class ArtifactIdentity:
+    device: int
+    inode: int
+    size: int
+    sha256: str
+
+
+@dataclass(frozen=True)
+class DeploymentSnapshot:
+    environment: ArtifactIdentity
+    compose: ArtifactIdentity
+    override: ArtifactIdentity | None
+    data_root_identity: tuple[int, int] | None
+    data_mount_record: tuple[str, str, str, str] | None
+
+
+READINESS_TIMEOUT = 90.0
 
 HttpProbe = Callable[[str, Mapping[str, str], float], bool]
 StateProbe = Callable[[], Mapping[str, Mapping[str, str]]]
@@ -47,12 +69,13 @@ def wait_for_http(
 ) -> ReadinessResult:
     """Wait for a bounded HTTP response without exposing response bodies or addresses."""
 
-    deadline = clock() + timeout
+    deadline = clock() + max(0.0, timeout)
     while True:
-        if probe(url, headers or {}, min(5.0, max(0.1, deadline - clock()))):
-            return ReadinessResult(True, "ready")
-        if clock() >= deadline:
+        remaining = deadline - clock()
+        if remaining <= 0:
             return ReadinessResult(False, "HTTP readiness timed out")
+        if probe(url, headers or {}, min(5.0, remaining)):
+            return ReadinessResult(True, "ready")
         sleep(min(interval, max(0.0, deadline - clock())))
 
 
@@ -67,8 +90,17 @@ def wait_for_container(
 ) -> ReadinessResult:
     """Wait for running, non-unhealthy Compose state using an injectable probe."""
 
-    deadline = clock() + timeout
+    deadline = clock() + max(0.0, timeout)
+    observed: Mapping[str, str] = {}
     while True:
+        if clock() >= deadline:
+            state = observed.get("state", "unknown")
+            health = observed.get("health", "")
+            if state == "running" and health == "unhealthy":
+                return ReadinessResult(False, "container reported unhealthy")
+            if state == "running":
+                return ReadinessResult(False, "container health did not become ready")
+            return ReadinessResult(False, "container did not reach running state")
         try:
             observed = state_probe().get(service, {})
         except (OSError, RuntimeError, ValueError, subprocess.SubprocessError):
@@ -77,13 +109,88 @@ def wait_for_container(
         health = observed.get("health", "")
         if state == "running" and health in {"", "healthy"}:
             return ReadinessResult(True, "ready")
-        if clock() >= deadline:
-            if state == "running" and health == "unhealthy":
-                return ReadinessResult(False, "container reported unhealthy")
-            if state == "running":
-                return ReadinessResult(False, "container health did not become ready")
-            return ReadinessResult(False, "container did not reach running state")
         sleep(min(interval, max(0.0, deadline - clock())))
+
+
+def _artifact_identity(path: Path, *, optional: bool = False) -> ArtifactIdentity | None:
+    try:
+        descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+    except FileNotFoundError:
+        if optional:
+            return None
+        raise ValueError("deployment artifact is unavailable") from None
+    except OSError as error:
+        raise ValueError("deployment artifact cannot be verified") from error
+    try:
+        before = os.fstat(descriptor)
+        if not stat.S_ISREG(before.st_mode):
+            raise ValueError("deployment artifact must be a regular file")
+        digest = hashlib.sha256()
+        while chunk := os.read(descriptor, 128 * 1024):
+            digest.update(chunk)
+        after = os.fstat(descriptor)
+        if (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns) != (
+            after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns
+        ):
+            raise ValueError("deployment artifact changed while being read")
+        return ArtifactIdentity(before.st_dev, before.st_ino, before.st_size, digest.hexdigest())
+    finally:
+        os.close(descriptor)
+
+
+def _unescape_mount(value: str) -> str:
+    for encoded, decoded in (("\\040", " "), ("\\011", "\t"), ("\\012", "\n"), ("\\134", "\\")):
+        value = value.replace(encoded, decoded)
+    return value
+
+
+def _data_mount_snapshot(config: EnvDocument) -> tuple[tuple[int, int], tuple[str, str, str, str]] | tuple[None, None]:
+    configured = config.get("DATA_ROOT")
+    if not configured:
+        return None, None
+    path = Path(configured).expanduser()
+    try:
+        if not path.is_absolute() or path.resolve(strict=True) != path:
+            raise ValueError("DATA_ROOT identity cannot be verified")
+        identity = path.stat()
+        device = f"{os.major(identity.st_dev)}:{os.minor(identity.st_dev)}"
+        candidates: list[tuple[Path, tuple[str, str, str, str]]] = []
+        for line in Path("/proc/self/mountinfo").read_text(encoding="utf-8").splitlines():
+            fields = line.split()
+            separator = fields.index("-")
+            mount_point = Path(_unescape_mount(fields[4]))
+            try:
+                path.relative_to(mount_point)
+            except ValueError:
+                continue
+            if fields[2] != device:
+                continue
+            candidates.append((mount_point, (fields[2], str(mount_point), fields[separator + 1], fields[separator + 2])))
+        if not candidates:
+            raise ValueError("DATA_ROOT mount identity cannot be verified")
+        record = max(candidates, key=lambda item: len(item[0].parts))[1]
+    except (OSError, ValueError, IndexError) as error:
+        if isinstance(error, ValueError) and str(error).startswith("DATA_ROOT"):
+            raise
+        raise ValueError("DATA_ROOT mount identity cannot be verified") from error
+    return (identity.st_dev, identity.st_ino), record
+
+
+def capture_deployment_snapshot(repository_root: str | Path, config: EnvDocument) -> DeploymentSnapshot:
+    """Capture mutation inputs; a final adjacent comparison narrows, but cannot remove, unmount races."""
+
+    root = Path(repository_root).resolve()
+    data_identity, mount_record = _data_mount_snapshot(config)
+    environment = _artifact_identity(root / ".env")
+    compose = _artifact_identity(root / "docker-compose.yml")
+    assert environment is not None and compose is not None
+    return DeploymentSnapshot(
+        environment,
+        compose,
+        _artifact_identity(root / "docker-compose.override.yml", optional=True),
+        data_identity,
+        mount_record,
+    )
 
 
 def _readiness_targets(config: EnvDocument) -> dict[str, tuple[str, dict[str, str]]]:
@@ -124,6 +231,59 @@ def _diagnostics(
     return diagnostics
 
 
+def _initial_readiness(
+    states: Mapping[str, Mapping[str, str]],
+    targets: Mapping[str, tuple[str, dict[str, str]]],
+    http_waiter: Callable[..., ReadinessResult],
+    *,
+    timeout: float,
+    clock: Callable[[], float],
+) -> dict[str, ReadinessResult]:
+    deadline = clock() + timeout
+    readiness: dict[str, ReadinessResult] = {}
+    remaining_services = len(CORE_SERVICES)
+    for service in CORE_SERVICES:
+        observed = states.get(service, {})
+        remaining = max(0.0, deadline - clock())
+        fair_share = remaining / remaining_services
+        remaining_services -= 1
+        if observed.get("state") == "running" and observed.get("health") in {"", "healthy"}:
+            url, headers = targets[service]
+            readiness[service] = http_waiter(url, headers=headers, timeout=fair_share)
+        else:
+            readiness[service] = ReadinessResult(False, "readiness was not observed")
+    return readiness
+
+
+def _post_start_readiness(
+    targets: Mapping[str, tuple[str, dict[str, str]]],
+    state_probe: StateProbe,
+    http_waiter: Callable[..., ReadinessResult],
+    container_waiter: Callable[..., ReadinessResult],
+    *,
+    timeout: float,
+    clock: Callable[[], float],
+) -> dict[str, ReadinessResult]:
+    deadline = clock() + timeout
+    readiness: dict[str, ReadinessResult] = {}
+    remaining_calls = len(CORE_SERVICES) * 2
+    for service in CORE_SERVICES:
+        remaining = max(0.0, deadline - clock())
+        container_timeout = remaining / remaining_calls
+        remaining_calls -= 1
+        container = container_waiter(service, state_probe, timeout=container_timeout)
+        if not container.ready:
+            readiness[service] = container
+            remaining_calls -= 1
+            continue
+        remaining = max(0.0, deadline - clock())
+        http_timeout = remaining / remaining_calls
+        remaining_calls -= 1
+        url, headers = targets[service]
+        readiness[service] = http_waiter(url, headers=headers, timeout=http_timeout)
+    return readiness
+
+
 def deploy_core(
     repository_root: str | Path,
     *,
@@ -132,14 +292,17 @@ def deploy_core(
     preflight_runner: Callable[[EnvDocument, str, object], PreflightReport] = run_preflight,
     http_waiter: Callable[..., ReadinessResult] = wait_for_http,
     container_waiter: Callable[..., ReadinessResult] = wait_for_container,
+    readiness_timeout: float = READINESS_TIMEOUT,
+    clock: Callable[[], float] = time.monotonic,
+    snapshotter: Callable[[str | Path, EnvDocument], DeploymentSnapshot] = capture_deployment_snapshot,
 ) -> dict[str, object]:
-    """Reconcile the immutable core allowlist, retaining working partial startup."""
+    """Reconcile core with one bounded budget for each initial and post-start readiness phase."""
 
     root = Path(repository_root).resolve()
     command_runner = runner or CommandRunner()
     config = EnvDocument.load(root / ".env")
     prefix = compose_command(root)
-    up_argv = [*prefix, "up", "--detach", *CORE_SERVICES]
+    up_argv = [*prefix, "up", "--detach", "--no-deps", *CORE_SERVICES]
     ps_argv = [*prefix, "ps", "--format", "json"]
     if dry_run:
         return {
@@ -165,27 +328,40 @@ def deploy_core(
             "reason": "Compose service state could not be verified",
         }
 
-    readiness: dict[str, ReadinessResult] = {}
-    for service in CORE_SERVICES:
-        observed = initial_states.get(service, {})
-        if observed.get("state") == "running" and observed.get("health") in {"", "healthy"}:
-            url, headers = targets[service]
-            readiness[service] = http_waiter(url, headers=headers)
-        else:
-            readiness[service] = ReadinessResult(False, "readiness was not observed")
+    readiness = _initial_readiness(
+        initial_states, targets, http_waiter, timeout=readiness_timeout, clock=clock
+    )
     if all(result.ready for result in readiness.values()):
-        checkpoint_changed = not state.checkpoints.get("core_containers_started", False)
-        if checkpoint_changed:
+        diagnostics = _diagnostics(initial_states, readiness)
+        if not state.checkpoints.get("core_containers_started", False):
             state.checkpoints["core_containers_started"] = True
-            state.save(state_path)
+            try:
+                state.save(state_path)
+            except (OSError, ValueError):
+                return {
+                    "status": "checkpoint_failed",
+                    "changed": False,
+                    "services": diagnostics,
+                    "checkpoint_recorded": False,
+                    "reason": "Verified core readiness could not be checkpointed",
+                }
         return {
             "status": "already_ready",
             "changed": False,
-            "services": _diagnostics(initial_states, readiness),
+            "services": diagnostics,
             "checkpoint_recorded": True,
         }
 
-    # This phase-aware preflight is intentionally the final operation before mutation.
+    try:
+        before_preflight = snapshotter(root, config)
+    except (OSError, ValueError):
+        return {
+            "status": "deployment_snapshot_failed",
+            "changed": False,
+            "services": _diagnostics(initial_states, readiness),
+            "checkpoint_recorded": False,
+            "reason": "Deployment inputs could not be verified",
+        }
     report = preflight_runner(config, "core", command_runner)
     if not report.passed:
         return {
@@ -195,6 +371,27 @@ def deploy_core(
             "services": _diagnostics(initial_states, readiness),
             "checkpoint_recorded": False,
         }
+    try:
+        after_preflight = snapshotter(root, config)
+    except (OSError, ValueError):
+        return {
+            "status": "deployment_drift",
+            "changed": False,
+            "services": _diagnostics(initial_states, readiness),
+            "checkpoint_recorded": False,
+            "reason": "Deployment inputs changed or became unverifiable during preflight",
+            "safety_note": "External mount changes after the final drift guard cannot be eliminated",
+        }
+    if before_preflight != after_preflight:
+        return {
+            "status": "deployment_drift",
+            "changed": False,
+            "services": _diagnostics(initial_states, readiness),
+            "checkpoint_recorded": False,
+            "reason": "Deployment inputs changed during preflight",
+            "safety_note": "External mount changes after the final drift guard cannot be eliminated",
+        }
+    # Keep this final snapshot comparison immediately adjacent to the only mutation.
     startup_process_failed = False
     start_returncode = 1
     try:
@@ -205,35 +402,64 @@ def deploy_core(
         # Reconcile live state below without exposing the exception, argv, or output.
         startup_process_failed = True
 
-    final_readiness: dict[str, ReadinessResult] = {}
-    for service in CORE_SERVICES:
-        container = container_waiter(service, lambda: compose_ps(root, command_runner))
-        if not container.ready:
-            final_readiness[service] = container
-            continue
-        url, headers = targets[service]
-        final_readiness[service] = http_waiter(url, headers=headers)
+    last_states = initial_states
+
+    def state_probe() -> Mapping[str, Mapping[str, str]]:
+        nonlocal last_states
+        observed = compose_ps(root, command_runner)
+        last_states = observed
+        return observed
+
+    final_readiness = _post_start_readiness(
+        targets,
+        state_probe,
+        http_waiter,
+        container_waiter,
+        timeout=readiness_timeout,
+        clock=clock,
+    )
+    state_verification_failed = False
     try:
         final_states = compose_ps(root, command_runner)
+        last_states = final_states
     except (OSError, RuntimeError, ValueError, subprocess.SubprocessError):
-        final_states = {}
+        state_verification_failed = True
+        final_states = last_states
     diagnostics = _diagnostics(final_states, final_readiness)
     succeeded = (
         not startup_process_failed
+        and not state_verification_failed
         and start_returncode == 0
         and all(item["ready"] for item in diagnostics)
     )
     if succeeded:
         state.checkpoints["core_containers_started"] = True
-        state.save(state_path)
+        try:
+            state.save(state_path)
+        except (OSError, ValueError):
+            return {
+                "status": "checkpoint_failed",
+                "changed": True,
+                "services": diagnostics,
+                "checkpoint_recorded": False,
+                "reason": "Verified core readiness could not be checkpointed",
+                "safety_note": "External mount changes after the final drift guard cannot be eliminated",
+            }
     return {
         "status": (
             "ready" if succeeded else
+            "state_verification_failed" if state_verification_failed else
             "startup_failed" if startup_process_failed else
             "partial_failure"
         ),
         "changed": True,
         "services": diagnostics,
         "checkpoint_recorded": succeeded,
-        **({"reason": "Compose startup command did not complete"} if startup_process_failed else {}),
+        **(
+            {"reason": "Final Compose service state could not be verified"}
+            if state_verification_failed else
+            {"reason": "Compose startup command did not complete"}
+            if startup_process_failed else {}
+        ),
+        "safety_note": "External mount changes after the final drift guard cannot be eliminated",
     }
