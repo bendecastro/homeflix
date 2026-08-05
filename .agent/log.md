@@ -235,3 +235,12 @@ identity, pins the Compose project, probes actual LAN service resolution, and re
 byte-stable ignored override. QuickSync is enabled only for accessible Intel render devices.
 Seventy-nine tests and fresh spec/security reviews passed; no real deployment files were
 created.
+
+## [2026-08-05] implementation | Agent setup task 5 — phase-aware preflight
+
+Replaced the shell implementation with structured core/acquisition preflight while preserving
+the repository-relative wrapper. Core warns on missing VPN secrets; acquisition fails. Checks
+cover mounted non-symlink storage, ownership, known filesystem risks, exact Compose validity,
+and real torrent/media plus acquisition-only Usenet/media hardlinks with fail-closed cleanup.
+Every data bind now disables host-path creation. Ninety-eight tests and fresh spec/quality
+reviews passed; no real deployment paths or containers were touched.

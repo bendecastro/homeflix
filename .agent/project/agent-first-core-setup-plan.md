@@ -96,14 +96,14 @@ Updated: 2026-08-04
 
 ## Task 5: Make preflight phase-aware and harden storage binds
 
-- [ ] Add failing tests for `preflight --phase core` passing with empty VPN keys, `--phase acquisition` failing with the same file, hardlink inode verification, PUID/PGID mismatch, unsupported filesystems, absent mounts, and `--json` result counts.
-- [ ] Add a Compose assertion test that every `${DATA_ROOT}` bind has `bind.create_host_path: false` and every *arr service receives one `${DATA_ROOT}:/data` mount rather than split media/download mounts.
-- [ ] Run `python3 -m unittest tests.test_preflight tests.test_compose -v`; expect failures.
-- [ ] Implement `CheckResult`, `PreflightReport`, `run_preflight(config, phase, runner)`, and CLI exit behavior. A core report warns on empty VPN values; acquisition reports them as failures.
-- [ ] Convert data bind entries to long syntax with `create_host_path: false` without changing container paths or access modes.
-- [ ] Replace `scripts/preflight.sh` internals with an `exec` compatibility call to `scripts/homeflix preflight "$@"`.
-- [ ] Run tests, `bash -n scripts/preflight.sh`, and `docker compose --env-file .env.example config --quiet`; expect all green.
-- [ ] Commit with `git add docker-compose.yml scripts/preflight.sh scripts/homeflix_setup/preflight.py scripts/homeflix_setup/cli.py tests/test_preflight.py tests/test_compose.py && git commit -m "Add phase-aware fail-closed preflight"`.
+- [x] Add failing tests for `preflight --phase core` passing with empty VPN keys, `--phase acquisition` failing with the same file, hardlink inode verification, PUID/PGID mismatch, unsupported filesystems, absent mounts, and `--json` result counts.
+- [x] Add a Compose assertion test that every `${DATA_ROOT}` bind has `bind.create_host_path: false` and every *arr service receives one `${DATA_ROOT}:/data` mount rather than split media/download mounts.
+- [x] Run `python3 -m unittest tests.test_preflight tests.test_compose -v`; expect failures.
+- [x] Implement `CheckResult`, `PreflightReport`, `run_preflight(config, phase, runner)`, and CLI exit behavior. A core report warns on empty VPN values; acquisition reports them as failures.
+- [x] Convert data bind entries to long syntax with `create_host_path: false` without changing container paths or access modes.
+- [x] Replace `scripts/preflight.sh` internals with an `exec` compatibility call to `scripts/homeflix preflight "$@"`.
+- [x] Run tests, `bash -n scripts/preflight.sh`, and `docker compose --env-file .env.example config --quiet`; expect all green.
+- [x] Commit with `git add docker-compose.yml scripts/preflight.sh scripts/homeflix_setup/preflight.py scripts/homeflix_setup/cli.py tests/test_preflight.py tests/test_compose.py && git commit -m "Add phase-aware fail-closed preflight"`.
 
 ## Task 6: Deploy and reconcile the core containers
 
