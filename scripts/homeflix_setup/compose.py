@@ -20,6 +20,7 @@ CORE_SERVICES = ("traefik", "jellyfin", "jellyseerr", "radarr", "sonarr")
 _COMPOSE_STATES = {"created", "dead", "exited", "paused", "removing", "restarting", "running"}
 _COMPOSE_HEALTH = {"", "healthy", "starting", "unhealthy"}
 _COMPOSE_SERVICE_NAME = re.compile(r"[a-z0-9][a-z0-9_.-]*\Z", re.ASCII)
+_COMPOSE_PROJECT_NAME = re.compile(r"[a-z0-9][a-z0-9_-]*\Z", re.ASCII)
 
 
 class Runner(Protocol):
@@ -164,9 +165,10 @@ def configure(
 
 
 def _validated_project_name(value: str | None) -> str:
-    if not value or not value.replace("-", "").replace("_", "").isalnum():
-        raise ValueError("COMPOSE_PROJECT_NAME must be a stable non-empty project name")
-    return value
+    normalized = value.strip() if isinstance(value, str) else ""
+    if _COMPOSE_PROJECT_NAME.fullmatch(normalized) is None:
+        raise ValueError("COMPOSE_PROJECT_NAME must use lowercase ASCII Compose project-name syntax")
+    return normalized
 
 
 def compose_command(

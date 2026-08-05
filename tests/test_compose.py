@@ -221,6 +221,22 @@ class ComposeExecutionTests(unittest.TestCase):
         compose_ps(root, runner, timeout=1.25)
         self.assertEqual(runner.timeouts, [1.25])
 
+    def test_project_name_uses_exact_ascii_compose_grammar_before_commands(self) -> None:
+        temporary, root = self.make_root()
+        self.addCleanup(temporary.cleanup)
+        valid_runner = self.Runner()
+        compose_up(root, CORE_SERVICES, valid_runner, project_name=" homeflix ")
+        self.assertEqual(len(valid_runner.commands), 1)
+        self.assertIn("homeflix", valid_runner.commands[0])
+        self.assertNotIn(" homeflix ", valid_runner.commands[0])
+
+        for invalid in ("Homeflix", "homéflix", "-homeflix", "_homeflix"):
+            with self.subTest(project_name=invalid):
+                runner = self.Runner()
+                with self.assertRaises(ValueError):
+                    compose_up(root, CORE_SERVICES, runner, project_name=invalid)
+                self.assertEqual(runner.commands, [])
+
     def test_compose_up_rejects_non_core_service(self) -> None:
         temporary, root = self.make_root()
         self.addCleanup(temporary.cleanup)
