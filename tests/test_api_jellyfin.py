@@ -3,9 +3,11 @@ from __future__ import annotations
 from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
+import os
 from pathlib import Path
 import threading
 import unittest
+from unittest.mock import patch
 from urllib import error
 
 from scripts.homeflix_setup.api import ApiError, HttpResponse, JellyfinClient, JsonClient
@@ -29,6 +31,13 @@ def fixture(name):
     return json.loads((FIXTURES / name).read_text(encoding="utf-8"))
 
 
+class CountingHTTPServer(ThreadingHTTPServer):
+    def get_request(self):
+        connection = super().get_request()
+        self.connection_count += 1
+        return connection
+
+
 class WireHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.server.events.append((self.path, dict(self.headers)))
@@ -44,7 +53,8 @@ class WireHandler(BaseHTTPRequestHandler):
 
 @contextmanager
 def wire_server(routes):
-    server = ThreadingHTTPServer(("127.0.0.1", 0), WireHandler)
+    server = CountingHTTPServer(("127.0.0.1", 0), WireHandler)
+    server.connection_count = 0
     server.routes = routes
     server.events = []
     thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -91,6 +101,25 @@ class JsonClientTests(unittest.TestCase):
             client.request("GET", "/status", operation="bounded retry")
         self.assertEqual(len(calls), 1)
         self.assertAlmostEqual(sleeps[0], 0.1)
+
+    def test_wire_transport_ignores_all_proxy_environment_for_loopback(self):
+        with wire_server({"/direct": (200, {}, b'{"direct":true}')}) as (direct, direct_base):
+            proxy_path = direct_base + "/direct"
+            with wire_server({proxy_path: (200, {}, b'{"via":"proxy"}')}) as (proxy, proxy_base):
+                proxy_environment = {
+                    "HTTP_PROXY": proxy_base, "http_proxy": proxy_base,
+                    "ALL_PROXY": proxy_base, "all_proxy": proxy_base,
+                    "NO_PROXY": "", "no_proxy": "",
+                }
+                with patch.dict(os.environ, proxy_environment, clear=False):
+                    client = JsonClient("fixture", direct_base, headers={
+                        "X-Api-Key": "FIXTURE_API_KEY_NOT_REAL", "Authorization": "Fixture auth",
+                    }, attempts=1)
+                    self.assertEqual(client.request("GET", "/direct", operation="direct wire check"), {"direct": True})
+        self.assertEqual(len(direct.events), 1)
+        self.assertEqual(direct.connection_count, 1)
+        self.assertEqual(proxy.events, [])
+        self.assertEqual(proxy.connection_count, 0)
 
     def test_wire_transport_rejects_redirect_without_contacting_target(self):
         with wire_server({"/target": (200, {}, b"{}")}) as (target, target_base):

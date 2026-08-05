@@ -38,7 +38,7 @@ class _NoRedirect(request.HTTPRedirectHandler):
 
 
 def urllib_transport(outgoing: request.Request, timeout: float) -> HttpResponse:
-    opener = request.build_opener(_NoRedirect())
+    opener = request.build_opener(request.ProxyHandler({}), _NoRedirect())
     with opener.open(outgoing, timeout=timeout) as response:
         return HttpResponse(response.status, response.read(2 * 1024 * 1024 + 1))
 
