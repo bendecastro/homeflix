@@ -87,6 +87,31 @@ class StatusCliTests(unittest.TestCase):
         self.assertEqual(pipe_code, 2)
         self.assertNotIn(secret, json_stdout + json_stderr + pipe_stdout + pipe_stderr)
 
+    def test_invalid_domain_is_structured_for_all_discovery_entry_points(self) -> None:
+        commands = (
+            ("discover",),
+            ("host", "prepare"),
+            ("configure", "--data-root", "/fixture/data", "--config-root", "/fixture/config", "--cache-root", "/fixture/cache"),
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / ".env").write_text("DOMAIN='invalid domain'\n", encoding="utf-8")
+            for command in commands:
+                with self.subTest(command=command, output="text"):
+                    code, stdout, stderr = run_main(*command, repository_root=root)
+                    self.assertNotEqual(code, 0)
+                    self.assertEqual(stdout, "")
+                    self.assertRegex(stderr, r"^homeflix: .+: LAN DNS domain is invalid\n$")
+                    self.assertNotIn("Traceback", stderr)
+                with self.subTest(command=command, output="json"):
+                    code, stdout, stderr = run_main("--json", *command, repository_root=root)
+                    self.assertNotEqual(code, 0)
+                    self.assertEqual(stderr, "")
+                    error = parse_single_json(stdout)
+                    self.assertEqual(set(error), {"error"})
+                    self.assertIn(error["error"]["code"], {"discovery_refused", "configuration_refused"})
+                    self.assertEqual(error["error"]["message"], "LAN DNS domain is invalid")
+
     def test_launcher_works_cross_cwd_without_changing_repository_state(self) -> None:
         state_path = REPOSITORY_ROOT / ".homeflix" / "setup.json"
         existed_before = state_path.exists()

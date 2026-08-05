@@ -14,6 +14,40 @@ _KEY = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 _ASSIGNMENT = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)=(.*)$")
 
 
+def _assignment_parts(line: str) -> tuple[str, str, str, str] | None:
+    if line.endswith("\r\n"):
+        content, ending = line[:-2], "\r\n"
+    elif line.endswith("\n") or line.endswith("\r"):
+        content, ending = line[:-1], line[-1]
+    else:
+        content, ending = line, ""
+    match = _ASSIGNMENT.match(content)
+    if match is None:
+        return None
+    key, body = match.groups()
+    quote: str | None = None
+    escaped = False
+    for index, character in enumerate(body):
+        if quote == '"' and escaped:
+            escaped = False
+            continue
+        if quote == '"' and character == "\\":
+            escaped = True
+            continue
+        if character in ("'", '"'):
+            if quote is None:
+                quote = character
+            elif quote == character:
+                quote = None
+            continue
+        if character == "#" and quote is None and (index == 0 or body[index - 1].isspace()):
+            comment_start = index
+            while comment_start > 0 and body[comment_start - 1] in " \t":
+                comment_start -= 1
+            return key, body[:comment_start], body[comment_start:], ending
+    return key, body, "", ending
+
+
 def _decode(value: str) -> str:
     value = value.strip()
     if len(value) >= 2 and value[0] == value[-1] == "'":
@@ -56,9 +90,9 @@ class EnvDocument:
     def get(self, key: str) -> str | None:
         found: str | None = None
         for line in self.lines:
-            match = _ASSIGNMENT.match(line.rstrip("\r\n"))
-            if match and match.group(1) == key and found is None:
-                found = _decode(match.group(2))
+            assignment = _assignment_parts(line)
+            if assignment is not None and assignment[0] == key:
+                found = _decode(assignment[1])
         return found
 
     def updated(self, updates: Mapping[str, str]) -> "EnvDocument":
@@ -67,19 +101,20 @@ class EnvDocument:
                 raise ValueError(f"invalid environment key {key!r}")
             _quote(str(value))
         remaining = dict(updates)
-        seen: set[str] = set()
+        assignments = [_assignment_parts(line) for line in self.lines]
+        last_indexes: dict[str, int] = {}
+        for index, assignment in enumerate(assignments):
+            if assignment is not None and assignment[0] in updates:
+                last_indexes[assignment[0]] = index
         output: list[str] = []
-        for line in self.lines:
-            match = _ASSIGNMENT.match(line.rstrip("\r\n"))
-            if not match or match.group(1) not in updates:
+        for index, (line, assignment) in enumerate(zip(self.lines, assignments)):
+            if assignment is None or assignment[0] not in updates:
                 output.append(line)
                 continue
-            key = match.group(1)
-            if key in seen:
+            key, _value, comment, ending = assignment
+            if last_indexes[key] != index:
                 continue
-            ending = "\r\n" if line.endswith("\r\n") else "\n"
-            output.append(f"{key}={_quote(str(updates[key]))}{ending}")
-            seen.add(key)
+            output.append(f"{key}={_quote(str(updates[key]))}{comment}{ending}")
             remaining.pop(key, None)
         if remaining:
             if output and not output[-1].endswith(("\n", "\r")):
@@ -108,18 +143,22 @@ def update_env(
     serialized = document.updated({key: str(value) for key, value in updates.items()}).render()
     env_path.parent.mkdir(parents=True, exist_ok=True)
     temporary_name: str | None = None
+    descriptor: int | None = None
     try:
         descriptor, temporary_name = tempfile.mkstemp(
             dir=env_path.parent, prefix=f".{env_path.name}.", suffix=".tmp"
         )
         os.fchmod(descriptor, 0o600)
-        with os.fdopen(descriptor, "w", encoding="utf-8", newline="") as temporary:
+        temporary = os.fdopen(descriptor, "w", encoding="utf-8", newline="")
+        descriptor = None  # fdopen owns the descriptor after a successful call.
+        with temporary:
             temporary.write(serialized)
             temporary.flush()
             os.fsync(temporary.fileno())
         os.replace(temporary_name, env_path)
-        os.chmod(env_path, 0o600)
     finally:
+        if descriptor is not None:
+            os.close(descriptor)
         if temporary_name is not None:
             Path(temporary_name).unlink(missing_ok=True)
     return {

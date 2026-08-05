@@ -77,6 +77,14 @@ def _configured_domain(repository_root: Path) -> str:
     return "local"
 
 
+def _input_error(*, json_output: bool, code: str, label: str, error: Exception) -> int:
+    if json_output:
+        print(json.dumps({"error": {"code": code, "message": str(error)}}, sort_keys=True))
+    else:
+        print(f"homeflix: {label}: {error}", file=sys.stderr)
+    return 1
+
+
 def _status(repository_root: Path) -> dict[str, object]:
     state_path = repository_root / ".homeflix" / "setup.json"
     exists = state_path.exists()
@@ -123,11 +131,27 @@ def main(argv: Sequence[str] | None = None, *, repository_root: Path | None = No
                 print(f"homeflix: invalid setup state: {error}", file=sys.stderr)
             return 1
     elif arguments.command == "discover":
-        discovered = discover_host(CommandRunner(), domain=_configured_domain(root))
+        try:
+            discovered = discover_host(CommandRunner(), domain=_configured_domain(root))
+        except (OSError, ValueError) as error:
+            return _input_error(
+                json_output=arguments.json_output,
+                code="discovery_refused",
+                label="discovery refused",
+                error=error,
+            )
         result = discovered.to_dict()
     elif arguments.command == "host" and arguments.host_command == "prepare":
         runner = CommandRunner()
-        discovered = discover_host(runner, domain=_configured_domain(root))
+        try:
+            discovered = discover_host(runner, domain=_configured_domain(root))
+        except (OSError, ValueError) as error:
+            return _input_error(
+                json_output=arguments.json_output,
+                code="discovery_refused",
+                label="host discovery refused",
+                error=error,
+            )
         preparation = plan_host_preparation(discovered)
         if arguments.apply and preparation.refusal is None:
             if not arguments.confirm_plan:
@@ -145,8 +169,8 @@ def main(argv: Sequence[str] | None = None, *, repository_root: Path | None = No
                 )
         result = preparation.to_dict()
     elif arguments.command == "configure":
-        discovered = discover_host(CommandRunner(), domain=_configured_domain(root))
         try:
+            discovered = discover_host(CommandRunner(), domain=_configured_domain(root))
             result = configure(
                 root,
                 discovered,
@@ -157,11 +181,12 @@ def main(argv: Sequence[str] | None = None, *, repository_root: Path | None = No
                 direct_setup_ports=arguments.direct_setup_ports,
             )
         except (OSError, ValueError) as error:
-            if arguments.json_output:
-                print(json.dumps({"error": {"code": "configuration_refused", "message": str(error)}}, sort_keys=True))
-            else:
-                print(f"homeflix: configuration refused: {error}", file=sys.stderr)
-            return 1
+            return _input_error(
+                json_output=arguments.json_output,
+                code="configuration_refused",
+                label="configuration refused",
+                error=error,
+            )
     else:  # pragma: no cover - argparse limits command values
         raise AssertionError(f"unhandled command {arguments.command}")
 

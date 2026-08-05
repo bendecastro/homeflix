@@ -1,13 +1,15 @@
 from __future__ import annotations
 
 from dataclasses import replace
+import os
 from pathlib import Path
 import subprocess
 import tempfile
 import unittest
+from unittest import mock
 from unittest.mock import patch
 
-from scripts.homeflix_setup.compose import build_override, configure
+from scripts.homeflix_setup.compose import _atomic_write, build_override, configure
 from scripts.homeflix_setup.discover import GraphicsDeviceFact, GraphicsFact, HostFacts, MountFact
 from scripts.homeflix_setup.envfile import EnvDocument
 
@@ -105,8 +107,22 @@ class ComposeOverrideTests(unittest.TestCase):
             self.assertEqual(token.call_count, 1)
             self.assertEqual((root / ".env").read_bytes(), first_env)
             self.assertEqual((root / "docker-compose.override.yml").read_bytes(), first_override)
+            self.assertEqual((root / "docker-compose.override.yml").stat().st_mode & 0o777, 0o644)
             self.assertNotIn("fixture-secret", repr(result))
             self.assertNotIn("fixture-secret", repr(rerun))
+
+    def test_override_atomic_setup_failure_closes_fd_and_cleans_temp(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "override.yml"
+            path.write_text("services: {}\n", encoding="utf-8")
+            with mock.patch("scripts.homeflix_setup.compose.os.fchmod", side_effect=OSError("mode failure")), mock.patch(
+                "scripts.homeflix_setup.compose.os.close", wraps=os.close
+            ) as close:
+                with self.assertRaisesRegex(OSError, "mode failure"):
+                    _atomic_write(path, "services:\n", 0o644)
+            close.assert_called_once()
+            self.assertEqual(path.read_text(encoding="utf-8"), "services: {}\n")
+            self.assertEqual(list(Path(directory).glob(".*.tmp")), [])
 
     def test_configure_refuses_nonexistent_or_unverified_storage(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

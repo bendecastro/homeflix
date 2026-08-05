@@ -40,18 +40,22 @@ def build_override(facts: HostFacts, direct_setup_ports: bool) -> str:
 def _atomic_write(path: Path, contents: str, mode: int) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary_name: str | None = None
+    descriptor: int | None = None
     try:
         descriptor, temporary_name = tempfile.mkstemp(
             dir=path.parent, prefix=f".{path.name}.", suffix=".tmp"
         )
         os.fchmod(descriptor, mode)
-        with os.fdopen(descriptor, "w", encoding="utf-8", newline="") as temporary:
+        temporary = os.fdopen(descriptor, "w", encoding="utf-8", newline="")
+        descriptor = None  # fdopen owns the descriptor after a successful call.
+        with temporary:
             temporary.write(contents)
             temporary.flush()
             os.fsync(temporary.fileno())
         os.replace(temporary_name, path)
-        os.chmod(path, mode)
     finally:
+        if descriptor is not None:
+            os.close(descriptor)
         if temporary_name is not None:
             Path(temporary_name).unlink(missing_ok=True)
 
