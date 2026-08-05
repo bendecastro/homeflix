@@ -193,11 +193,95 @@ class PreflightTests(unittest.TestCase):
             self.assertEqual(list((data / "torrents").glob(".homeflix-preflight-*")), [])
             self.assertEqual(list((data / "media").glob(".homeflix-preflight-*")), [])
 
+    def test_acquisition_probes_torrents_and_usenet_to_media_with_distinct_results(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            config = configured(Path(directory))
+            data = Path(config["DATA_ROOT"])
+            config["VPN_USER"] = "set"
+            config["VPN_PASSWORD"] = "set"
+            probe_names: list[str] = []
+            original_link = os.link
+
+            def record_link(source: Path, destination: Path) -> None:
+                probe_names.append(source.name)
+                original_link(source, destination)
+
+            with mock.patch("scripts.homeflix_setup.preflight.os.link", side_effect=record_link):
+                acquisition = run_preflight(config, "acquisition", MountRunner(data))
+            core = run_preflight(config, "core", MountRunner(data))
+            remaining = {
+                leaf: list((data / leaf).glob(".homeflix-preflight-*"))
+                + list((data / leaf).glob(".homeflix-quarantine-*"))
+                for leaf in ("torrents", "usenet", "media")
+            }
+        self.assertEqual(next(r for r in acquisition.results if r.name == "hardlink").status, "pass")
+        self.assertEqual(len(probe_names), 2)
+        self.assertEqual(len(set(probe_names)), 2)
+        self.assertTrue(any("torrents-media" in name for name in probe_names))
+        self.assertTrue(any("usenet-media" in name for name in probe_names))
+        usenet = next(r for r in acquisition.results if r.name == "usenet_hardlink")
+        self.assertEqual(usenet.status, "pass")
+        self.assertIn("usenet to media", usenet.message)
+        self.assertFalse(any(result.name == "usenet_hardlink" for result in core.results))
+        self.assertEqual(remaining, {"torrents": [], "usenet": [], "media": []})
+
+    def test_acquisition_usenet_link_failure_is_blocking_and_both_probes_clean(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            config = configured(Path(directory))
+            data = Path(config["DATA_ROOT"])
+            config["VPN_USER"] = "set"
+            config["VPN_PASSWORD"] = "set"
+            original_link = os.link
+            attempted_sources: list[Path] = []
+
+            def fail_usenet_link(source: Path, destination: Path) -> None:
+                attempted_sources.append(source.parent)
+                if source.parent == data / "usenet":
+                    raise OSError("simulated cross-filesystem link failure")
+                original_link(source, destination)
+
+            with mock.patch("scripts.homeflix_setup.preflight.os.link", side_effect=fail_usenet_link):
+                report = run_preflight(config, "acquisition", MountRunner(data))
+            remaining = {
+                leaf: list((data / leaf).glob(".homeflix-preflight-*"))
+                + list((data / leaf).glob(".homeflix-quarantine-*"))
+                for leaf in ("torrents", "usenet", "media")
+            }
+
+            self.assertEqual(next(r for r in report.results if r.name == "hardlink").status, "pass")
+            self.assertEqual(next(r for r in report.results if r.name == "usenet_hardlink").status, "fail")
+            self.assertEqual(attempted_sources, [data / "torrents", data / "usenet"])
+            self.assertFalse(report.passed)
+            self.assertEqual(remaining, {"torrents": [], "usenet": [], "media": []})
+
+    def test_acquisition_usenet_cleanup_failure_has_distinct_blocking_result(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            config = configured(Path(directory))
+            data = Path(config["DATA_ROOT"])
+            config["VPN_USER"] = "set"
+            config["VPN_PASSWORD"] = "set"
+            original_unlink = Path.unlink
+
+            def fail_usenet_quarantine(path: Path, *args, **kwargs):
+                if path.name.startswith(".homeflix-quarantine-") and path.parent == data / "usenet":
+                    raise OSError("simulated cleanup failure")
+                return original_unlink(path, *args, **kwargs)
+
+            with mock.patch.object(Path, "unlink", autospec=True, side_effect=fail_usenet_quarantine):
+                report = run_preflight(config, "acquisition", MountRunner(data))
+
+            self.assertEqual(next(r for r in report.results if r.name == "hardlink").status, "pass")
+            self.assertEqual(next(r for r in report.results if r.name == "usenet_hardlink").status, "pass")
+            cleanup = next(r for r in report.results if r.name == "usenet_hardlink_cleanup")
+            self.assertEqual(cleanup.status, "fail")
+            self.assertIn(str(data / "usenet"), cleanup.message)
+            self.assertFalse(report.passed)
+
     def test_preexisting_probe_destination_is_never_deleted(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             config = configured(Path(directory))
             data = Path(config["DATA_ROOT"])
-            destination = data / "media" / ".homeflix-preflight-collision"
+            destination = data / "media" / ".homeflix-preflight-torrents-media-collision"
             destination.write_text("pre-existing", encoding="utf-8")
             fake_uuid = mock.Mock(hex="collision")
             with mock.patch("scripts.homeflix_setup.preflight.uuid.uuid4", return_value=fake_uuid):

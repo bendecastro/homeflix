@@ -242,6 +242,63 @@ def _cleanup_owned_probe(
     return True, None
 
 
+def _run_hardlink_probe(
+    results: list[CheckResult],
+    source_directory: Path,
+    media_directory: Path,
+    *,
+    probe_slug: str,
+    result_name: str,
+    cleanup_name: str,
+    label: str,
+) -> None:
+    token = uuid.uuid4().hex
+    filename = f".homeflix-preflight-{probe_slug}-{token}"
+    source = source_directory / filename
+    link = media_directory / filename
+    source_created = False
+    link_created = False
+    source_identity: tuple[int, int] | None = None
+    link_identity: tuple[int, int] | None = None
+    try:
+        with source.open("x", encoding="utf-8") as stream:
+            source_created = True
+            source_stat = os.fstat(stream.fileno())
+            source_identity = (source_stat.st_dev, source_stat.st_ino)
+            stream.write("homeflix preflight\n")
+        os.link(source, link)
+        link_created = True
+        observed_link_identity = _file_identity(link)
+        # A hardlink created from our source must have its recorded identity.
+        # Retain that expected identity so a raced replacement is never removed.
+        link_identity = source_identity
+        if source_identity is not None and source_identity == observed_link_identity:
+            _result(results, result_name, "pass", f"Hardlink probe {label} shares one device and inode")
+        else:
+            _result(results, result_name, "fail", f"Hardlink probe {label} did not share one device and inode")
+    except OSError:
+        _result(results, result_name, "fail", f"Hardlink probe {label} failed")
+    finally:
+        link_clean, link_cleanup_error = _cleanup_owned_probe(
+            link, created=link_created, identity=link_identity
+        )
+        source_clean, source_cleanup_error = _cleanup_owned_probe(
+            source, created=source_created, identity=source_identity
+        )
+        if not link_clean or not source_clean:
+            cleanup_errors = [
+                error
+                for error in (link_cleanup_error, source_cleanup_error)
+                if error is not None
+            ]
+            _result(
+                results,
+                cleanup_name,
+                "fail",
+                f"Hardlink probe {label} cleanup failed: " + "; ".join(cleanup_errors),
+            )
+
+
 def run_preflight(
     config: EnvDocument | Mapping[str, object], phase: str, runner: Runner
 ) -> PreflightReport:
@@ -403,49 +460,24 @@ def run_preflight(
                 details.append("symlinked: " + ", ".join(linked))
             _result(results, "data_layout", "fail", "Required DATA_ROOT directories are invalid (" + "; ".join(details) + ")")
         elif filesystem_allows_probe:
-            token = uuid.uuid4().hex
-            source = torrents / f".homeflix-preflight-{token}"
-            link = media / f".homeflix-preflight-{token}"
-            source_created = False
-            link_created = False
-            source_identity: tuple[int, int] | None = None
-            link_identity: tuple[int, int] | None = None
-            try:
-                with source.open("x", encoding="utf-8") as stream:
-                    source_created = True
-                    source_stat = os.fstat(stream.fileno())
-                    source_identity = (source_stat.st_dev, source_stat.st_ino)
-                    stream.write("homeflix preflight\n")
-                os.link(source, link)
-                link_created = True
-                observed_link_identity = _file_identity(link)
-                # A hardlink created from our source must have its recorded identity.
-                # Retain that expected identity so a raced replacement is never removed.
-                link_identity = source_identity
-                if source_identity is not None and source_identity == observed_link_identity:
-                    _result(results, "hardlink", "pass", "Hardlink probe shares one device and inode")
-                else:
-                    _result(results, "hardlink", "fail", "Hardlink probe did not share one device and inode")
-            except OSError:
-                _result(results, "hardlink", "fail", "Hardlink probe failed")
-            finally:
-                link_clean, link_cleanup_error = _cleanup_owned_probe(
-                    link, created=link_created, identity=link_identity
+            _run_hardlink_probe(
+                results,
+                torrents,
+                media,
+                probe_slug="torrents-media",
+                result_name="hardlink",
+                cleanup_name="hardlink_cleanup",
+                label="torrents to media",
+            )
+            if phase == "acquisition":
+                _run_hardlink_probe(
+                    results,
+                    data_root / "usenet",
+                    media,
+                    probe_slug="usenet-media",
+                    result_name="usenet_hardlink",
+                    cleanup_name="usenet_hardlink_cleanup",
+                    label="usenet to media",
                 )
-                source_clean, source_cleanup_error = _cleanup_owned_probe(
-                    source, created=source_created, identity=source_identity
-                )
-                if not link_clean or not source_clean:
-                    cleanup_errors = [
-                        error
-                        for error in (link_cleanup_error, source_cleanup_error)
-                        if error is not None
-                    ]
-                    _result(
-                        results,
-                        "hardlink_cleanup",
-                        "fail",
-                        "Hardlink probe cleanup failed: " + "; ".join(cleanup_errors),
-                    )
 
     return PreflightReport(phase, tuple(results))
