@@ -55,7 +55,7 @@ class ComposeOverrideTests(unittest.TestCase):
         first = build_override(facts(quicksync=True), True)
         second = build_override(facts(quicksync=True), True)
         self.assertEqual(first, second)
-        self.assertIn("/dev/dri:/dev/dri", first)
+        self.assertIn("/dev/dri/renderD128:/dev/dri/renderD128", first)
         for port in (5055, 7878, 8989):
             self.assertIn(f'"{port}:{port}"', first)
         self.assertNotIn("password", first.casefold())
@@ -65,6 +65,11 @@ class ComposeOverrideTests(unittest.TestCase):
         override = build_override(facts(), False)
         self.assertEqual(override, "services: {}\n")
         self.assert_valid_override(override)
+
+    def test_usable_nonstandard_render_node_does_not_select_quicksync_mapping(self) -> None:
+        device = GraphicsDeviceFact("/dev/dri/renderD129", "0x8086", "ok", True, True)
+        host = replace(facts(), graphics=GraphicsFact((device.path,), devices=(device,)))
+        self.assertNotIn("/dev/dri", build_override(host, False))
 
     def test_non_intel_unknown_or_inaccessible_graphics_do_not_map_dri(self) -> None:
         cases = (

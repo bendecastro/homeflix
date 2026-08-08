@@ -48,7 +48,8 @@ class DeploymentSnapshot:
 
 
 READINESS_TIMEOUT = 90.0
-ACQUISITION_SERVICES = ("gluetun", "qbittorrent", "nzbget", "prowlarr")
+NON_CORE_SERVICES = ("gluetun", "qbittorrent", "nzbget", "prowlarr", "lidarr", "bazarr")
+QUICKSYNC_DEVICE = "/dev/dri/renderD128"
 
 HttpProbe = Callable[[str, Mapping[str, str], float], bool]
 StateProbe = Callable[[float], Mapping[str, Mapping[str, str]]]
@@ -317,7 +318,7 @@ def _load_private_environment(path: Path) -> EnvDocument:
         metadata = path.stat(follow_symlinks=False)
         if (metadata.st_dev, metadata.st_ino) != (identity.device, identity.inode):
             raise ValueError("environment file changed while being read")
-        if metadata.st_mode & stat.S_IROTH:
+        if metadata.st_mode & (stat.S_IRWXG | stat.S_IRWXO):
             raise ValueError("environment file permissions are unsafe")
         document = EnvDocument.parse(raw.decode("utf-8"))
     except UnicodeDecodeError:
@@ -406,7 +407,7 @@ def _check(domain: str, passed: bool | None, reason: str) -> dict[str, object]:
     return {"domain": domain, "status": "pass" if passed is True else "fail" if passed is False else "unknown", "reason": reason}
 
 
-def _inspect_quicksync(root: Path, runner: CommandRunner, project_name: str) -> bool:
+def _inspect_quicksync(root: Path, runner: CommandRunner, project_name: str) -> bool | None:
     prefix = compose_command(root, project_name=project_name)
     rendered = runner.run((*prefix, "config", "--format", "json"), check=False, timeout=30)
     if rendered.returncode:
@@ -416,30 +417,40 @@ def _inspect_quicksync(root: Path, runner: CommandRunner, project_name: str) -> 
         devices = config["services"]["jellyfin"].get("devices", [])
     except (json.JSONDecodeError, KeyError, TypeError):
         raise ValueError("rendered Compose configuration was malformed") from None
-    rendered_ok = any(
-        isinstance(item, dict)
-        and item.get("source") == "/dev/dri"
-        and item.get("target") == "/dev/dri"
-        for item in devices
-    ) or "/dev/dri:/dev/dri" in json.dumps(devices, separators=(",", ":"))
+    if not isinstance(devices, list):
+        raise ValueError("rendered Compose device configuration was malformed")
+    if not devices:
+        return None
+    rendered_ok = len(devices) == 1 and (
+        (
+            isinstance(devices[0], dict)
+            and devices[0].get("source") == QUICKSYNC_DEVICE
+            and devices[0].get("target") == QUICKSYNC_DEVICE
+        )
+        or devices[0] == f"{QUICKSYNC_DEVICE}:{QUICKSYNC_DEVICE}"
+    )
+    if not rendered_ok:
+        return False
     container = runner.run((*prefix, "ps", "--quiet", "jellyfin"), check=False, timeout=30)
     identifier = container.stdout.strip()
     if container.returncode or re.fullmatch(r"[a-f0-9]{12,64}", identifier) is None:
         return False
     inspected = runner.run(
-        ("docker", "inspect", "--format", "{{json .HostConfig.Devices}}", identifier),
+        ("docker", "inspect", "--format", "{{json .HostConfig.Devices}}|{{json .State.Running}}", identifier),
         check=False, timeout=30,
     )
     if inspected.returncode:
         raise RuntimeError("live container device mapping is unavailable")
     try:
-        live_devices = json.loads(inspected.stdout)
-    except json.JSONDecodeError:
+        devices_text, running_text = inspected.stdout.strip().split("|", 1)
+        live_devices = json.loads(devices_text)
+        running = json.loads(running_text)
+    except (json.JSONDecodeError, ValueError):
         raise ValueError("live container device mapping was malformed") from None
-    live_ok = isinstance(live_devices, list) and any(
+    live_ok = running is True and isinstance(live_devices, list) and len(live_devices) == 1 and any(
         isinstance(item, dict)
-        and item.get("PathOnHost") == "/dev/dri"
-        and item.get("PathInContainer") == "/dev/dri"
+        and item.get("PathOnHost") == QUICKSYNC_DEVICE
+        and item.get("PathInContainer") == QUICKSYNC_DEVICE
         for item in live_devices
     )
     return rendered_ok and live_ok
@@ -491,7 +502,7 @@ def verify_core(
         for service in CORE_SERVICES:
             checks.append(_check(f"service:{service}", None, "service readiness could not be inspected"))
 
-    absent = all(name not in by_service for name in ACQUISITION_SERVICES)
+    absent = all(name not in by_service for name in NON_CORE_SERVICES)
     checks.append(_check("acquisition_absent", absent, "acquisition services are absent" if absent else "an acquisition service exists in this project"))
 
     values = {key: config.get(key) for key in ("JELLYFIN_ADMIN_USER", "JELLYFIN_ADMIN_PASSWORD", "CONFIG_ROOT", "PUID", "QUALITY_PROFILE")}
@@ -523,16 +534,19 @@ def verify_core(
             if domain not in existing:
                 checks.append(_check(domain, None, f"{domain} state could not be inspected"))
 
-    override = root / "docker-compose.override.yml"
-    quicksync_selected = override.exists() and "/dev/dri:/dev/dri" in override.read_text(encoding="utf-8")
-    if quicksync_selected:
-        try:
-            quicksync_ok = quicksync_inspector(root, command_runner, "homeflix")
-            checks.append(_check("quicksync", quicksync_ok, "rendered and live device mappings match" if quicksync_ok else "rendered or live device mapping is missing"))
-        except (OSError, RuntimeError, ValueError, subprocess.SubprocessError):
-            checks.append(_check("quicksync", None, "device mapping could not be inspected"))
-    else:
-        checks.append(_check("quicksync", True, "not selected"))
+    try:
+        quicksync = quicksync_inspector(root, command_runner, "homeflix")
+        checks.append(
+            _check(
+                "quicksync",
+                True if quicksync is None else quicksync,
+                "not selected" if quicksync is None else
+                "rendered and live device mappings match" if quicksync else
+                "rendered or live device mapping is invalid",
+            )
+        )
+    except (OSError, RuntimeError, ValueError, subprocess.SubprocessError):
+        checks.append(_check("quicksync", None, "device mapping could not be inspected"))
     passed = all(item["status"] == "pass" for item in checks)
     return {"status": "verified" if passed else "failed", "passed": passed, "checks": checks}
 

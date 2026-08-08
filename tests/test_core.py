@@ -9,11 +9,14 @@ import subprocess
 import tempfile
 import unittest
 from unittest.mock import patch
+from urllib.parse import parse_qs, urlsplit
 
+from scripts.homeflix_setup.api import HttpResponse
 from scripts.homeflix_setup.cli import main
 from scripts.homeflix_setup.compose import CORE_SERVICES
 from scripts.homeflix_setup.core import (
     ReadinessResult,
+    _inspect_quicksync,
     _readiness_targets,
     capture_deployment_snapshot,
     deploy_core,
@@ -544,6 +547,121 @@ class CoreDeploymentTests(unittest.TestCase):
         self.assertFalse((root / ".homeflix" / "setup.json").exists())
 
 
+class StatefulCoreFixture:
+    key = "FIXTURE_API_KEY_1234567890ABCDE"
+
+    def __init__(self, missing: str) -> None:
+        self.containers = set(CORE_SERVICES)
+        if missing == "container": self.containers.remove("radarr")
+        self.startup = missing != "jellyfin_startup"
+        self.admin = self.startup
+        self.libraries = {
+            "Movies": ("movies", "/data/media/movies"),
+            "Shows": ("tvshows", "/data/media/tv"),
+            "Music": ("music", "/data/media/music"),
+        }
+        if missing == "jellyfin_library": self.libraries.pop("Music")
+        self.roots = {"radarr": ["/data/media/movies"], "sonarr": ["/data/media/tv"]}
+        if missing == "arr_root": self.roots["radarr"] = []
+        self.media_ok = {"radarr": missing != "arr_settings", "sonarr": True}
+        self.completed_ok = {"radarr": True, "sonarr": True}
+        self.servers = {"radarr": [self._server("radarr")], "sonarr": [self._server("sonarr")]}
+        if missing == "jellyseerr_server": self.servers["sonarr"] = []
+        self.initialized = True
+        self.commands = []
+        self.creations = {"account": 0, "library": 0, "root": 0, "settings": 0, "server": 0}
+
+    @staticmethod
+    def _server(service):
+        root = "/data/media/movies" if service == "radarr" else "/data/media/tv"
+        result = {
+            "id": 3 if service == "radarr" else 4, "name": service.capitalize(),
+            "hostname": service, "port": 7878 if service == "radarr" else 8989,
+            "apiKey": StatefulCoreFixture.key, "useSsl": False, "baseUrl": "",
+            "activeProfileId": 19, "activeProfileName": "Fixture HD", "activeDirectory": root,
+            "is4k": False, "minimumAvailability": "released", "isDefault": True,
+            "externalUrl": "", "syncEnabled": True, "preventSearch": False, "tags": [],
+        }
+        if service == "sonarr": result.update({"enableSeasonFolders": True, "animeTags": []})
+        return result
+
+    def run(self, argv, **kwargs):
+        command = tuple(argv); self.commands.append(command)
+        if "up" in command:
+            self.containers.update(CORE_SERVICES)
+            return subprocess.CompletedProcess(command, 0, "", "")
+        if "config" in command:
+            return subprocess.CompletedProcess(command, 0, json.dumps({"services": {"jellyfin": {"devices": []}}}), "")
+        if "ps" in command:
+            records = [
+                {"Service": service, "State": "running", "Health": "healthy", **({"Project": "homeflix"} if "--all" in command else {})}
+                for service in CORE_SERVICES if service in self.containers
+            ]
+            return subprocess.CompletedProcess(command, 0, json.dumps(records), "")
+        raise AssertionError(f"unexpected fixture command {command}")
+
+    @staticmethod
+    def _response(status, payload):
+        return HttpResponse(status, json.dumps(payload).encode())
+
+    def jellyfin(self, outgoing, timeout):
+        path = urlsplit(outgoing.full_url).path
+        if outgoing.method == "GET" and path == "/System/Info/Public":
+            return self._response(200, {"StartupWizardCompleted": self.startup})
+        if outgoing.method == "POST" and path == "/Users/AuthenticateByName":
+            return self._response(200, {"AccessToken": "MEMORY_ONLY_TOKEN"}) if self.admin else self._response(401, {})
+        if outgoing.method == "POST" and path == "/Startup/User":
+            self.admin = True; self.creations["account"] += 1
+        elif outgoing.method == "POST" and path == "/Startup/Complete": self.startup = True
+        elif outgoing.method == "GET" and path == "/Library/VirtualFolders":
+            payload = [{"Name": name, "CollectionType": kind, "Locations": [location]} for name, (kind, location) in self.libraries.items()]
+            return self._response(200, payload)
+        elif outgoing.method == "POST" and path == "/Library/VirtualFolders":
+            query = parse_qs(urlsplit(outgoing.full_url).query)
+            self.libraries[query["name"][0]] = (query["collectionType"][0], query["paths"][0]); self.creations["library"] += 1
+        return self._response(204, {})
+
+    def arr(self, service):
+        def transport(outgoing, timeout):
+            path = urlsplit(outgoing.full_url).path
+            root = "/data/media/movies" if service == "radarr" else "/data/media/tv"
+            rename = "renameMovies" if service == "radarr" else "renameEpisodes"
+            if outgoing.method == "GET" and path.endswith("/qualityprofile"):
+                return self._response(200, [{"id": 19, "name": "Fixture HD"}])
+            if outgoing.method == "GET" and path.endswith("/rootfolder"):
+                return self._response(200, [{"id": index + 1, "path": value} for index, value in enumerate(self.roots[service])])
+            if outgoing.method == "POST" and path.endswith("/rootfolder"):
+                self.roots[service].append(root); self.creations["root"] += 1
+                return self._response(200, {"id": 8, "path": root})
+            if outgoing.method == "GET" and path.endswith("/mediamanagement"):
+                return self._response(200, {"id": 1, rename: self.media_ok[service], "copyUsingHardlinks": self.media_ok[service]})
+            if outgoing.method == "PUT" and path.endswith("/mediamanagement"):
+                self.media_ok[service] = True; self.creations["settings"] += 1
+            if outgoing.method == "GET" and path.endswith("/downloadclient"):
+                return self._response(200, {"id": 2, "enableCompletedDownloadHandling": self.completed_ok[service]})
+            if outgoing.method == "PUT" and path.endswith("/downloadclient"):
+                self.completed_ok[service] = True
+            return self._response(200, {})
+        return transport
+
+    def jellyseerr(self, outgoing, timeout):
+        path = urlsplit(outgoing.full_url).path
+        if outgoing.method == "GET" and path == "/api/v1/settings/public": return self._response(200, {"initialized": self.initialized})
+        if outgoing.method == "GET" and path == "/api/v1/settings/jellyfin": return self._response(200, {"hostname": "jellyfin", "port": 8096, "useSsl": False, "urlBase": "", "serverType": 2})
+        for service in ("radarr", "sonarr"):
+            base = f"/api/v1/settings/{service}"
+            if outgoing.method == "POST" and path == base + "/test": return self._response(200, {"success": True})
+            if outgoing.method == "GET" and path == base: return self._response(200, self.servers[service])
+            if outgoing.method == "POST" and path == base:
+                payload = json.loads(outgoing.data); payload["id"] = 9
+                self.servers[service].append(payload); self.creations["server"] += 1
+                return self._response(200, payload)
+            if outgoing.method == "PUT" and path.startswith(base + "/"):
+                payload = json.loads(outgoing.data); self.servers[service] = [payload]
+                return self._response(200, payload)
+        return self._response(200, {})
+
+
 class CoreVerificationAndResumeTests(unittest.TestCase):
     def make_root(self):
         temporary = tempfile.TemporaryDirectory()
@@ -588,6 +706,7 @@ class CoreVerificationAndResumeTests(unittest.TestCase):
                 root, runner=Runner(), api_key_reader=lambda *args: "FIXTURE_API_KEY_1234567890ABCDE",
                 settings_key_reader=lambda *args: "FIXTURE_API_KEY_1234567890ABCDE",
                 http_waiter=lambda *args, **kwargs: ReadinessResult(True, "ready"),
+                quicksync_inspector=lambda *args: None,
             )
         self.assertTrue(result["passed"])
         self.assertEqual(state_path.read_bytes(), before)
@@ -599,12 +718,21 @@ class CoreVerificationAndResumeTests(unittest.TestCase):
 
     def test_verify_requires_rendered_and_live_quicksync_mapping_when_selected(self):
         temporary, root = self.make_root(); self.addCleanup(temporary.cleanup)
-        (root / "docker-compose.override.yml").write_text("services:\n  jellyfin:\n    devices:\n      - /dev/dri:/dev/dri\n", encoding="utf-8")
         class Runner:
+            def __init__(self): self.commands = []
             def run(self, argv, **kwargs):
-                records = [{"Service": service, "State": "running", "Health": "healthy", "Project": "homeflix"} for service in CORE_SERVICES]
-                return subprocess.CompletedProcess(argv, 0, json.dumps(records), "")
-        inspected = []
+                self.commands.append(tuple(argv))
+                if "config" in argv:
+                    payload = {"services": {"jellyfin": {"devices": [{"source": "/dev/dri/renderD128", "target": "/dev/dri/renderD128"}]}}}
+                elif "--quiet" in argv:
+                    return subprocess.CompletedProcess(argv, 0, "a" * 64 + "\n", "")
+                elif argv[:2] == ("docker", "inspect"):
+                    payload = [{"PathOnHost": "/dev/dri/renderD128", "PathInContainer": "/dev/dri/renderD128", "CgroupPermissions": "rwm"}]
+                    return subprocess.CompletedProcess(argv, 0, json.dumps(payload) + "|true", "")
+                else:
+                    payload = [{"Service": service, "State": "running", "Health": "healthy", "Project": "homeflix"} for service in CORE_SERVICES]
+                return subprocess.CompletedProcess(argv, 0, json.dumps(payload), "")
+        runner = Runner()
         class Jellyfin:
             def __init__(self, **kwargs): pass
             def inspect(self, *args): return {"initialized": True, "libraries_exact": True}
@@ -616,36 +744,173 @@ class CoreVerificationAndResumeTests(unittest.TestCase):
             def authorize(self, key): pass
             def inspect(self, runtime): return {"initialized": True, "jellyfin": True, "radarr": True, "sonarr": True}
         with patch("scripts.homeflix_setup.core.JellyfinClient", Jellyfin), patch("scripts.homeflix_setup.core.ArrClient", Arr), patch("scripts.homeflix_setup.core.JellyseerrClient", Seerr):
-            result = verify_core(root, runner=Runner(), api_key_reader=lambda *args: "FIXTURE_API_KEY_1234567890ABCDE", settings_key_reader=lambda *args: "FIXTURE_API_KEY_1234567890ABCDE", http_waiter=lambda *args, **kwargs: ReadinessResult(True, "ready"), quicksync_inspector=lambda *args: inspected.append(args) or True)
-        self.assertTrue(inspected)
+            result = verify_core(root, runner=runner, api_key_reader=lambda *args: "FIXTURE_API_KEY_1234567890ABCDE", settings_key_reader=lambda *args: "FIXTURE_API_KEY_1234567890ABCDE", http_waiter=lambda *args, **kwargs: ReadinessResult(True, "ready"))
         self.assertEqual(next(item for item in result["checks"] if item["domain"] == "quicksync")["status"], "pass")
+        self.assertTrue(any("config" in command and "json" in command for command in runner.commands))
+        self.assertTrue(any(command[:2] == ("docker", "inspect") for command in runner.commands))
 
-    def test_verify_fails_when_acquisition_service_exists_in_project(self):
+    def test_quicksync_rendered_selection_is_structured_and_fails_closed(self):
         temporary, root = self.make_root(); self.addCleanup(temporary.cleanup)
-        class Runner:
+        cases = (
+            ([], None),
+            ([{"source": "/dev/dri/renderD128", "target": "/dev/dri/renderD128"}], True),
+            (["/dev/dri/renderD128:/dev/dri/renderD128"], True),
+            ([{"source": "/dev/dri", "target": "/dev/dri"}], False),
+            ("malformed", "error"),
+        )
+        for devices, expected in cases:
+            with self.subTest(devices=devices):
+                class Runner:
+                    def run(self, argv, **kwargs):
+                        if "config" in argv:
+                            return subprocess.CompletedProcess(argv, 0, json.dumps({"services": {"jellyfin": {"devices": devices}}}), "")
+                        if "--quiet" in argv:
+                            return subprocess.CompletedProcess(argv, 0, "a" * 64, "")
+                        live = [{"PathOnHost": "/dev/dri/renderD128", "PathInContainer": "/dev/dri/renderD128"}]
+                        return subprocess.CompletedProcess(argv, 0, json.dumps(live) + "|true", "")
+                if expected == "error":
+                    with self.assertRaises(ValueError):
+                        _inspect_quicksync(root, Runner(), "homeflix")
+                else:
+                    self.assertIs(_inspect_quicksync(root, Runner(), "homeflix"), expected)
+        class LiveRunner:
+            def __init__(self, live): self.live = live
             def run(self, argv, **kwargs):
-                records = [{"Service": service, "State": "running", "Health": "healthy", "Project": "homeflix"} for service in (*CORE_SERVICES, "gluetun")]
-                return subprocess.CompletedProcess(argv, 0, json.dumps(records), "")
-        result = verify_core(root, runner=Runner(), http_waiter=lambda *args, **kwargs: ReadinessResult(True, "ready"))
-        check = next(item for item in result["checks"] if item["domain"] == "acquisition_absent")
-        self.assertEqual(check["status"], "fail")
+                if "config" in argv:
+                    devices = [{"source": "/dev/dri/renderD128", "target": "/dev/dri/renderD128"}]
+                    return subprocess.CompletedProcess(argv, 0, json.dumps({"services": {"jellyfin": {"devices": devices}}}), "")
+                if "--quiet" in argv: return subprocess.CompletedProcess(argv, 0, "a" * 64, "")
+                return subprocess.CompletedProcess(argv, 0, self.live, "")
+        self.assertFalse(_inspect_quicksync(root, LiveRunner("[]|true"), "homeflix"))
+        self.assertFalse(_inspect_quicksync(root, LiveRunner(json.dumps([{"PathOnHost": "/dev/dri/renderD128", "PathInContainer": "/dev/dri/renderD128"}]) + "|false"), "homeflix"))
+        with self.assertRaises(ValueError):
+            _inspect_quicksync(root, LiveRunner("malformed"), "homeflix")
 
-    def test_reconcile_repairs_from_each_checkpoint_without_trusting_it(self):
-        checkpoints = ({}, {"configured": True}, {"core_containers_started": True},
-                       {"core_api_configured": True}, {"core_verified": True})
-        for initial in checkpoints:
-            with self.subTest(initial=initial):
+    def test_verify_fails_for_every_explicit_non_core_service(self):
+        for forbidden in ("gluetun", "qbittorrent", "nzbget", "prowlarr", "lidarr", "bazarr"):
+            with self.subTest(service=forbidden):
                 temporary, root = self.make_root()
                 try:
+                    class Runner:
+                        def run(self, argv, **kwargs):
+                            records = [{"Service": service, "State": "running", "Health": "healthy", "Project": "homeflix"} for service in (*CORE_SERVICES, forbidden)]
+                            return subprocess.CompletedProcess(argv, 0, json.dumps(records), "")
+                    result = verify_core(root, runner=Runner(), http_waiter=lambda *args, **kwargs: ReadinessResult(True, "ready"), quicksync_inspector=lambda *args: None)
+                    check = next(item for item in result["checks"] if item["domain"] == "acquisition_absent")
+                    self.assertEqual(check["status"], "fail")
+                finally:
+                    temporary.cleanup()
+
+    def test_verify_fail_closed_aggregation_is_table_driven_and_sanitized(self):
+        scenarios = (
+            ("wrong_project", "compose_project", "fail"),
+            ("missing_service", "service:sonarr", "fail"),
+            ("unhealthy_service", "service:radarr", "fail"),
+            ("malformed_inventory", "compose_project", "unknown"),
+            ("jellyfin_false", "jellyfin", "fail"),
+            ("jellyfin_wrong", "jellyfin", "fail"),
+            ("radarr_false", "radarr", "fail"),
+            ("sonarr_wrong", "sonarr", "unknown"),
+            ("jellyseerr_false", "jellyseerr", "fail"),
+            ("jellyseerr_wrong", "jellyseerr", "fail"),
+            ("acquisition", "acquisition_absent", "fail"),
+            ("acquisition_malformed", "acquisition_absent", "unknown"),
+            ("quicksync_invalid", "quicksync", "fail"),
+            ("quicksync_unknown", "quicksync", "unknown"),
+        )
+        for scenario, domain, expected_status in scenarios:
+            with self.subTest(scenario=scenario):
+                temporary, root = self.make_root()
+                try:
+                    class Runner:
+                        def run(self, argv, **kwargs):
+                            project = "other" if scenario == "wrong_project" else "homeflix"
+                            records = []
+                            for service in CORE_SERVICES:
+                                if scenario == "missing_service" and service == "sonarr": continue
+                                state = "broken" if scenario == "malformed_inventory" and service == "radarr" else "running"
+                                health = "unhealthy" if scenario == "unhealthy_service" and service == "radarr" else "healthy"
+                                records.append({"Service": service, "State": state, "Health": health, "Project": project})
+                            if scenario == "acquisition": records.append({"Service": "bazarr", "State": "created", "Health": "", "Project": "homeflix"})
+                            if scenario == "acquisition_malformed": records.append({"Service": "bad service", "State": "created", "Health": "", "Project": "homeflix"})
+                            return subprocess.CompletedProcess(argv, 0, json.dumps(records), "")
+                    class Jellyfin:
+                        def __init__(self, **kwargs): pass
+                        def inspect(self, *args):
+                            if scenario == "jellyfin_false": return {"initialized": False, "libraries_exact": True}
+                            if scenario == "jellyfin_wrong": return {"initialized": "yes", "libraries_exact": True}
+                            return {"initialized": True, "libraries_exact": True}
+                    class Arr:
+                        def __init__(self, service, *args, **kwargs): self.service = service
+                        def inspect(self, profile, path):
+                            result = {"profile_exact": True, "root_exact": True, "media_settings": True, "completed_handling": True, "runtime_profile": {"id": 1, "name": profile}, "runtime_root": {"id": 2, "path": path}}
+                            if scenario == "radarr_false" and self.service == "radarr": result["root_exact"] = False
+                            if scenario == "sonarr_wrong" and self.service == "sonarr": result.pop("media_settings")
+                            return result
+                    class Seerr:
+                        def __init__(self, **kwargs): pass
+                        def authorize(self, key): pass
+                        def inspect(self, runtime):
+                            if scenario == "jellyseerr_wrong": return {"initialized": "yes"}
+                            return {"initialized": scenario != "jellyseerr_false", "jellyfin": True, "radarr": True, "sonarr": True}
+                    def quick(*args):
+                        if scenario == "quicksync_unknown": raise ValueError("private /root 10.0.0.1")
+                        return False if scenario == "quicksync_invalid" else None
+                    with patch("scripts.homeflix_setup.core.JellyfinClient", Jellyfin), patch("scripts.homeflix_setup.core.ArrClient", Arr), patch("scripts.homeflix_setup.core.JellyseerrClient", Seerr):
+                        result = verify_core(root, runner=Runner(), api_key_reader=lambda *args: StatefulCoreFixture.key, settings_key_reader=lambda *args: StatefulCoreFixture.key, http_waiter=lambda *args, **kwargs: ReadinessResult(True, "ready"), quicksync_inspector=quick)
+                    self.assertFalse(result["passed"])
+                    check = next(item for item in result["checks"] if item["domain"] == domain)
+                    self.assertEqual(check["status"], expected_status)
+                    rendered = json.dumps(result)
+                    for private in ("/root", "10.0.0.1"):
+                        self.assertNotIn(private, rendered)
+                finally:
+                    temporary.cleanup()
+
+    def test_reconcile_repairs_live_drift_from_every_checkpoint_without_duplicates(self):
+        cases = (
+            ({}, "container", None),
+            ({"configured": True}, "jellyfin_startup", "account"),
+            ({"core_containers_started": True}, "jellyfin_library", "library"),
+            ({"core_api_configured": True}, "arr_root", "root"),
+            ({"core_verified": True}, "arr_settings", "settings"),
+            ({"configured": True, "core_verified": True}, "jellyseerr_server", "server"),
+        )
+        for initial, missing, created_kind in cases:
+            with self.subTest(initial=initial, missing=missing):
+                temporary, root = self.make_root()
+                try:
+                    with (root / ".env").open("a", encoding="utf-8") as environment:
+                        environment.write(f"DATA_ROOT={root}\n")
+                    (root / "docker-compose.yml").write_text("services: {}\n", encoding="utf-8")
                     SetupState(checkpoints=dict(initial)).save(root / ".homeflix" / "setup.json")
-                    with patch("scripts.homeflix_setup.core.deploy_core", return_value={"status": "already_ready"}) as deploy, patch("scripts.homeflix_setup.core.configure_core", return_value={"status": "configured"}) as configure_api, patch("scripts.homeflix_setup.core.verify_core", return_value={"status": "verified", "passed": True, "checks": []}) as verify:
-                        result = reconcile_core(root)
-                    self.assertEqual(result["status"], "verified")
-                    deploy.assert_called_once(); configure_api.assert_called_once(); verify.assert_called_once()
-                    saved = SetupState.load(root / ".homeflix" / "setup.json")
-                    self.assertTrue(saved.checkpoints["core_containers_started"])
-                    self.assertTrue(saved.checkpoints["core_api_configured"])
-                    self.assertTrue(saved.checkpoints["core_verified"])
+                    fixture = StatefulCoreFixture(missing)
+                    kwargs = {
+                        "runner": fixture,
+                        "transports": {"jellyfin": fixture.jellyfin, "radarr": fixture.arr("radarr"), "sonarr": fixture.arr("sonarr"), "jellyseerr": fixture.jellyseerr},
+                        "api_key_reader": lambda *args: fixture.key,
+                        "settings_key_reader": lambda *args: fixture.key,
+                        "preflight_runner": passing_preflight,
+                        "container_waiter": lambda *args, **kwargs: ReadinessResult(True, "ready"),
+                        "http_waiter": lambda *args, **kwargs: ReadinessResult(True, "ready"),
+                    }
+                    first = reconcile_core(root, **kwargs)
+                    counts_after_first = dict(fixture.creations)
+                    second = reconcile_core(root, **kwargs)
+                    self.assertEqual(first["status"], "verified")
+                    self.assertEqual(second["status"], "verified")
+                    expected = {name: 0 for name in fixture.creations}
+                    if created_kind is not None: expected[created_kind] = 1
+                    self.assertEqual(counts_after_first, expected)
+                    self.assertEqual(fixture.creations, expected)
+                    self.assertEqual(set(fixture.containers), set(CORE_SERVICES))
+                    self.assertEqual(set(fixture.libraries), {"Movies", "Shows", "Music"})
+                    self.assertEqual(fixture.roots["radarr"], ["/data/media/movies"])
+                    self.assertEqual(fixture.roots["sonarr"], ["/data/media/tv"])
+                    self.assertEqual(len(fixture.servers["radarr"]), 1)
+                    self.assertEqual(len(fixture.servers["sonarr"]), 1)
+                    up_calls = sum("up" in command for command in fixture.commands)
+                    self.assertEqual(up_calls, 1 if missing == "container" else 0)
                 finally:
                     temporary.cleanup()
 

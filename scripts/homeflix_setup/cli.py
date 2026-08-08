@@ -13,7 +13,7 @@ from typing import Sequence
 from .api import ApiError
 from .command import CommandRunner
 from .compose import configure
-from .core import configure_core, deploy_core, reconcile_core, verify_core
+from .core import _load_private_environment, configure_core, deploy_core, verify_core
 from .discover import HostFacts, discover_host
 from .envfile import EnvDocument
 from .host import HostPreparationPlan, apply_host_preparation, plan_host_preparation
@@ -84,7 +84,7 @@ def build_parser() -> argparse.ArgumentParser:
     setup_parser.add_argument("--data-root")
     setup_parser.add_argument("--config-root")
     setup_parser.add_argument("--cache-root")
-    setup_parser.add_argument("--quality-profile", default="HD-1080p")
+    setup_parser.add_argument("--quality-profile")
     setup_parser.add_argument("--direct-setup-ports", action="store_true")
     secrets_parser = subparsers.add_parser("secrets", help="explicitly retrieve local credentials")
     secrets_subparsers = secrets_parser.add_subparsers(dest="secrets_command", required=True)
@@ -267,30 +267,92 @@ def main(argv: Sequence[str] | None = None, *, repository_root: Path | None = No
                 "acquisition_mutations": [],
             }
         else:
+            phase_names = ("configure", "preflight:core", "deploy:core", "initialize:core", "verify:core")
+            phases: list[dict[str, object]] = []
+
+            def stop(status: str, phase: str, details: object | None = None) -> dict[str, object]:
+                phases.append({"phase": phase, "status": "fail"})
+                completed = {item["phase"] for item in phases}
+                phases.extend({"phase": name, "status": "skipped"} for name in phase_names if name not in completed)
+                failure: dict[str, object] = {"status": status, "phases": phases}
+                if details is not None:
+                    failure["details"] = details
+                return failure
+
+            existing: EnvDocument | None = None
             try:
-                phases: list[dict[str, object]] = []
-                roots = (arguments.data_root, arguments.config_root, arguments.cache_root)
-                if any(roots):
-                    if not all(roots):
-                        raise ValueError("all three root paths are required when configuring setup")
-                    discovered = discover_host(CommandRunner(), domain=_configured_domain(root))
-                    configured = configure(root, discovered, data_root=arguments.data_root, config_root=arguments.config_root, cache_root=arguments.cache_root, quality_profile=arguments.quality_profile, direct_setup_ports=arguments.direct_setup_ports)
-                    phases.append({"phase": "configure", "status": "complete"})
-                elif not (root / ".env").exists():
+                if (root / ".env").exists():
+                    existing = _load_private_environment(root / ".env")
+                supplied = (arguments.data_root, arguments.config_root, arguments.cache_root)
+                if any(supplied) and not all(supplied):
+                    raise ValueError("all three root paths are required when configuring setup")
+                if all(supplied):
+                    data_root, config_root, cache_root = supplied
+                elif existing is not None:
+                    data_root, config_root, cache_root = (
+                        existing.get("DATA_ROOT"), existing.get("CONFIG_ROOT"), existing.get("CACHE_ROOT")
+                    )
+                    if not all((data_root, config_root, cache_root)):
+                        raise ValueError("existing configuration is missing required root paths")
+                else:
                     raise ValueError("DATA_ROOT, CONFIG_ROOT, and CACHE_ROOT are required for a new setup")
+                quality_profile = arguments.quality_profile or (
+                    existing.get("QUALITY_PROFILE") if existing is not None else None
+                ) or "HD-1080p"
+                discovered = discover_host(CommandRunner(), domain=_configured_domain(root))
+                configure(
+                    root, discovered,
+                    data_root=data_root, config_root=config_root, cache_root=cache_root,
+                    quality_profile=quality_profile,
+                    direct_setup_ports=arguments.direct_setup_ports,
+                )
+                phases.append({"phase": "configure", "status": "complete"})
+            except (OSError, RuntimeError, ValueError, subprocess.SubprocessError):
+                result = stop("configuration_failed", "configure")
+            else:
+                try:
+                    config = _load_private_environment(root / ".env")
+                    preflight = run_preflight(config, "core", CommandRunner())
+                except (OSError, RuntimeError, ValueError, subprocess.SubprocessError):
+                    result = stop("preflight_failed", "preflight:core")
                 else:
-                    phases.append({"phase": "configure", "status": "reused"})
-                config = EnvDocument.load(root / ".env")
-                preflight = run_preflight(config, "core", CommandRunner())
-                phases.append({"phase": "preflight:core", "status": "pass" if preflight.passed else "fail"})
-                if not preflight.passed:
-                    result = {"status": "preflight_failed", "phases": phases, "preflight": preflight.to_dict()}
-                else:
-                    reconciled = reconcile_core(root)
-                    phases.extend([{"phase": "deploy:core", "status": "complete"}, {"phase": "initialize:core", "status": "complete"}, {"phase": "verify:core", "status": "pass" if reconciled.get("status") == "verified" else "fail"}])
-                    result = {"status": reconciled.get("status"), "phases": phases, "result": reconciled}
-            except (ApiError, OSError, RuntimeError, ValueError, subprocess.SubprocessError):
-                return _input_error(json_output=arguments.json_output, code="setup_refused", label="setup refused", error=RuntimeError("core setup could not be completed safely"))
+                    if not preflight.passed:
+                        result = stop("preflight_failed", "preflight:core", preflight.to_dict())
+                    else:
+                        phases.append({"phase": "preflight:core", "status": "pass"})
+                        try:
+                            deployed = deploy_core(root)
+                        except (OSError, RuntimeError, ValueError, subprocess.SubprocessError):
+                            result = stop("deployment_failed", "deploy:core")
+                        else:
+                            if deployed.get("status") not in {"ready", "already_ready"}:
+                                result = stop("deployment_failed", "deploy:core", deployed)
+                            else:
+                                phases.append({"phase": "deploy:core", "status": "complete"})
+                                try:
+                                    initialized = configure_core(root)
+                                except (ApiError, OSError, RuntimeError, ValueError):
+                                    result = stop("initialization_failed", "initialize:core")
+                                else:
+                                    phases.append({"phase": "initialize:core", "status": "complete"})
+                                    try:
+                                        verified = verify_core(root)
+                                    except (OSError, RuntimeError, ValueError, subprocess.SubprocessError):
+                                        result = stop("verification_failed", "verify:core")
+                                    else:
+                                        if verified.get("passed") is not True:
+                                            result = stop("verification_failed", "verify:core", verified)
+                                        else:
+                                            phases.append({"phase": "verify:core", "status": "pass"})
+                                            state_path = root / ".homeflix" / "setup.json"
+                                            state = SetupState.load(state_path)
+                                            state.checkpoints.update({"configured": True, "core_containers_started": True, "core_api_configured": True, "core_verified": True})
+                                            try:
+                                                state.save(state_path)
+                                            except (OSError, ValueError):
+                                                result = {"status": "checkpoint_failed", "phases": phases, "reason": "Verified core state could not be checkpointed"}
+                                            else:
+                                                result = {"status": "verified", "phases": phases, "verify": verified}
     elif arguments.command == "deploy" and arguments.phase == "core":
         try:
             result = deploy_core(root, dry_run=arguments.dry_run)
@@ -389,7 +451,7 @@ def main(argv: Sequence[str] | None = None, *, repository_root: Path | None = No
         print(f"Setup state: {state_description} (schema {result['schema_version']})")
     if preparation is not None:
         return 1 if preparation.refusal is not None else 0
-    if preflight is not None:
+    if arguments.command == "preflight" and preflight is not None:
         return 0 if preflight.passed else 1
     if arguments.command == "deploy":
         return 0 if result["status"] in {"planned", "ready", "already_ready"} else 1
