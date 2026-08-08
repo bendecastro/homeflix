@@ -723,11 +723,11 @@ class CoreVerificationAndResumeTests(unittest.TestCase):
             def run(self, argv, **kwargs):
                 self.commands.append(tuple(argv))
                 if "config" in argv:
-                    payload = {"services": {"jellyfin": {"devices": [{"source": "/dev/dri/renderD128", "target": "/dev/dri/renderD128"}]}}}
+                    payload = {"services": {"jellyfin": {"devices": [{"source": "/dev/dri", "target": "/dev/dri"}]}}}
                 elif "--quiet" in argv:
                     return subprocess.CompletedProcess(argv, 0, "a" * 64 + "\n", "")
                 elif argv[:2] == ("docker", "inspect"):
-                    payload = [{"PathOnHost": "/dev/dri/renderD128", "PathInContainer": "/dev/dri/renderD128", "CgroupPermissions": "rwm"}]
+                    payload = [{"PathOnHost": "/dev/dri", "PathInContainer": "/dev/dri", "CgroupPermissions": "rwm"}]
                     return subprocess.CompletedProcess(argv, 0, json.dumps(payload) + "|true", "")
                 else:
                     payload = [{"Service": service, "State": "running", "Health": "healthy", "Project": "homeflix"} for service in CORE_SERVICES]
@@ -753,9 +753,9 @@ class CoreVerificationAndResumeTests(unittest.TestCase):
         temporary, root = self.make_root(); self.addCleanup(temporary.cleanup)
         cases = (
             ([], None),
-            ([{"source": "/dev/dri/renderD128", "target": "/dev/dri/renderD128"}], True),
-            (["/dev/dri/renderD128:/dev/dri/renderD128"], True),
-            ([{"source": "/dev/dri", "target": "/dev/dri"}], False),
+            ([{"source": "/dev/dri", "target": "/dev/dri"}], True),
+            (["/dev/dri:/dev/dri"], True),
+            ([{"source": "/dev/dri/renderD128", "target": "/dev/dri/renderD128"}], False),
             ("malformed", "error"),
         )
         for devices, expected in cases:
@@ -766,7 +766,7 @@ class CoreVerificationAndResumeTests(unittest.TestCase):
                             return subprocess.CompletedProcess(argv, 0, json.dumps({"services": {"jellyfin": {"devices": devices}}}), "")
                         if "--quiet" in argv:
                             return subprocess.CompletedProcess(argv, 0, "a" * 64, "")
-                        live = [{"PathOnHost": "/dev/dri/renderD128", "PathInContainer": "/dev/dri/renderD128"}]
+                        live = [{"PathOnHost": "/dev/dri", "PathInContainer": "/dev/dri"}]
                         return subprocess.CompletedProcess(argv, 0, json.dumps(live) + "|true", "")
                 if expected == "error":
                     with self.assertRaises(ValueError):
@@ -777,12 +777,14 @@ class CoreVerificationAndResumeTests(unittest.TestCase):
             def __init__(self, live): self.live = live
             def run(self, argv, **kwargs):
                 if "config" in argv:
-                    devices = [{"source": "/dev/dri/renderD128", "target": "/dev/dri/renderD128"}]
+                    devices = [{"source": "/dev/dri", "target": "/dev/dri"}]
                     return subprocess.CompletedProcess(argv, 0, json.dumps({"services": {"jellyfin": {"devices": devices}}}), "")
                 if "--quiet" in argv: return subprocess.CompletedProcess(argv, 0, "a" * 64, "")
                 return subprocess.CompletedProcess(argv, 0, self.live, "")
         self.assertFalse(_inspect_quicksync(root, LiveRunner("[]|true"), "homeflix"))
-        self.assertFalse(_inspect_quicksync(root, LiveRunner(json.dumps([{"PathOnHost": "/dev/dri/renderD128", "PathInContainer": "/dev/dri/renderD128"}]) + "|false"), "homeflix"))
+        wrong = [{"PathOnHost": "/dev/dri/renderD128", "PathInContainer": "/dev/dri/renderD128"}]
+        self.assertFalse(_inspect_quicksync(root, LiveRunner(json.dumps(wrong) + "|true"), "homeflix"))
+        self.assertFalse(_inspect_quicksync(root, LiveRunner(json.dumps([{"PathOnHost": "/dev/dri", "PathInContainer": "/dev/dri"}]) + "|false"), "homeflix"))
         with self.assertRaises(ValueError):
             _inspect_quicksync(root, LiveRunner("malformed"), "homeflix")
 

@@ -35,10 +35,7 @@ class Runner(Protocol):
 
 
 def _quicksync_usable(facts: HostFacts) -> bool:
-    return any(
-        device.path == "/dev/dri/renderD128" and device.quicksync_usable
-        for device in facts.graphics.devices
-    )
+    return facts.graphics.quicksync_usable
 
 
 def build_override(facts: HostFacts, direct_setup_ports: bool) -> str:
@@ -46,7 +43,7 @@ def build_override(facts: HostFacts, direct_setup_ports: bool) -> str:
 
     services: list[tuple[str, list[str]]] = []
     if _quicksync_usable(facts):
-        services.append(("jellyfin", ["    devices:", "      - /dev/dri/renderD128:/dev/dri/renderD128"]))
+        services.append(("jellyfin", ["    devices:", "      - /dev/dri:/dev/dri"]))
     ports_enabled = direct_setup_ports or facts.lan_dns_status != "resolved"
     if ports_enabled:
         for service, port in DIRECT_PORTS:

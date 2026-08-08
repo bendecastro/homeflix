@@ -49,7 +49,7 @@ class DeploymentSnapshot:
 
 READINESS_TIMEOUT = 90.0
 NON_CORE_SERVICES = ("gluetun", "qbittorrent", "nzbget", "prowlarr", "lidarr", "bazarr")
-QUICKSYNC_DEVICE = "/dev/dri/renderD128"
+QUICKSYNC_DEVICE = "/dev/dri"
 
 HttpProbe = Callable[[str, Mapping[str, str], float], bool]
 StateProbe = Callable[[float], Mapping[str, Mapping[str, str]]]
