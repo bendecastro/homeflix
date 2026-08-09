@@ -274,7 +274,9 @@ def _initial_readiness(
         remaining = max(0.0, deadline - clock())
         fair_share = remaining / remaining_services
         remaining_services -= 1
-        if observed.get("state") == "running" and observed.get("health") in {"", "healthy"}:
+        if fair_share <= 0:
+            readiness[service] = ReadinessResult(False, "readiness deadline exhausted")
+        elif observed.get("state") == "running" and observed.get("health") in {"", "healthy"}:
             url, headers = targets[service]
             readiness[service] = http_waiter(url, headers=headers, timeout=fair_share)
         else:
@@ -297,6 +299,10 @@ def _post_start_readiness(
         remaining = max(0.0, deadline - clock())
         container_timeout = remaining / remaining_calls
         remaining_calls -= 1
+        if container_timeout <= 0:
+            readiness[service] = ReadinessResult(False, "readiness deadline exhausted")
+            remaining_calls -= 1
+            continue
         container = container_waiter(service, state_probe, timeout=container_timeout)
         if not container.ready:
             readiness[service] = container
@@ -305,6 +311,9 @@ def _post_start_readiness(
         remaining = max(0.0, deadline - clock())
         http_timeout = remaining / remaining_calls
         remaining_calls -= 1
+        if http_timeout <= 0:
+            readiness[service] = ReadinessResult(False, "readiness deadline exhausted")
+            continue
         url, headers = targets[service]
         readiness[service] = http_waiter(url, headers=headers, timeout=http_timeout)
     return readiness
@@ -331,15 +340,14 @@ def configure_core(
     repository_root: str | Path,
     *,
     transports: Mapping[str, Transport] | None = None,
+    deadline: float | None = None,
+    clock: Callable[[], float] = time.monotonic,
     api_key_reader: Callable[[str | Path, str, int], str] = read_api_key,
     settings_key_reader: Callable[[str | Path, int], str] = read_settings_api_key,
 ) -> dict[str, object]:
-    """Reconcile core application APIs after the explicit container checkpoint."""
+    """Reconcile core application APIs using caller-established live readiness."""
 
     root = Path(repository_root).resolve()
-    state = SetupState.load(root / ".homeflix" / "setup.json")
-    if state.checkpoints.get("core_containers_started") is not True:
-        raise ValueError("core containers must be live before API configuration")
     config = _load_private_environment(root / ".env")
     required = ("JELLYFIN_ADMIN_USER", "JELLYFIN_ADMIN_PASSWORD", "CONFIG_ROOT", "PUID", "QUALITY_PROFILE", "DOMAIN")
     values = {key: config.get(key) for key in required}
@@ -361,7 +369,9 @@ def configure_core(
         for service in ("radarr", "sonarr")
     }
     chosen_transports = dict(transports or {})
-    jellyfin = JellyfinClient(transport=chosen_transports.get("jellyfin", urllib_transport))
+    if deadline is not None and clock() >= deadline:
+        raise TimeoutError("core operation deadline exhausted")
+    jellyfin = JellyfinClient(transport=chosen_transports.get("jellyfin", urllib_transport), deadline=deadline, clock=clock)
     created_admin = jellyfin.initialize(values["JELLYFIN_ADMIN_USER"] or "", values["JELLYFIN_ADMIN_PASSWORD"] or "")
     libraries = jellyfin.ensure_libraries()
 
@@ -372,7 +382,7 @@ def configure_core(
         client = ArrClient(
             service, "http://127.0.0.1", key,
             headers={"Host": f"{service}.{domain}"},
-            transport=chosen_transports.get(service, urllib_transport),
+            transport=chosen_transports.get(service, urllib_transport), deadline=deadline, clock=clock,
         )
         result = client.configure(selected, media_path)
         arr_results[service] = result
@@ -382,7 +392,7 @@ def configure_core(
 
     jellyseerr = JellyseerrClient(
         headers={"Host": f"jellyseerr.{domain}"},
-        transport=chosen_transports.get("jellyseerr", urllib_transport),
+        transport=chosen_transports.get("jellyseerr", urllib_transport), deadline=deadline, clock=clock,
     )
     was_initialized = jellyseerr.initialized()
     if not was_initialized:
@@ -407,9 +417,12 @@ def _check(domain: str, passed: bool | None, reason: str) -> dict[str, object]:
     return {"domain": domain, "status": "pass" if passed is True else "fail" if passed is False else "unknown", "reason": reason}
 
 
-def _inspect_quicksync(root: Path, runner: CommandRunner, project_name: str) -> bool | None:
+def _inspect_quicksync(root: Path, runner: CommandRunner, project_name: str, *, deadline: float | None = None, clock: Callable[[], float] = time.monotonic) -> bool | None:
     prefix = compose_command(root, project_name=project_name)
-    rendered = runner.run((*prefix, "config", "--format", "json"), check=False, timeout=30)
+    remaining = 30.0 if deadline is None else deadline - clock()
+    if remaining <= 0:
+        raise TimeoutError("core operation deadline exhausted")
+    rendered = runner.run((*prefix, "config", "--format", "json"), check=False, timeout=min(30.0, remaining))
     if rendered.returncode:
         raise RuntimeError("rendered Compose configuration is unavailable")
     try:
@@ -431,13 +444,19 @@ def _inspect_quicksync(root: Path, runner: CommandRunner, project_name: str) -> 
     )
     if not rendered_ok:
         return False
-    container = runner.run((*prefix, "ps", "--quiet", "jellyfin"), check=False, timeout=30)
+    remaining = 30.0 if deadline is None else deadline - clock()
+    if remaining <= 0:
+        raise TimeoutError("core operation deadline exhausted")
+    container = runner.run((*prefix, "ps", "--quiet", "jellyfin"), check=False, timeout=min(30.0, remaining))
     identifier = container.stdout.strip()
     if container.returncode or re.fullmatch(r"[a-f0-9]{12,64}", identifier) is None:
         return False
+    remaining = 30.0 if deadline is None else deadline - clock()
+    if remaining <= 0:
+        raise TimeoutError("core operation deadline exhausted")
     inspected = runner.run(
         ("docker", "inspect", "--format", "{{json .HostConfig.Devices}}|{{json .State.Running}}", identifier),
-        check=False, timeout=30,
+        check=False, timeout=min(30.0, remaining),
     )
     if inspected.returncode:
         raise RuntimeError("live container device mapping is unavailable")
@@ -466,17 +485,25 @@ def verify_core(
     http_waiter: Callable[..., ReadinessResult] = wait_for_http,
     readiness_timeout: float = READINESS_TIMEOUT,
     clock: Callable[[], float] = time.monotonic,
-    quicksync_inspector: Callable[[Path, CommandRunner, str], bool] = _inspect_quicksync,
+    deadline: float | None = None,
+    quicksync_inspector: Callable[..., bool | None] = _inspect_quicksync,
 ) -> dict[str, object]:
     """Inspect live core state. Checkpoints are never consulted or changed."""
     root = Path(repository_root).resolve()
     command_runner = runner or CommandRunner()
+    operation_deadline = deadline if deadline is not None else clock() + max(0.0, readiness_timeout)
     checks: list[dict[str, object]] = []
     try:
         config = _load_private_environment(root / ".env")
         project_name = config.get("COMPOSE_PROJECT_NAME")
         project_ok = project_name == "homeflix"
-        inventory = compose_inventory(root, command_runner, project_name=project_name, timeout=readiness_timeout)
+        remaining = operation_deadline - clock()
+        if remaining <= 0:
+            raise TimeoutError("core operation deadline exhausted")
+        inventory = compose_inventory(root, command_runner, project_name=project_name, timeout=remaining)
+        observed_services = {item["service"] for item in inventory}
+        if not observed_services.issubset(set(CORE_SERVICES) | set(NON_CORE_SERVICES)):
+            raise ValueError("Compose service inventory contained an unknown project service")
         projects_ok = bool(inventory) and all(item["project"] == "homeflix" for item in inventory)
         checks.append(_check("compose_project", project_ok and projects_ok, "expected project scope observed" if project_ok and projects_ok else "expected project scope was not observed"))
     except (OSError, RuntimeError, ValueError, subprocess.SubprocessError):
@@ -491,8 +518,7 @@ def verify_core(
     core_states = {name: by_service.get(name, {}) for name in CORE_SERVICES}
     try:
         targets = _readiness_targets(config)
-        deadline = clock() + max(0.0, readiness_timeout)
-        readiness = _initial_readiness(core_states, targets, http_waiter, deadline=deadline, clock=clock)
+        readiness = _initial_readiness(core_states, targets, http_waiter, deadline=operation_deadline, clock=clock)
         for service in CORE_SERVICES:
             item = core_states[service]
             known = item.get("state") == "running" and item.get("health") in {"", "healthy"}
@@ -502,8 +528,9 @@ def verify_core(
         for service in CORE_SERVICES:
             checks.append(_check(f"service:{service}", None, "service readiness could not be inspected"))
 
-    absent = all(name not in by_service for name in NON_CORE_SERVICES)
-    checks.append(_check("acquisition_absent", absent, "acquisition services are absent" if absent else "an acquisition service exists in this project"))
+    present_non_core = sorted(name for name in NON_CORE_SERVICES if name in by_service)
+    absent = not present_non_core
+    checks.append(_check("acquisition_absent", absent, "acquisition services are absent" if absent else "Non-core project services present: " + ", ".join(present_non_core)))
 
     values = {key: config.get(key) for key in ("JELLYFIN_ADMIN_USER", "JELLYFIN_ADMIN_PASSWORD", "CONFIG_ROOT", "PUID", "QUALITY_PROFILE")}
     chosen = dict(transports or {})
@@ -512,18 +539,20 @@ def verify_core(
         if any(not value for value in values.values()) or re.fullmatch(r"[0-9]+", values["PUID"] or "") is None:
             raise ValueError("required verification configuration is missing")
         uid = int(values["PUID"] or "")
-        jf = JellyfinClient(transport=chosen.get("jellyfin", urllib_transport)).inspect(values["JELLYFIN_ADMIN_USER"] or "", values["JELLYFIN_ADMIN_PASSWORD"] or "")
+        if clock() >= operation_deadline:
+            raise TimeoutError("core operation deadline exhausted")
+        jf = JellyfinClient(transport=chosen.get("jellyfin", urllib_transport), deadline=operation_deadline, clock=clock).inspect(values["JELLYFIN_ADMIN_USER"] or "", values["JELLYFIN_ADMIN_PASSWORD"] or "")
         jf_ok = jf["initialized"] is True and jf["libraries_exact"] is True
         checks.append(_check("jellyfin", jf_ok, "initialized with exact libraries" if jf_ok else "initialization or exact libraries differ"))
         for service, media_path in (("radarr", "/data/media/movies"), ("sonarr", "/data/media/tv")):
             key = api_key_reader(values["CONFIG_ROOT"] or "", service, uid)
             domain = config.get("DOMAIN") or ""
-            inspected = ArrClient(service, "http://127.0.0.1", key, headers={"Host": f"{service}.{domain}"}, transport=chosen.get(service, urllib_transport)).inspect(values["QUALITY_PROFILE"] or "", media_path)
+            inspected = ArrClient(service, "http://127.0.0.1", key, headers={"Host": f"{service}.{domain}"}, transport=chosen.get(service, urllib_transport), deadline=operation_deadline, clock=clock).inspect(values["QUALITY_PROFILE"] or "", media_path)
             ok = all(inspected[name] is True for name in ("profile_exact", "root_exact", "media_settings", "completed_handling"))
             checks.append(_check(service, ok, "selected profile, root, and media settings match" if ok else "selected profile, root, or media settings differ"))
             if inspected["runtime_root"] is not None:
                 runtime[service] = (inspected["runtime_profile"], inspected["runtime_root"])  # type: ignore[assignment]
-        seerr = JellyseerrClient(headers={"Host": f"jellyseerr.{config.get('DOMAIN') or ''}"}, transport=chosen.get("jellyseerr", urllib_transport))
+        seerr = JellyseerrClient(headers={"Host": f"jellyseerr.{config.get('DOMAIN') or ''}"}, transport=chosen.get("jellyseerr", urllib_transport), deadline=operation_deadline, clock=clock)
         seerr.authorize(settings_key_reader(values["CONFIG_ROOT"] or "", uid))
         inspected_seerr = seerr.inspect(runtime)
         seerr_ok = all(value is True for value in inspected_seerr.values())
@@ -535,7 +564,12 @@ def verify_core(
                 checks.append(_check(domain, None, f"{domain} state could not be inspected"))
 
     try:
-        quicksync = quicksync_inspector(root, command_runner, "homeflix")
+        if quicksync_inspector is _inspect_quicksync:
+            quicksync = quicksync_inspector(root, command_runner, "homeflix", deadline=operation_deadline, clock=clock)
+        else:
+            if clock() >= operation_deadline:
+                raise TimeoutError("core operation deadline exhausted")
+            quicksync = quicksync_inspector(root, command_runner, "homeflix")
         checks.append(
             _check(
                 "quicksync",
@@ -554,15 +588,43 @@ def verify_core(
 def reconcile_core(repository_root: str | Path, **kwargs: object) -> dict[str, object]:
     """Repair safe core drift with existing idempotent primitives, then verify live state."""
     root = Path(repository_root).resolve()
-    deploy = deploy_core(root, **{key: value for key, value in kwargs.items() if key in {"runner", "preflight_runner", "http_waiter", "container_waiter", "readiness_timeout", "clock", "snapshotter"}})
-    if deploy.get("status") not in {"ready", "already_ready"}:
+    operation_clock = kwargs.get("clock", time.monotonic)
+    if not callable(operation_clock):
+        raise ValueError("operation clock is invalid")
+    timeout = float(kwargs.get("readiness_timeout", READINESS_TIMEOUT))
+    operation_deadline = float(kwargs.get("deadline", operation_clock() + max(0.0, timeout)))
+    remaining = operation_deadline - operation_clock()
+    if remaining <= 0:
+        return {"status": "timeout", "reason": "Core reconciliation deadline was exhausted"}
+    deploy_kwargs = {key: value for key, value in kwargs.items() if key in {"runner", "preflight_runner", "http_waiter", "container_waiter", "clock", "snapshotter"}}
+    deploy_kwargs["readiness_timeout"] = remaining
+    deploy_kwargs["deadline"] = operation_deadline
+    try:
+        deploy = deploy_core(root, **deploy_kwargs)
+    except TimeoutError:
+        return {"status": "timeout", "reason": "Core reconciliation deadline was exhausted"}
+    deployment_verified = deploy.get("status") in {"ready", "already_ready"} or (
+        deploy.get("status") == "checkpoint_failed"
+        and all(isinstance(item, dict) and item.get("ready") is True for item in deploy.get("services", []))
+    )
+    if not deployment_verified:
         return {"status": "deployment_failed", "deploy": deploy}
-    configured = configure_core(root, **{key: value for key, value in kwargs.items() if key in {"transports", "api_key_reader", "settings_key_reader"}})
-    verified = verify_core(root, **{key: value for key, value in kwargs.items() if key in {"runner", "transports", "api_key_reader", "settings_key_reader", "http_waiter", "readiness_timeout", "clock", "quicksync_inspector"}})
+    if operation_clock() >= operation_deadline:
+        return {"status": "timeout", "deploy": deploy, "reason": "Core reconciliation deadline was exhausted"}
+    try:
+        configured = configure_core(root, deadline=operation_deadline, clock=operation_clock, **{key: value for key, value in kwargs.items() if key in {"transports", "api_key_reader", "settings_key_reader"}})
+    except TimeoutError:
+        return {"status": "timeout", "deploy": deploy, "reason": "Core reconciliation deadline was exhausted"}
+    if operation_clock() >= operation_deadline:
+        return {"status": "timeout", "deploy": deploy, "configure": configured, "reason": "Core reconciliation deadline was exhausted"}
+    verified = verify_core(root, deadline=operation_deadline, **{key: value for key, value in kwargs.items() if key in {"runner", "transports", "api_key_reader", "settings_key_reader", "http_waiter", "clock", "quicksync_inspector"}})
     if not verified["passed"]:
         return {"status": "verification_failed", "deploy": deploy, "configure": configured, "verify": verified}
     state_path = root / ".homeflix" / "setup.json"
-    state = SetupState.load(state_path)
+    try:
+        state = SetupState.load(state_path)
+    except (OSError, ValueError):
+        state = SetupState()
     state.checkpoints.update({"core_containers_started": True, "core_api_configured": True, "core_verified": True})
     try:
         state.save(state_path)
@@ -581,12 +643,14 @@ def deploy_core(
     container_waiter: Callable[..., ReadinessResult] = wait_for_container,
     readiness_timeout: float = READINESS_TIMEOUT,
     clock: Callable[[], float] = time.monotonic,
+    deadline: float | None = None,
     snapshotter: Callable[[str | Path, EnvDocument], DeploymentSnapshot] = capture_deployment_snapshot,
 ) -> dict[str, object]:
     """Reconcile core under one readiness deadline shared by initial and post-start checks."""
 
     root = Path(repository_root).resolve()
     command_runner = runner or CommandRunner()
+    operation_deadline = deadline if deadline is not None else clock() + max(0.0, readiness_timeout)
     environment_path = root / ".env"
     captured_environment = _read_artifact(environment_path)
     assert captured_environment is not None
@@ -611,7 +675,12 @@ def deploy_core(
         }
 
     state_path = root / ".homeflix" / "setup.json"
-    state = SetupState.load(state_path)
+    state_warning: str | None = None
+    try:
+        state = SetupState.load(state_path)
+    except (OSError, ValueError):
+        state = SetupState()
+        state_warning = "Existing checkpoint state could not be read; live reconciliation continued"
     targets = _readiness_targets(config)
     try:
         baseline_snapshot = snapshotter(root, config)
@@ -631,7 +700,7 @@ def deploy_core(
             "checkpoint_recorded": False,
             "reason": "Environment configuration changed before reconciliation",
         }
-    readiness_deadline = clock() + max(0.0, readiness_timeout)
+    readiness_deadline = operation_deadline
     initial_ps_timeout = max(0.0, readiness_deadline - clock())
     if initial_ps_timeout <= 0:
         return {
@@ -676,9 +745,15 @@ def deploy_core(
             "changed": False,
             "services": diagnostics,
             "checkpoint_recorded": True,
+            **({"checkpoint_warning": state_warning} if state_warning else {}),
         }
 
-    report = preflight_runner(config, "core", command_runner)
+    if clock() >= readiness_deadline:
+        return {"status": "timeout", "changed": False, "services": _diagnostics(initial_states, readiness), "checkpoint_recorded": False, "reason": "Core deployment deadline was exhausted"}
+    if preflight_runner is run_preflight:
+        report = preflight_runner(config, "core", command_runner, deadline=readiness_deadline, clock=clock)
+    else:
+        report = preflight_runner(config, "core", command_runner)
     if not report.passed:
         return {
             "status": "preflight_failed",
@@ -708,11 +783,14 @@ def deploy_core(
             "safety_note": "External mount changes after the final drift guard cannot be eliminated",
         }
     # Keep this final snapshot comparison immediately adjacent to the only mutation.
+    if clock() >= readiness_deadline:
+        return {"status": "timeout", "changed": False, "services": _diagnostics(initial_states, readiness), "checkpoint_recorded": False, "reason": "Core deployment deadline was exhausted"}
     startup_process_failed = False
     start_returncode = 1
     try:
         start = compose_up(
-            root, CORE_SERVICES, command_runner, project_name=project_name
+            root, CORE_SERVICES, command_runner, project_name=project_name,
+            timeout=max(0.0, readiness_deadline - clock()),
         )
         start_returncode = start.returncode
     except (OSError, subprocess.SubprocessError):
@@ -789,4 +867,5 @@ def deploy_core(
             if startup_process_failed else {}
         ),
         "safety_note": "External mount changes after the final drift guard cannot be eliminated",
+        **({"checkpoint_warning": state_warning} if state_warning else {}),
     }

@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import posixpath
-from typing import Mapping
+import time
+from typing import Callable, Mapping
 from urllib.parse import urlencode
 
 from .client import ApiError, JsonClient, Transport, urllib_transport
@@ -13,8 +14,8 @@ LIBRARIES = {"Movies": ("movies", "/data/media/movies"), "Shows": ("tvshows", "/
 
 
 class JellyfinClient:
-    def __init__(self, base_url: str = "http://127.0.0.1:8096", *, transport: Transport = urllib_transport) -> None:
-        self.http = JsonClient("jellyfin", base_url, transport=transport)
+    def __init__(self, base_url: str = "http://127.0.0.1:8096", *, transport: Transport = urllib_transport, deadline: float | None = None, clock: Callable[[], float] = time.monotonic) -> None:
+        self.http = JsonClient("jellyfin", base_url, transport=transport, deadline=deadline, clock=clock)
         self.token: str | None = None
 
     def startup_completed(self) -> bool:
@@ -73,22 +74,40 @@ class JellyfinClient:
         normalized = {posixpath.normpath(value) for value in locations}
         return normalized == {posixpath.normpath(path)}
 
+    def logout(self) -> None:
+        """Close the ephemeral verification session and always forget its token."""
+        if self.token is None:
+            return
+        try:
+            self.http.request(
+                "POST", "/Sessions/Logout", operation="close verification session",
+                payload={}, headers=self._headers(),
+            )
+        finally:
+            self.token = None
+
     def inspect(self, username: str, password: str) -> dict[str, object]:
-        """Authenticate without retaining credentials and inspect exact live library state."""
+        """Authenticate ephemerally, inspect with GET, then close the session."""
         if not self.startup_completed():
             return {"initialized": False, "libraries_exact": False}
-        # Jellyfin exposes authentication as POST even though this credential exchange is
-        # semantically read-only. Verification performs no other non-GET request.
         self.authenticate(username, password)
-        existing = self.http.request(
-            "GET", "/Library/VirtualFolders", operation="inspect libraries", headers=self._headers()
-        )
-        if not isinstance(existing, list):
-            raise ApiError("jellyfin", "inspect libraries", None, "invalid_response")
-        exact = len(existing) == len(LIBRARIES) and all(
-            sum(1 for item in existing if self._library_equivalent(item, name, kind, path)) == 1
-            for name, (kind, path) in LIBRARIES.items()
-        )
+        try:
+            existing = self.http.request(
+                "GET", "/Library/VirtualFolders", operation="inspect libraries", headers=self._headers()
+            )
+            if not isinstance(existing, list):
+                raise ApiError("jellyfin", "inspect libraries", None, "invalid_response")
+            exact = len(existing) == len(LIBRARIES) and all(
+                sum(1 for item in existing if self._library_equivalent(item, name, kind, path)) == 1
+                for name, (kind, path) in LIBRARIES.items()
+            )
+        except Exception:
+            try:
+                self.logout()
+            except Exception:
+                pass
+            raise
+        self.logout()
         return {"initialized": True, "libraries_exact": exact}
 
     def ensure_libraries(self) -> list[str]:

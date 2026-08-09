@@ -57,6 +57,7 @@ class JsonClient:
         attempts: int = 3,
         sleep: Callable[[float], None] = time.sleep,
         clock: Callable[[], float] = time.monotonic,
+        deadline: float | None = None,
     ) -> None:
         parsed = urlsplit(base_url)
         if parsed.scheme != "http" or parsed.hostname not in {"127.0.0.1", "localhost", "::1"}:
@@ -71,6 +72,7 @@ class JsonClient:
         self.attempts = min(max(int(attempts), 1), 4)
         self.sleep = sleep
         self.clock = clock
+        self.deadline = deadline
 
     def request(
         self,
@@ -104,7 +106,8 @@ class JsonClient:
             outgoing_headers["Content-Type"] = "application/json"
         safe_retry = method in {"GET", "HEAD", "OPTIONS", "PUT", "DELETE"}
         count = self.attempts if safe_retry else 1
-        deadline = self.clock() + self.timeout * count
+        local_deadline = self.clock() + self.timeout * count
+        deadline = min(local_deadline, self.deadline) if self.deadline is not None else local_deadline
 
         def wait_before_retry(attempt: int) -> bool:
             remaining = deadline - self.clock()

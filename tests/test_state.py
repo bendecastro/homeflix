@@ -152,6 +152,14 @@ class SetupStateTests(TemporaryDirectoryTestCase, unittest.TestCase):
 
         self.assertEqual(SetupState.load(path), state)
 
+    def test_string_host_facts_are_field_bounded_and_printable(self) -> None:
+        path = self.temp_path / "setup.json"
+        for value in ("x" * 257, "debian\nsecret", "cpu\x1b[31mred", "bad\x7fvalue"):
+            with self.subTest(value=repr(value)):
+                with self.assertRaisesRegex(ValueError, "unsafe string"):
+                    SetupState(host_facts={"cpu_model": value}).save(path)
+        self.assertFalse(path.exists())
+
     def test_rejects_nested_or_wrong_typed_host_facts(self) -> None:
         path = self.temp_path / "setup.json"
         invalid_facts = (

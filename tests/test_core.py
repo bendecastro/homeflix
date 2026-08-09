@@ -800,8 +800,61 @@ class CoreVerificationAndResumeTests(unittest.TestCase):
                     result = verify_core(root, runner=Runner(), http_waiter=lambda *args, **kwargs: ReadinessResult(True, "ready"), quicksync_inspector=lambda *args: None)
                     check = next(item for item in result["checks"] if item["domain"] == "acquisition_absent")
                     self.assertEqual(check["status"], "fail")
+                    self.assertIn(forbidden, check["reason"])
                 finally:
                     temporary.cleanup()
+
+    def test_verify_uses_one_deadline_and_skips_later_calls_when_exhausted(self):
+        temporary, root = self.make_root(); self.addCleanup(temporary.cleanup)
+        clock = FakeClock(); timeouts = []; http_calls = []
+        class Runner:
+            def run(self, argv, **kwargs):
+                timeouts.append(kwargs["timeout"])
+                clock.advance(kwargs["timeout"])
+                records = [{"Service": service, "State": "running", "Health": "healthy", "Project": "homeflix"} for service in CORE_SERVICES]
+                return subprocess.CompletedProcess(argv, 0, json.dumps(records), "")
+        with patch("scripts.homeflix_setup.core.JellyfinClient", side_effect=AssertionError("API must be skipped")):
+            result = verify_core(
+                root, runner=Runner(), readiness_timeout=5, clock=clock,
+                http_waiter=lambda *args, **kwargs: http_calls.append(args) or ReadinessResult(True, "ready"),
+                quicksync_inspector=lambda *args: self.fail("QuickSync must be skipped"),
+            )
+        self.assertFalse(result["passed"])
+        self.assertEqual(clock.now, 5)
+        self.assertEqual(timeouts, [5])
+        self.assertEqual(http_calls, [])
+        self.assertEqual(next(item for item in result["checks"] if item["domain"] == "jellyfin")["status"], "unknown")
+        self.assertEqual(next(item for item in result["checks"] if item["domain"] == "quicksync")["status"], "unknown")
+
+    def test_reconcile_deadline_does_not_reset_between_phases(self):
+        clock = FakeClock()
+        def consume(*args, **kwargs):
+            self.assertEqual(kwargs["deadline"], 5)
+            clock.advance(5)
+            return {"status": "already_ready"}
+        with patch("scripts.homeflix_setup.core.deploy_core", side_effect=consume), patch("scripts.homeflix_setup.core.configure_core", side_effect=AssertionError("API configuration must be skipped")):
+            result = reconcile_core(".", readiness_timeout=5, clock=clock)
+        self.assertEqual(result["status"], "timeout")
+        self.assertEqual(clock.now, 5)
+
+    def test_reconcile_continues_live_api_work_after_checkpoint_write_failure(self):
+        temporary, root = self.make_root(); self.addCleanup(temporary.cleanup)
+        with (root / ".env").open("a", encoding="utf-8") as environment:
+            environment.write(f"DATA_ROOT={root}\n")
+        (root / "docker-compose.yml").write_text("services: {}\n", encoding="utf-8")
+        fixture = StatefulCoreFixture("jellyfin_library")
+        with patch("scripts.homeflix_setup.core.SetupState.save", side_effect=OSError("private checkpoint path")):
+            result = reconcile_core(
+                root, runner=fixture,
+                transports={"jellyfin": fixture.jellyfin, "radarr": fixture.arr("radarr"), "sonarr": fixture.arr("sonarr"), "jellyseerr": fixture.jellyseerr},
+                api_key_reader=lambda *args: fixture.key, settings_key_reader=lambda *args: fixture.key,
+                preflight_runner=passing_preflight,
+                http_waiter=lambda *args, **kwargs: ReadinessResult(True, "ready"),
+            )
+        self.assertEqual(result["status"], "checkpoint_failed")
+        self.assertEqual(set(fixture.libraries), {"Movies", "Shows", "Music"})
+        self.assertIn("verify", result)
+        self.assertNotIn("private", json.dumps(result))
 
     def test_verify_fail_closed_aggregation_is_table_driven_and_sanitized(self):
         scenarios = (
@@ -885,7 +938,12 @@ class CoreVerificationAndResumeTests(unittest.TestCase):
                     with (root / ".env").open("a", encoding="utf-8") as environment:
                         environment.write(f"DATA_ROOT={root}\n")
                     (root / "docker-compose.yml").write_text("services: {}\n", encoding="utf-8")
-                    SetupState(checkpoints=dict(initial)).save(root / ".homeflix" / "setup.json")
+                    state_path = root / ".homeflix" / "setup.json"
+                    if missing == "arr_settings":
+                        state_path.parent.mkdir(parents=True)
+                        state_path.write_text("corrupt checkpoint state", encoding="utf-8")
+                    else:
+                        SetupState(checkpoints=dict(initial)).save(state_path)
                     fixture = StatefulCoreFixture(missing)
                     kwargs = {
                         "runner": fixture,

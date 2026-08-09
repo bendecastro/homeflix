@@ -197,9 +197,6 @@ class ConfigureCoreTests(unittest.TestCase):
                 encoding="utf-8",
             )
             (root / ".env").chmod(0o600)
-            state = root / ".homeflix" / "setup.json"
-            state.parent.mkdir()
-            state.write_text(json.dumps({"schema_version": 1, "checkpoints": {"core_containers_started": True}, "host_facts": {}}), encoding="utf-8")
             calls = []
             class FakeJellyfin:
                 def __init__(self, **kwargs): pass

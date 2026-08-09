@@ -8,18 +8,31 @@ import json
 from pathlib import Path
 import subprocess
 import sys
+import time
 from typing import Sequence
 
 from .api import ApiError
 from .command import CommandRunner
 from .compose import configure
-from .core import _load_private_environment, configure_core, deploy_core, verify_core
+from .core import READINESS_TIMEOUT, _load_private_environment, configure_core, deploy_core, verify_core
 from .discover import HostFacts, discover_host
 from .envfile import EnvDocument
 from .host import HostPreparationPlan, apply_host_preparation, plan_host_preparation
 from .preflight import PreflightReport, run_preflight
 from .secrets import reveal_jellyfin
 from .state import SetupState
+
+
+class _DeadlineRunner(CommandRunner):
+    def __init__(self, deadline: float) -> None:
+        self.deadline = deadline
+
+    def run(self, argv, *, input_text=None, check=False, redact=(), timeout=None):
+        remaining = self.deadline - time.monotonic()
+        if remaining <= 0:
+            raise TimeoutError("core setup deadline exhausted")
+        capped = remaining if timeout is None else min(float(timeout), remaining)
+        return super().run(argv, input_text=input_text, check=check, redact=redact, timeout=capped)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -267,6 +280,7 @@ def main(argv: Sequence[str] | None = None, *, repository_root: Path | None = No
                 "acquisition_mutations": [],
             }
         else:
+            operation_deadline = time.monotonic() + READINESS_TIMEOUT
             phase_names = ("configure", "preflight:core", "deploy:core", "initialize:core", "verify:core")
             phases: list[dict[str, object]] = []
 
@@ -299,20 +313,26 @@ def main(argv: Sequence[str] | None = None, *, repository_root: Path | None = No
                 quality_profile = arguments.quality_profile or (
                     existing.get("QUALITY_PROFILE") if existing is not None else None
                 ) or "HD-1080p"
-                discovered = discover_host(CommandRunner(), domain=_configured_domain(root))
+                discovered = discover_host(_DeadlineRunner(operation_deadline), domain=_configured_domain(root))
                 configure(
                     root, discovered,
                     data_root=data_root, config_root=config_root, cache_root=cache_root,
                     quality_profile=quality_profile,
                     direct_setup_ports=arguments.direct_setup_ports,
                 )
+                if time.monotonic() >= operation_deadline:
+                    raise TimeoutError("core setup deadline exhausted")
                 phases.append({"phase": "configure", "status": "complete"})
+            except TimeoutError:
+                result = stop("timeout", "configure")
             except (OSError, RuntimeError, ValueError, subprocess.SubprocessError):
                 result = stop("configuration_failed", "configure")
             else:
                 try:
                     config = _load_private_environment(root / ".env")
-                    preflight = run_preflight(config, "core", CommandRunner())
+                    preflight = run_preflight(config, "core", _DeadlineRunner(operation_deadline), deadline=operation_deadline)
+                except TimeoutError:
+                    result = stop("timeout", "preflight:core")
                 except (OSError, RuntimeError, ValueError, subprocess.SubprocessError):
                     result = stop("preflight_failed", "preflight:core")
                 else:
@@ -321,22 +341,32 @@ def main(argv: Sequence[str] | None = None, *, repository_root: Path | None = No
                     else:
                         phases.append({"phase": "preflight:core", "status": "pass"})
                         try:
-                            deployed = deploy_core(root)
+                            deployed = deploy_core(root, deadline=operation_deadline)
+                        except TimeoutError:
+                            result = stop("timeout", "deploy:core")
                         except (OSError, RuntimeError, ValueError, subprocess.SubprocessError):
                             result = stop("deployment_failed", "deploy:core")
                         else:
-                            if deployed.get("status") not in {"ready", "already_ready"}:
+                            deployment_verified = deployed.get("status") in {"ready", "already_ready"} or (
+                                deployed.get("status") == "checkpoint_failed"
+                                and all(isinstance(item, dict) and item.get("ready") is True for item in deployed.get("services", []))
+                            )
+                            if deployed.get("status") == "timeout":
+                                result = stop("timeout", "deploy:core", deployed)
+                            elif not deployment_verified:
                                 result = stop("deployment_failed", "deploy:core", deployed)
                             else:
                                 phases.append({"phase": "deploy:core", "status": "complete"})
                                 try:
-                                    initialized = configure_core(root)
+                                    initialized = configure_core(root, deadline=operation_deadline)
+                                except TimeoutError:
+                                    result = stop("timeout", "initialize:core")
                                 except (ApiError, OSError, RuntimeError, ValueError):
                                     result = stop("initialization_failed", "initialize:core")
                                 else:
                                     phases.append({"phase": "initialize:core", "status": "complete"})
                                     try:
-                                        verified = verify_core(root)
+                                        verified = verify_core(root, deadline=operation_deadline)
                                     except (OSError, RuntimeError, ValueError, subprocess.SubprocessError):
                                         result = stop("verification_failed", "verify:core")
                                     else:
@@ -345,7 +375,10 @@ def main(argv: Sequence[str] | None = None, *, repository_root: Path | None = No
                                         else:
                                             phases.append({"phase": "verify:core", "status": "pass"})
                                             state_path = root / ".homeflix" / "setup.json"
-                                            state = SetupState.load(state_path)
+                                            try:
+                                                state = SetupState.load(state_path)
+                                            except (OSError, ValueError):
+                                                state = SetupState()
                                             state.checkpoints.update({"configured": True, "core_containers_started": True, "core_api_configured": True, "core_verified": True})
                                             try:
                                                 state.save(state_path)

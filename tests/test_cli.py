@@ -84,10 +84,14 @@ class StatusCliTests(unittest.TestCase):
                         )
                         (root / ".env").chmod(0o600)
                     return {}
-                def preflight_fixture(*args): calls.append(("preflight", {})); return PreflightReport("core", (CheckResult("fixture", "pass", "passed"),))
-                def deploy_fixture(*args): calls.append(("deploy", {})); return {"status": "already_ready"}
-                def initialize_fixture(*args): calls.append(("initialize", {})); return {"status": "configured"}
-                def verify_fixture(*args): calls.append(("verify", {})); return {"status": "verified", "passed": True, "checks": []}
+                def preflight_fixture(*args, **kwargs): calls.append(("preflight", {})); return PreflightReport("core", (CheckResult("fixture", "pass", "passed"),))
+                def deploy_fixture(*args, **kwargs):
+                    calls.append(("deploy", {}))
+                    if resumed:
+                        return {"status": "checkpoint_failed", "services": [{"ready": True} for _ in range(5)]}
+                    return {"status": "already_ready"}
+                def initialize_fixture(*args, **kwargs): calls.append(("initialize", {})); return {"status": "configured"}
+                def verify_fixture(*args, **kwargs): calls.append(("verify", {})); return {"status": "verified", "passed": True, "checks": []}
                 argv = ["--json", "setup", "core"]
                 if not resumed:
                     argv += ["--data-root", roots[0], "--config-root", roots[1], "--cache-root", roots[2], "--quality-profile", "Fixture HD"]
@@ -97,6 +101,23 @@ class StatusCliTests(unittest.TestCase):
                 self.assertEqual([name for name, _ in calls], ["configure", "preflight", "deploy", "initialize", "verify"])
                 self.assertEqual(tuple(calls[0][1][name] for name in ("data_root", "config_root", "cache_root")), roots)
                 self.assertNotIn("PRESERVE_ME", stdout + stderr)
+
+    def test_setup_core_uses_one_deadline_and_skips_after_configuration_exhausts_it(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            now = [0.0]
+            def configure_fixture(*args, **kwargs):
+                (root / ".env").write_text("DATA_ROOT=/d\nCONFIG_ROOT=/c\nCACHE_ROOT=/k\n", encoding="utf-8")
+                (root / ".env").chmod(0o600)
+                now[0] = 90.0
+                return {}
+            with patch("scripts.homeflix_setup.cli.time.monotonic", side_effect=lambda: now[0]), patch("scripts.homeflix_setup.cli.discover_host", return_value=object()), patch("scripts.homeflix_setup.cli.configure", side_effect=configure_fixture), patch("scripts.homeflix_setup.cli.run_preflight", side_effect=AssertionError("preflight must be skipped")):
+                code, stdout, stderr = run_main("--json", "setup", "core", "--data-root", "/d", "--config-root", "/c", "--cache-root", "/k", repository_root=root)
+        payload = parse_single_json(stdout)
+        self.assertEqual(code, 1)
+        self.assertEqual(stderr, "")
+        self.assertEqual(payload["status"], "timeout")
+        self.assertEqual([phase["status"] for phase in payload["phases"]], ["fail", "skipped", "skipped", "skipped", "skipped"])
 
     def test_setup_core_phase_failures_are_truthful_and_skip_later_work(self) -> None:
         cases = (

@@ -29,6 +29,13 @@ _HOST_FACT_TYPES: dict[str, type[object]] = {
     "docker_daemon_reachable": bool,
     "ssh_context": bool,
 }
+_HOST_FACT_STRING_LIMITS = {
+    "os_id": 64,
+    "os_version_id": 64,
+    "architecture": 64,
+    "timezone": 128,
+    "cpu_model": 256,
+}
 
 
 def _validate_checkpoints(checkpoints: object) -> None:
@@ -50,6 +57,10 @@ def _validate_host_facts(host_facts: object) -> None:
             raise ValueError(f"host fact {name!r} is not permitted")
         if type(value) is not expected_type:
             raise ValueError(f"host fact {name!r} must be {expected_type.__name__}")
+        if expected_type is str:
+            assert isinstance(value, str)
+            if len(value) > _HOST_FACT_STRING_LIMITS[name] or not value.isprintable() or any(ord(character) == 127 for character in value):
+                raise ValueError(f"host fact {name!r} contains an unsafe string")
 
 
 def _validate_state_parts(checkpoints: object, host_facts: object) -> None:

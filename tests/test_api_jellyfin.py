@@ -163,6 +163,19 @@ class JsonClientTests(unittest.TestCase):
             with self.subTest(path=path), self.assertRaises(ValueError):
                 client.request("GET", path, operation="validate path")
 
+    def test_shared_absolute_deadline_caps_sequential_requests_without_reset(self):
+        now = [0.0]; timeouts = []
+        def transport(outgoing, timeout):
+            timeouts.append(timeout); now[0] += 0.6
+            return HttpResponse(200, b"{}")
+        client = JsonClient("fixture", "http://127.0.0.1", transport=transport, timeout=5, attempts=1, clock=lambda: now[0], deadline=1.0)
+        client.request("GET", "/one", operation="one")
+        client.request("GET", "/two", operation="two")
+        with self.assertRaises(ApiError):
+            client.request("GET", "/three", operation="three")
+        self.assertEqual(len(timeouts), 2)
+        self.assertEqual(timeouts, [1.0, 0.4])
+
     def test_post_cannot_override_retry_policy(self):
         transport = FixtureTransport([error.URLError("fixture secret"), (200, {})])
         client = JsonClient("fixture", "http://127.0.0.1", transport=transport, attempts=2)
@@ -254,14 +267,56 @@ class JellyfinApiTests(unittest.TestCase):
             (200, fixture("jellyfin-startup-complete.json")),
             (200, fixture("jellyfin-auth.json")),
             (200, fixture("jellyfin-libraries-complete.json")),
+            (204, {}),
         ])
-        result = JellyfinClient(transport=transport).inspect("fixture-admin", "FIXTURE_PASSWORD_NOT_REAL")
+        client = JellyfinClient(transport=transport)
+        result = client.inspect("fixture-admin", "FIXTURE_PASSWORD_NOT_REAL")
         self.assertEqual(result, {"initialized": True, "libraries_exact": True})
         methods_paths = [(request.method, request.full_url) for request, _ in transport.requests]
         posts = [(method, path) for method, path in methods_paths if method != "GET"]
-        self.assertEqual(len(posts), 1)
+        self.assertEqual(len(posts), 2)
         self.assertTrue(posts[0][1].endswith("/Users/AuthenticateByName"))
+        self.assertTrue(posts[1][1].endswith("/Sessions/Logout"))
+        self.assertIsNone(client.token)
         self.assertFalse(any("Startup/" in path or "Library/VirtualFolders?" in path for _, path in methods_paths))
+
+    def test_inspection_logout_failure_is_fail_closed_and_token_is_cleared(self):
+        transport = FixtureTransport([
+            (200, fixture("jellyfin-startup-complete.json")),
+            (200, fixture("jellyfin-auth.json")),
+            (200, fixture("jellyfin-libraries-complete.json")),
+            (500, {}),
+        ])
+        client = JellyfinClient(transport=transport)
+        with self.assertRaises(ApiError) as raised:
+            client.inspect("fixture-admin", "FIXTURE_PASSWORD_NOT_REAL")
+        self.assertEqual(raised.exception.operation, "close verification session")
+        self.assertIsNone(client.token)
+        self.assertNotIn("MEMORY_ONLY", str(raised.exception))
+
+    def test_primary_inspection_failure_is_not_masked_by_logout_failure(self):
+        transport = FixtureTransport([
+            (200, fixture("jellyfin-startup-complete.json")),
+            (200, fixture("jellyfin-auth.json")),
+            (200, {"malformed": True}),
+            (500, {}),
+        ])
+        client = JellyfinClient(transport=transport)
+        with self.assertRaises(ApiError) as raised:
+            client.inspect("fixture-admin", "FIXTURE_PASSWORD_NOT_REAL")
+        self.assertEqual(raised.exception.operation, "inspect libraries")
+        self.assertIsNone(client.token)
+
+    def test_repeated_inspection_closes_every_ephemeral_session(self):
+        responses = []
+        for _ in range(2):
+            responses.extend(((200, fixture("jellyfin-startup-complete.json")), (200, fixture("jellyfin-auth.json")), (200, fixture("jellyfin-libraries-complete.json")), (204, {})))
+        transport = FixtureTransport(responses)
+        client = JellyfinClient(transport=transport)
+        for _ in range(2):
+            self.assertTrue(client.inspect("fixture-admin", "FIXTURE_PASSWORD_NOT_REAL")["libraries_exact"])
+        self.assertEqual(sum(request.full_url.endswith("/Sessions/Logout") for request, _ in transport.requests), 2)
+        self.assertIsNone(client.token)
 
     def test_non_idempotent_post_is_not_blindly_retried(self):
         transport = FixtureTransport([error.URLError("fixture secret")])

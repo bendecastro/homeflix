@@ -11,7 +11,7 @@ from unittest import mock
 from unittest.mock import patch
 
 from scripts.homeflix_setup.compose import (
-    CORE_SERVICES, _atomic_write, build_override, compose_ps, compose_up, configure,
+    CORE_SERVICES, _atomic_write, build_override, compose_inventory, compose_ps, compose_up, configure,
 )
 from scripts.homeflix_setup.discover import GraphicsDeviceFact, GraphicsFact, HostFacts, MountFact
 from scripts.homeflix_setup.envfile import EnvDocument
@@ -218,6 +218,18 @@ class ComposeExecutionTests(unittest.TestCase):
         for malformed in malformed_records:
             with self.subTest(malformed=malformed), self.assertRaises(ValueError):
                 compose_ps(root, self.Runner(malformed))
+
+    def test_compose_inventory_requires_exact_raw_project_and_service_identity(self) -> None:
+        temporary, root = self.make_root(); self.addCleanup(temporary.cleanup)
+        valid = {"Service": "radarr", "State": "running", "Health": "healthy", "Project": "homeflix"}
+        self.assertEqual(compose_inventory(root, self.Runner(json.dumps([valid])), project_name="homeflix")[0]["service"], "radarr")
+        for field, value in (("Service", "Radarr"), ("Service", " radarr"), ("Project", "Homeflix"), ("Project", "homeflix ")):
+            with self.subTest(field=field, value=value):
+                record = dict(valid); record[field] = value
+                with self.assertRaises(ValueError):
+                    compose_inventory(root, self.Runner(json.dumps([record])), project_name="homeflix")
+        with self.assertRaises(ValueError):
+            compose_inventory(root, self.Runner(json.dumps([valid, valid])), project_name="homeflix")
 
     def test_compose_ps_uses_callers_remaining_timeout(self) -> None:
         temporary, root = self.make_root()

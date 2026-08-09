@@ -9,7 +9,8 @@ import json
 import os
 from pathlib import Path
 import subprocess
-from typing import Mapping, Protocol, Sequence
+import time
+from typing import Callable, Mapping, Protocol, Sequence
 import uuid
 
 from .envfile import EnvDocument
@@ -125,13 +126,22 @@ def _identity(value: object) -> int | None:
     return None
 
 
-def _mount_fact(data_root: Path, runner: Runner) -> tuple[str, str] | None:
+def _remaining_timeout(deadline: float | None, clock: Callable[[], float], cap: float) -> float:
+    remaining = cap if deadline is None else deadline - clock()
+    if remaining <= 0:
+        raise TimeoutError("preflight deadline exhausted")
+    return min(cap, remaining)
+
+
+def _mount_fact(data_root: Path, runner: Runner, *, deadline: float | None = None, clock: Callable[[], float] = time.monotonic) -> tuple[str, str] | None:
     try:
         completed = runner.run(
             ("findmnt", "--json", "--target", str(data_root), "--output", "TARGET,SOURCE,FSTYPE"),
             check=False,
-            timeout=10,
+            timeout=_remaining_timeout(deadline, clock, 10),
         )
+    except TimeoutError:
+        raise
     except (FileNotFoundError, OSError, subprocess.TimeoutExpired):
         return None
     if completed.returncode:
@@ -205,7 +215,7 @@ def _cleanup_owned_probe(
     if not created:
         return True, None
     if identity is None:
-        return False, f"probe identity unavailable at {path}"
+        return False, "probe identity is unavailable"
 
     quarantine: Path | None = None
     for _attempt in range(3):
@@ -217,28 +227,28 @@ def _cleanup_owned_probe(
         except FileExistsError:
             continue
         except OSError:
-            return False, f"could not quarantine probe path {path}"
+            return False, "probe path could not be quarantined"
         quarantine = candidate
         break
     if quarantine is None:
-        return False, f"could not allocate quarantine path for {path}"
+        return False, "probe quarantine could not be allocated"
 
     captured_identity = _file_identity(quarantine)
     if captured_identity != identity:
         try:
             _rename_noreplace(quarantine, path)
         except FileExistsError:
-            return False, f"foreign probe inode retained at {quarantine}; original path is occupied"
+            return False, "foreign probe inode was retained because its original name is occupied"
         except OSError:
-            return False, f"foreign probe inode retained at {quarantine}; restore failed"
-        return False, f"foreign probe inode restored at {path}"
+            return False, "foreign probe inode was retained because restoration failed"
+        return False, "foreign probe inode was restored"
 
     try:
         quarantine.unlink()
     except OSError:
-        return False, f"owned probe quarantine could not be removed at {quarantine}"
+        return False, "owned probe quarantine could not be removed"
     if quarantine.exists():
-        return False, f"owned probe quarantine remains at {quarantine}"
+        return False, "owned probe quarantine remains"
     return True, None
 
 
@@ -300,7 +310,8 @@ def _run_hardlink_probe(
 
 
 def run_preflight(
-    config: EnvDocument | Mapping[str, object], phase: str, runner: Runner
+    config: EnvDocument | Mapping[str, object], phase: str, runner: Runner,
+    *, deadline: float | None = None, clock: Callable[[], float] = time.monotonic,
 ) -> PreflightReport:
     """Run bounded checks without creating any missing deployment directories."""
 
@@ -338,7 +349,9 @@ def run_preflight(
         ("docker_daemon", ("docker", "info")),
     ):
         try:
-            completed = runner.run(argv, check=False, timeout=10)
+            completed = runner.run(argv, check=False, timeout=_remaining_timeout(deadline, clock, 10))
+        except TimeoutError:
+            raise
         except (FileNotFoundError, OSError, subprocess.TimeoutExpired):
             completed = None
         if completed is not None and completed.returncode == 0:
@@ -361,7 +374,9 @@ def run_preflight(
             "--quiet",
         )
         try:
-            compose_result = runner.run(compose_command, check=False, timeout=30)
+            compose_result = runner.run(compose_command, check=False, timeout=_remaining_timeout(deadline, clock, 30))
+        except TimeoutError:
+            raise
         except (FileNotFoundError, OSError, subprocess.TimeoutExpired):
             compose_result = None
         if compose_result is not None and compose_result.returncode == 0:
@@ -384,7 +399,7 @@ def run_preflight(
     if data_root is not None and data_root_is_real:
         filesystem_allows_probe = False
         mount_is_safe = False
-        mount = _mount_fact(data_root, runner)
+        mount = _mount_fact(data_root, runner, deadline=deadline, clock=clock)
         if mount is None:
             _result(results, "data_mount", "fail", "DATA_ROOT mount facts are unavailable")
         else:

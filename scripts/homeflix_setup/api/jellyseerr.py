@@ -5,7 +5,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 import re
-from typing import Any, Mapping
+import time
+from typing import Any, Callable, Mapping
 
 from .client import ApiError, JsonClient, Transport, urllib_transport
 from .securepath import read_config_file
@@ -28,8 +29,8 @@ def read_settings_api_key(config_root: str | Path, expected_uid: int) -> str:
 
 
 class JellyseerrClient:
-    def __init__(self, base_url: str = "http://127.0.0.1", *, headers: Mapping[str, str] | None = None, transport: Transport = urllib_transport) -> None:
-        self.http = JsonClient("jellyseerr", base_url, headers=headers, transport=transport)
+    def __init__(self, base_url: str = "http://127.0.0.1", *, headers: Mapping[str, str] | None = None, transport: Transport = urllib_transport, deadline: float | None = None, clock: Callable[[], float] = time.monotonic) -> None:
+        self.http = JsonClient("jellyseerr", base_url, headers=headers, transport=transport, deadline=deadline, clock=clock)
 
     def authenticate_jellyfin(self, username: str, password: str) -> None:
         self.http.request("POST", "/api/v1/auth/jellyfin", operation="connect Jellyfin", payload={

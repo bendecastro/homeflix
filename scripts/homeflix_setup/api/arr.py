@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 import re
-from typing import Any, Mapping
+import time
+from typing import Any, Callable, Mapping
 import xml.etree.ElementTree as ET
 
 from .client import ApiError, JsonClient, Transport, urllib_transport
@@ -31,11 +32,11 @@ def read_api_key(config_root: str | Path, service: str, expected_uid: int) -> st
 
 
 class ArrClient:
-    def __init__(self, service: str, base_url: str, api_key: str, *, headers: Mapping[str, str] | None = None, transport: Transport = urllib_transport) -> None:
+    def __init__(self, service: str, base_url: str, api_key: str, *, headers: Mapping[str, str] | None = None, transport: Transport = urllib_transport, deadline: float | None = None, clock: Callable[[], float] = time.monotonic) -> None:
         if service not in {"radarr", "sonarr"} or not _KEY.fullmatch(api_key):
             raise ValueError("invalid Arr client configuration")
         self.service = service
-        self.http = JsonClient(service, base_url, headers={**dict(headers or {}), "X-Api-Key": api_key}, transport=transport)
+        self.http = JsonClient(service, base_url, headers={**dict(headers or {}), "X-Api-Key": api_key}, transport=transport, deadline=deadline, clock=clock)
         self.selected_profile: dict[str, Any] | None = None
         self.selected_root: dict[str, Any] | None = None
 

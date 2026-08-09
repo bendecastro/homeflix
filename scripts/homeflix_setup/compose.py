@@ -192,6 +192,7 @@ def compose_up(
     runner: Runner,
     *,
     project_name: str | None = None,
+    timeout: float = 300,
 ) -> subprocess.CompletedProcess[str]:
     """Start exactly the named services; callers must perform preflight first."""
 
@@ -202,7 +203,9 @@ def compose_up(
         *compose_command(repository_root, project_name=project_name),
         "up", "--detach", "--no-deps", *selected,
     )
-    return runner.run(argv, check=False, timeout=300)
+    if timeout <= 0:
+        raise TimeoutError("Compose startup deadline exhausted")
+    return runner.run(argv, check=False, timeout=min(300, timeout))
 
 
 def _json_records(text: str) -> list[object]:
@@ -249,15 +252,20 @@ def compose_inventory(
         }
         if not all(isinstance(value, str) for value in values.values()):
             raise ValueError("Compose service inventory was malformed")
-        normalized = {key: value.strip().casefold() for key, value in values.items()}
+        service = values["service"]
+        project = values["project"]
+        state = values["state"].strip().casefold()
+        health = values["health"].strip().casefold()
         if (
-            _COMPOSE_SERVICE_NAME.fullmatch(normalized["service"]) is None
-            or normalized["state"] not in _COMPOSE_STATES
-            or normalized["health"] not in _COMPOSE_HEALTH
-            or _COMPOSE_PROJECT_NAME.fullmatch(normalized["project"]) is None
+            service != service.strip() or project != project.strip()
+            or not service.isascii() or not project.isascii()
+            or _COMPOSE_SERVICE_NAME.fullmatch(service) is None
+            or state not in _COMPOSE_STATES
+            or health not in _COMPOSE_HEALTH
+            or _COMPOSE_PROJECT_NAME.fullmatch(project) is None
         ):
             raise ValueError("Compose service inventory was malformed")
-        inventory.append(normalized)
+        inventory.append({"service": service, "state": state, "health": health, "project": project})
     if len({item["service"] for item in inventory}) != len(inventory):
         raise ValueError("Compose service inventory was malformed")
     return inventory

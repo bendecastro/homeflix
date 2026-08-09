@@ -274,7 +274,9 @@ class PreflightTests(unittest.TestCase):
             self.assertEqual(next(r for r in report.results if r.name == "usenet_hardlink").status, "pass")
             cleanup = next(r for r in report.results if r.name == "usenet_hardlink_cleanup")
             self.assertEqual(cleanup.status, "fail")
-            self.assertIn(str(data / "usenet"), cleanup.message)
+            self.assertNotIn(str(data), cleanup.message)
+            self.assertNotIn(str(data), json.dumps(report.to_dict()))
+            self.assertNotIn(str(data), "\n".join(result.message for result in report.results))
             self.assertFalse(report.passed)
 
     def test_preexisting_probe_destination_is_never_deleted(self) -> None:
@@ -316,7 +318,7 @@ class PreflightTests(unittest.TestCase):
                 self.assertEqual(foreign[0].read_text(encoding="utf-8"), f"foreign-{leaf}")
                 cleanup = next(r for r in report.results if r.name == "hardlink_cleanup")
                 self.assertEqual(cleanup.status, "fail")
-                self.assertIn(str(foreign[0]), cleanup.message)
+                self.assertNotIn(str(data), cleanup.message)
                 self.assertFalse(report.passed)
 
     def test_cleanup_boundary_replacement_with_reoccupied_original_leaves_quarantine(self) -> None:
@@ -348,7 +350,7 @@ class PreflightTests(unittest.TestCase):
             self.assertEqual(original.read_text(encoding="utf-8"), "reoccupied-foreign")
             self.assertEqual(quarantine.read_text(encoding="utf-8"), "captured-foreign")
             cleanup = next(r for r in report.results if r.name == "hardlink_cleanup")
-            self.assertIn(str(quarantine), cleanup.message)
+            self.assertNotIn(str(data), cleanup.message)
             self.assertFalse(report.passed)
 
     def test_remaining_probe_paths_make_successful_hardlink_cleanup_blocking(self) -> None:
