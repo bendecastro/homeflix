@@ -73,6 +73,13 @@ class DocumentationContractTests(unittest.TestCase):
         self.assertNotIn("sudo mkdir", manual)
         self.assertNotIn('"$DATA_ROOT"', manual)
 
+    def test_public_environment_template_uses_only_portable_examples(self) -> None:
+        template = (ROOT / ".env.example").read_text(encoding="utf-8")
+        self.assertIn("DATA_ROOT=/srv/homeflix/data", template)
+        self.assertIn("TZ=UTC", template)
+        for private_value in ("/mnt/sidecar", "Europe/Lisbon", "/home/ben", "beelink"):
+            self.assertNotIn(private_value, template)
+
     def test_repo_local_markdown_links_exist_and_anchors_are_valid(self) -> None:
         for document in CHECKED_DOCS:
             for raw_target in extract_markdown_targets(document.read_text(encoding="utf-8")):

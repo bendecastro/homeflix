@@ -275,3 +275,13 @@ attests live deployment readiness before mutation; one global deadline bounds wo
 Jellyfin authentication sessions are always closed. Checkpoint/state output is typed,
 bounded, and secret-free. One hundred eighty-one fixture/temp tests and fresh spec/security
 reviews passed; no live deployment, API, or appdata operation was run.
+
+## [2026-08-09] implementation | Agent setup task 9 — guidance and acceptance
+
+Published agent-assisted setup as the first README path, added a lean AGENTS intent route and
+an outcome-oriented core setup guide, retained the manual fallback, and documented ignored
+mode-0600 configuration/state artifacts. Added fail-closed Markdown checks and a clean-state
+fixture journey spanning Debian discovery, ext4 preflight, exact core deployment, bounded
+partial API failure, resume, verification, and no-op rerun. One hundred eighty-seven tests and
+fresh spec/quality reviews passed. The core slice is fixture-accepted only; no disposable real
+Debian/Ubuntu host, live Docker deployment, appdata, or service API was accessed.

@@ -1,32 +1,30 @@
 # Active Tasks — Live Cursor
 
-Updated: 2026-08-04
+Updated: 2026-08-09
 
 > First thing the next agent reads after `index.md`. Keep it true.
 
 ## In flight
 
-- **Effort:** [Agent-first setup](../project/agent-first-setup.md) — design approved;
-  implementation has not started.
-- **In progress:** [Agent-first core setup](../project/agent-first-core-setup-plan.md),
-  covering supported-host discovery through API-initialized Jellyfin/Jellyseerr/Radarr/Sonarr
-  on existing mounted storage. Tasks 1–8 passed spec and quality/security review; executing
-  task 9: agent guidance and fixture acceptance coverage.
+- **Completed slice:** [Agent-first core setup](../project/agent-first-core-setup-plan.md),
+  covering local Debian/Ubuntu discovery through API-initialized and verified core on existing
+  mounted storage. All nine tasks passed fixture tests and independent spec/security review.
+- **Verification boundary:** fixture-accepted only; disposable real-host Debian/Ubuntu
+  acceptance remains required before claiming general production verification.
 - **Follow-ups:** guarded [encrypted storage](../project/agent-first-storage-plan.md) and
-  VPN-gated [acquisition setup](../project/agent-first-acquisition-plan.md).
+  VPN-gated [acquisition setup](../project/agent-first-acquisition-plan.md) are approved but
+  not implemented. SSH remains agent-provided orchestration rather than a CLI transport.
 - **Approved defaults:** Debian/Ubuntu local or SSH target; secure terminal secret handoff;
   resumable core-first deployment; API-driven application setup; agent-led composable tools.
-- **Blockers:** none for the core implementation slice.
+- **Blockers:** none for fixture-accepted core; real-host acceptance needs a disposable target.
 
 ## Next up (priority order)
 
-1. Execute the core plan task-by-task, beginning with the tested CLI/state foundation.
-2. Run its fixture acceptance suite, then verify on a disposable Debian/Ubuntu target before
-   claiming general host support.
-3. Execute the encrypted-storage slice with loop-device tests before any real-disk test.
-4. Execute acquisition only with authorized VPN/provider credentials and real fail-closed
+1. Verify core on a disposable Debian/Ubuntu target before claiming general host support.
+2. Execute the encrypted-storage slice with loop-device tests before any real-disk test.
+3. Execute acquisition only with authorized VPN/provider credentials and real fail-closed
    evidence.
-5. Resolve the independent Traefik dashboard, update policy, remote-access, and off-box
+4. Resolve the independent Traefik dashboard, update policy, remote-access, and off-box
    backup decisions already tracked elsewhere.
 
 ## Decisions recorded so far

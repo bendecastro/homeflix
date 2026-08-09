@@ -1,7 +1,7 @@
 # Agent-first Core Setup Implementation Plan
 
-Status: In progress
-Updated: 2026-08-04
+Status: Done
+Updated: 2026-08-09
 
 **Goal:** Let an agent take a clone on a local or SSH-accessible Debian/Ubuntu host with an existing mounted data filesystem to a fully initialized, verified Homeflix core without browser wizards.
 
@@ -139,14 +139,14 @@ Updated: 2026-08-04
 
 ## Task 9: Publish agent guidance and acceptance coverage
 
-- [ ] Add a failing documentation check that the README contains the exact setup intents, all referenced local paths exist, AGENTS routes setup without duplicating the full guide, and the manual quickstart remains linked.
-- [ ] Add a fixture acceptance test simulating a supported host with existing ext4 storage from discovery through verified core, plus cases for empty VPN credentials, no QuickSync, DNS failure/direct ports, interrupted resume, and rerun idempotence.
-- [ ] Run `python3 -m unittest tests.test_docs tests.test_core_acceptance -v`; expect failures.
-- [ ] Write `docs/agent-setup.md` around outcomes, decision points, secure gates, CLI capability discovery (`scripts/homeflix --help`), partial deployment, recovery, and evidence expected before completion.
-- [ ] Add a short setup-intent section to `AGENTS.md`; make agent-assisted setup the first README path and retain `docs/quickstart.md` as the manual fallback. Update configuration docs for ignored local state and mode-0600 `.env`.
-- [ ] Run `python3 -m unittest discover -s tests -v`, `docker compose --env-file .env.example config --quiet`, `bash -n scripts/preflight.sh`, and the Markdown link checker introduced by `tests.test_docs`; expect all green.
-- [ ] Update the design page, active cursor, and log with verified scope; do not claim a real-host acceptance run unless one occurred.
-- [ ] Commit with `git add AGENTS.md README.md docs .agent scripts tests && git commit -m "Document agent-first core setup"`.
+- [x] Add a failing documentation check that the README contains the exact setup intents, all referenced local paths exist, AGENTS routes setup without duplicating the full guide, and the manual quickstart remains linked.
+- [x] Add a fixture acceptance test simulating a supported host with existing ext4 storage from discovery through verified core, plus cases for empty VPN credentials, no QuickSync, DNS failure/direct ports, interrupted resume, and rerun idempotence.
+- [x] Run `python3 -m unittest tests.test_docs tests.test_core_acceptance -v`; expect failures.
+- [x] Write `docs/agent-setup.md` around outcomes, decision points, secure gates, CLI capability discovery (`scripts/homeflix --help`), partial deployment, recovery, and evidence expected before completion.
+- [x] Add a short setup-intent section to `AGENTS.md`; make agent-assisted setup the first README path and retain `docs/quickstart.md` as the manual fallback. Update configuration docs for ignored local state and mode-0600 `.env`.
+- [x] Run `python3 -m unittest discover -s tests -v`, `docker compose --env-file .env.example config --quiet`, `bash -n scripts/preflight.sh`, and the Markdown link checker introduced by `tests.test_docs`; expect all green.
+- [x] Update the design page, active cursor, and log with verified scope; do not claim a real-host acceptance run unless one occurred.
+- [x] Commit with `git add AGENTS.md README.md docs .agent scripts tests && git commit -m "Document agent-first core setup"`.
 
 ## Validation
 
