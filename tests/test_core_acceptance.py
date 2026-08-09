@@ -39,10 +39,16 @@ class JourneyRunner:
             return subprocess.CompletedProcess(command, 0, "Docker Compose fixture\n", "")
         if command == ("docker", "info"):
             return subprocess.CompletedProcess(command, 0, "fixture\n", "")
-        if command[:2] == ("findmnt", "--json"):
+        if command == (
+            "findmnt", "--json", "--target", str(self.mount / "data"),
+            "--output", "TARGET,SOURCE,FSTYPE",
+        ):
             payload = {"filesystems": [{"target": str(self.mount), "source": "/dev/fixture", "fstype": "ext4"}]}
             return subprocess.CompletedProcess(command, 0, json.dumps(payload), "")
-        if "config" in command and "--quiet" in command:
+        if command == (
+            "docker", "compose", "--project-directory", str(self.mount.parent),
+            "--env-file", str(self.mount.parent / ".env"), "config", "--quiet",
+        ):
             return subprocess.CompletedProcess(command, 0, "", "")
         return self.fixture.run(argv, **kwargs)
 
