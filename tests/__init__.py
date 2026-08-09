@@ -1,0 +1,1 @@
+"""Homeflix setup tests."""

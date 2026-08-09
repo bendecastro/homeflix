@@ -1,0 +1,28 @@
+{
+  "commands": {
+    "cat /etc/os-release": [0, "PRETTY_NAME=\"Ubuntu 24.04 LTS\"\nID=ubuntu\nVERSION_ID=\"24.04\"\nVERSION_CODENAME=noble\n", ""],
+    "docker --version": [127, "", "docker: command not found\n"],
+    "docker compose version": [127, "", "docker: command not found\n"],
+    "docker info --format {{json .ServerVersion}}": [127, "", "docker: command not found\n"],
+    "systemctl is-enabled docker": [4, "not-found\n", "Unit docker.service could not be found.\n"],
+    "dpkg-query --show --showformat=${binary:Package}\\t${db:Status-Abbrev}\\n": [0, "base-files\tii \n", ""],
+    "id -u": [0, "1002\n", ""],
+    "id -g": [0, "1002\n", ""],
+    "id -un": [0, "ubuntu\n", ""],
+    "id -nG": [0, "ubuntu sudo\n", ""],
+    "id -nG ubuntu": [0, "ubuntu sudo\n", ""],
+    "sudo -n true": [0, "", ""],
+    "timedatectl show --property=Timezone --value": [0, "Etc/UTC\n", ""],
+    "cat /proc/meminfo": [0, "MemTotal:        8388608 kB\n", ""],
+    "uname -m": [0, "aarch64\n", ""],
+    "cat /proc/cpuinfo": [0, "processor : 0\nmodel name : Fixture ARM CPU\n", ""],
+    "find /dev/dri -maxdepth 1 -name renderD* -type c -print": [0, "", ""],
+    "getent ahosts jellyseerr.local": [2, "", ""],
+    "getent ahosts radarr.local": [2, "", ""],
+    "getent ahosts sonarr.local": [2, "", ""],
+    "ss -H -lntu": [0, "udp UNCONN 0 0 127.0.0.53:53 0.0.0.0:*\n", ""],
+    "findmnt --list --json --bytes --output TARGET,SOURCE,FSTYPE,AVAIL": [0, "{\"filesystems\":[{\"target\":\"/\",\"source\":\"/dev/nvme0n1p2\",\"fstype\":\"ext4\",\"avail\":\"26843545600\"}]}\n", ""],
+    "cat /etc/resolv.conf": [0, "nameserver 127.0.0.53\n", ""]
+  },
+  "environment": {}
+}

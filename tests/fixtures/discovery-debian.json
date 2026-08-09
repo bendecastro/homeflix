@@ -1,0 +1,31 @@
+{
+  "commands": {
+    "cat /etc/os-release": [0, "PRETTY_NAME=\"Debian GNU/Linux 12 (bookworm)\"\nID=debian\nVERSION_ID=\"12\"\nVERSION_CODENAME=bookworm\n", ""],
+    "docker --version": [0, "Docker version 27.5.1, build fixture\n", ""],
+    "docker compose version": [0, "Docker Compose version v2.32.4\n", ""],
+    "docker info --format {{json .ServerVersion}}": [0, "\"27.5.1\"\n", ""],
+    "systemctl is-enabled docker": [0, "enabled\n", ""],
+    "dpkg-query --show --showformat=${binary:Package}\\t${db:Status-Abbrev}\\n": [0, "bash\tii \nca-certificates\tii \n", ""],
+    "id -u": [0, "1000\n", ""],
+    "id -g": [0, "1001\n", ""],
+    "id -un": [0, "homeflix\n", ""],
+    "id -nG": [0, "homeflix sudo docker\n", ""],
+    "id -nG homeflix": [0, "homeflix sudo docker\n", ""],
+    "sudo -n true": [0, "", ""],
+    "timedatectl show --property=Timezone --value": [0, "Europe/London\n", ""],
+    "cat /proc/meminfo": [0, "MemTotal:       16384000 kB\nMemFree:         1000000 kB\n", ""],
+    "uname -m": [0, "x86_64\n", ""],
+    "cat /proc/cpuinfo": [0, "processor : 0\nmodel name : Fixture Intel CPU\n", ""],
+    "find /dev/dri -maxdepth 1 -name renderD* -type c -print": [0, "/dev/dri/renderD128\n", ""],
+    "cat /sys/class/drm/renderD128/device/vendor": [0, "0x8086\n", ""],
+    "test -r /dev/dri/renderD128": [0, "", ""],
+    "test -w /dev/dri/renderD128": [0, "", ""],
+    "getent ahosts jellyseerr.local": [0, "192.0.2.21 STREAM jellyseerr.local\n", ""],
+    "getent ahosts radarr.local": [0, "192.0.2.22 STREAM radarr.local\n", ""],
+    "getent ahosts sonarr.local": [0, "192.0.2.23 STREAM sonarr.local\n", ""],
+    "ss -H -lntu": [0, "tcp LISTEN 0 4096 0.0.0.0:80 0.0.0.0:*\ntcp LISTEN 0 4096 [::]:8096 [::]:*\n", ""],
+    "findmnt --list --json --bytes --output TARGET,SOURCE,FSTYPE,AVAIL": [0, "{\"filesystems\":[{\"target\":\"/\",\"source\":\"/dev/vda1\",\"fstype\":\"ext4\",\"avail\":\"53687091200\"},{\"target\":\"/srv/media\",\"source\":\"/dev/mapper/media\",\"fstype\":\"ext4\",\"avail\":\"1099511627776\"}]}\n", ""],
+    "cat /etc/resolv.conf": [0, "search lan.example\nnameserver 192.0.2.53\n", ""]
+  },
+  "environment": {"SSH_CONNECTION": "192.0.2.2 50000 192.0.2.10 22"}
+}

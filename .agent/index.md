@@ -4,11 +4,11 @@ The local, project-scoped agent wiki for **homeflix** — a self-hosted streamin
 service for a household. It is the agent's brain for designing, building, and
 running homeflix.
 
-> **Status:** the portable stack is designed and Compose-valid but has not been generally
-> host-verified from this public checkout. An approved [agent-first setup](project/agent-first-setup.md)
-> effort now targets clone-to-running deployment through a coding-agent chat, starting with
-> the [core setup slice](project/agent-first-core-setup-plan.md). See
-> [overview](project/overview.md).
+> **Status:** the portable stack is Compose-valid, and the existing-storage
+> [agent-first core setup](project/agent-first-core-setup-plan.md) is fixture-accepted with
+> resumable verification. It has not been accepted on a disposable real host; encrypted
+> storage and acquisition remain follow-up slices. See [agent setup](../docs/agent-setup.md)
+> and [overview](project/overview.md).
 
 **Two doors.** This wiki explains *why* homeflix is built the way it is. If you just want
 to run it, you want [`docs/`](../docs/) instead —
@@ -37,7 +37,7 @@ to run it, you want [`docs/`](../docs/) instead —
 - [networking-remote-access.md](project/networking-remote-access.md) — reverse proxy, DNS, VPN, family remote access
 - [deployment.md](project/deployment.md) — host OS, container runtime, compose layout, backups
 - [agent-first-setup.md](project/agent-first-setup.md) — approved agent-led onboarding design
-- [agent-first-core-setup-plan.md](project/agent-first-core-setup-plan.md) — first implementation slice
+- [agent-first-core-setup-plan.md](project/agent-first-core-setup-plan.md) — completed fixture-accepted core slice
 - [agent-first-storage-plan.md](project/agent-first-storage-plan.md) — guarded encrypted-storage slice
 - [agent-first-acquisition-plan.md](project/agent-first-acquisition-plan.md) — VPN/acquisition slice
 

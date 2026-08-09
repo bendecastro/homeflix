@@ -1,7 +1,7 @@
 # Agent-first setup
 
 Status: Approved
-Updated: 2026-08-04
+Updated: 2026-08-09
 
 ## Goal
 
@@ -22,6 +22,15 @@ entry.
 
 Other distributions remain usable through the manual quickstart, but automated host
 provisioning does not claim to support them initially.
+
+## Delivery status
+
+The existing-storage core slice is implemented for a checkout running locally on a Debian or
+Ubuntu target and passes fixture acceptance, including interruption-safe resume. The CLI has no
+SSH transport; an agent may operate a target checkout through its own SSH capability. The
+encrypted-storage and VPN/acquisition slices remain approved follow-up plans, not shipped
+features. No disposable real-host acceptance has occurred, so the public implementation is not
+yet described as generally production-verified.
 
 ## Architecture
 

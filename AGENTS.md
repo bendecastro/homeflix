@@ -15,6 +15,13 @@ Before non-trivial work, read in this order:
 
 For a narrow task, do not read the whole wiki; use the context map.
 
+## Setup intents
+
+When a user asks to set up, resume, or verify Homeflix, route to
+[`docs/agent-setup.md`](docs/agent-setup.md). Discover the current CLI with
+`scripts/homeflix --help`, review generated plans before any mutation, and never run acquisition
+as part of core setup. Use the guide's capability-based workflow rather than duplicating it here.
+
 ## Project constraints
 
 - Keep `.agent/` current in the same change when work alters project state, establishes a

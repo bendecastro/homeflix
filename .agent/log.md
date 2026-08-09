@@ -198,4 +198,90 @@ installer. The target is Debian/Ubuntu locally or over SSH, with composable idem
 primitives, ignored resumable state, secure terminal secret handoff, optional guarded
 LUKS2/ext4 provisioning, core-first deployment without VPN credentials, and API-driven
 Jellyfin/Jellyseerr/Radarr/Sonarr initialization. Split delivery into independently testable
-core, encrypted-storage, and VPN/acquisition plans; implementation has not started.
+core, encrypted-storage, and VPN/acquisition plans.
+
+## [2026-08-04] implementation | Agent setup task 1 — CLI foundation
+
+Added the Python standard-library setup launcher, structured status command, injectable
+redacting command runner, and atomic schema-versioned local state. State accepts only typed
+non-secret facts and boolean checkpoints; malformed versions, secret/output-shaped fields,
+and corrupt JSON fail safely. Nineteen focused tests pass, including cross-directory use,
+machine-readable errors, overlapping-secret redaction, and failed-write preservation. Fresh
+spec and quality reviews passed after their findings were fixed.
+
+## [2026-08-04] implementation | Agent setup task 2 — host discovery
+
+Added read-only, bounded Debian/Ubuntu discovery for Docker/Compose, identity, timezone,
+CPU/memory, graphics, ports, mounts, DNS, and SSH context. Every uncertain probe distinguishes
+confirmed absence from missing/error/not-tested state; unsupported distributions refuse
+cleanly, Docker/Compose gaps are actionable, nested mounts are preserved, and no host facts
+are persisted. Thirty-seven tests pass; fresh spec and quality reviews passed.
+
+## [2026-08-04] implementation | Agent setup task 3 — guarded Docker preparation
+
+Added exact read-only Debian/Ubuntu Docker preparation plans with explicit fingerprint
+confirmation before apply. The apply path fully rediscovers/rebuilds the plan, refuses stale
+state and conflicting distro packages, stages apt repository files atomically, bounds
+privileged child processes, verifies identity/group/service state, and reports partial or
+cleanup failures structurally. Fifty-eight fixture tests pass and fresh spec/safety reviews
+passed. No real apt, systemd, group, repository, or Docker mutation was run.
+
+## [2026-08-05] implementation | Agent setup task 4 — secure host configuration
+
+Added atomic mode-0600 dotenv updates with real Bash/Compose-compatible encoding, effective
+last-assignment semantics, inline-comment preservation, generated-once Jellyfin credentials,
+and controlling-terminal-only reveal. Configuration verifies mounted storage, derives host
+identity, pins the Compose project, probes actual LAN service resolution, and renders a
+byte-stable ignored override. QuickSync is enabled only for accessible Intel render devices.
+Seventy-nine tests and fresh spec/security reviews passed; no real deployment files were
+created.
+
+## [2026-08-05] implementation | Agent setup task 5 — phase-aware preflight
+
+Replaced the shell implementation with structured core/acquisition preflight while preserving
+the repository-relative wrapper. Core warns on missing VPN secrets; acquisition fails. Checks
+cover mounted non-symlink storage, ownership, known filesystem risks, exact Compose validity,
+and real torrent/media plus acquisition-only Usenet/media hardlinks with fail-closed cleanup.
+Every data bind now disables host-path creation. Ninety-eight tests and fresh spec/quality
+reviews passed; no real deployment paths or containers were touched.
+
+## [2026-08-05] implementation | Agent setup task 6 — resumable core deployment
+
+Added an immutable five-service core allowlist with `--no-deps`, exact Compose context,
+side-effect-free dry-run, live-state no-op reconciliation, container plus HTTP readiness,
+and sanitized partial-failure diagnostics. One global deadline bounds readiness. Exact env
+bytes, Compose/override files, and data mount identity are snapshot-checked across preflight
+immediately before mutation; checkpoints are evidence only and record after full readiness.
+One hundred twenty-one tests and fresh spec/quality reviews passed; no real container command
+was run.
+
+## [2026-08-05] implementation | Agent setup task 7 — API initialization
+
+Added bounded, redacted clients for Jellyfin, Radarr/Sonarr, and Jellyseerr. Setup follows
+Jellyfin's startup/auth/library sequence, discovers *arr profiles by name, creates exact roots,
+preserves unowned settings while enabling rename/hardlinks/completed handling, and connects
+Jellyseerr over Docker DNS with non-4K defaults. Loopback API transport rejects proxies,
+redirects, and URL escapes; app secrets are read through owner-checked no-follow traversal,
+including normal read-only 0644 files. Initialized Jellyseerr must verify its internal
+Jellyfin connection. One hundred forty-eight fixture/localhost tests and fresh spec/security
+reviews passed; no live APIs or appdata were accessed.
+
+## [2026-08-09] implementation | Agent setup task 8 — verification and resume
+
+Added ordered `setup core` orchestration, checkpoint-independent reconciliation, and a
+strictly evidence-driven verifier for the exact Homeflix project, five core services, API
+state, conditional QuickSync mapping, and acquisition absence. Standalone initialization
+attests live deployment readiness before mutation; one global deadline bounds work, and
+Jellyfin authentication sessions are always closed. Checkpoint/state output is typed,
+bounded, and secret-free. One hundred eighty-one fixture/temp tests and fresh spec/security
+reviews passed; no live deployment, API, or appdata operation was run.
+
+## [2026-08-09] implementation | Agent setup task 9 — guidance and acceptance
+
+Published agent-assisted setup as the first README path, added a lean AGENTS intent route and
+an outcome-oriented core setup guide, retained the manual fallback, and documented ignored
+mode-0600 configuration/state artifacts. Added fail-closed Markdown checks and a clean-state
+fixture journey spanning Debian discovery, ext4 preflight, exact core deployment, bounded
+partial API failure, resume, verification, and no-op rerun. One hundred eighty-seven tests and
+fresh spec/quality reviews passed. The core slice is fixture-accepted only; no disposable real
+Debian/Ubuntu host, live Docker deployment, appdata, or service API was accessed.
