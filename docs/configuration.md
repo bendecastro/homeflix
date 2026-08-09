@@ -2,6 +2,28 @@
 
 Every setting lives in `.env`. Nothing is hardcoded in `docker-compose.yml`.
 
+## Local deployment artifacts
+
+`.env` is the canonical local configuration and secret file. It is ignored, written atomically
+by `scripts/homeflix configure`, and must remain mode 0600. Back it up only to a destination
+that provides equivalent secret protection; restoring it with broader permissions causes core
+API operations to refuse it. Never commit it or paste its values into JSON, logs, or chat.
+
+`.homeflix/setup.json` is ignored, typed, non-secret checkpoint evidence only. It may record
+approved checkpoint names and bounded non-secret host facts, but never environment values,
+credentials, API responses, command output, paths, addresses, or tokens. Live inspection is
+authoritative when checkpoint evidence and deployed state differ. Backing it up is optional; a
+missing file is reconstructed through reconciliation.
+
+`docker-compose.override.yml` is an ignored, deterministic generated adaptation for this host.
+It contains no credentials. Reconfiguration writes the same bytes for the same capability
+selection, including QuickSync and temporary direct setup ports.
+
+The generated Jellyfin administrator credential remains only in `.env`. Retrieve it explicitly
+through an unredirected controlling terminal with `scripts/homeflix secrets reveal jellyfin`.
+The reveal command refuses JSON and pipes; do not transcribe the values into setup state or chat.
+There is no VPN-secret setup command in the current core slice.
+
 ## Storage
 
 | Variable | Default | Notes |
@@ -86,14 +108,10 @@ daily. Keep it quoted.
 
 ## Hardware transcoding
 
-Commented out by default, since passing through a nonexistent device stops the container
-starting. With QuickSync available, uncomment in `docker-compose.yml`:
-
-```yaml
-jellyfin:
-  devices:
-    - /dev/dri:/dev/dri
-```
+Passing through a nonexistent device stops the container starting, so the base Compose file has
+no device mapping. Agent-assisted configuration adds `/dev/dri:/dev/dri` to the ignored override
+only when structured discovery confirms usable Intel QuickSync. Manual operators may add that
+same mapping to their own ignored override after verifying the device and permissions.
 
 ## Adding a service
 

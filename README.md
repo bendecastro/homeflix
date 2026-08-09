@@ -9,7 +9,25 @@ with a kill switch. Traefik routes everything to friendly `*.local` names.
 
 ```bash
 git clone https://github.com/bendecastro/homeflix.git
+cd homeflix
 ```
+
+## Agent-assisted setup
+
+Open the checkout with a capable coding agent and paste one of these exact intents:
+
+- `Set up Homeflix core on this Debian or Ubuntu machine using my existing mounted storage.`
+- `Resume Homeflix core setup and verify the live deployment.`
+- `Show me a dry-run plan for Homeflix core setup without changing this machine.`
+
+The current CLI supports **local Debian/Ubuntu with existing mounted storage**. It runs in the
+target checkout and does not provide SSH transport; an agent may use its own SSH capability.
+Core includes Traefik, Jellyfin, Jellyseerr, Radarr, and Sonarr. Encrypted storage and acquisition
+(VPN/download/indexer services) are planned follow-ups, not shipped setup phases. Automation is
+fixture-tested only and has not received disposable real-host Debian/Ubuntu acceptance.
+
+Start with the [agent setup guide](docs/agent-setup.md), which requires capability discovery,
+reviewed mutation plans, secure human gates, and live evidence before completion.
 
 ```
                         ┌──────────┐
@@ -42,9 +60,10 @@ git clone https://github.com/bendecastro/homeflix.git
    └──────────────────────────────────────────────────────┘
 ```
 
-## Quickstart
+## Manual quickstart fallback
 
-Requires a Linux host with Docker and the Compose plugin.
+Prefer the agent-assisted path above on its supported hosts. Manual operation requires a Linux
+host with Docker and the Compose plugin.
 
 ```bash
 git clone https://github.com/bendecastro/homeflix.git
