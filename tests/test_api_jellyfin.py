@@ -97,8 +97,9 @@ class JsonClientTests(unittest.TestCase):
         def sleep(seconds):
             sleeps.append(seconds); now[0] += seconds
         client = JsonClient("fixture", "http://127.0.0.1", transport=transport, timeout=1, attempts=2, sleep=sleep, clock=lambda: now[0])
-        with self.assertRaises(ApiError):
+        with self.assertRaises(ApiError) as raised:
             client.request("GET", "/status", operation="bounded retry")
+        self.assertEqual(raised.exception.code, "http_error")
         self.assertEqual(len(calls), 1)
         self.assertAlmostEqual(sleeps[0], 0.1)
 
@@ -162,6 +163,27 @@ class JsonClientTests(unittest.TestCase):
         for path in invalid:
             with self.subTest(path=path), self.assertRaises(ValueError):
                 client.request("GET", path, operation="validate path")
+
+    def test_local_budget_exhaustion_without_shared_deadline_is_transport_error(self):
+        now = [0.0]
+        def transport(outgoing, timeout):
+            now[0] += timeout
+            raise TimeoutError
+        client = JsonClient("fixture", "http://127.0.0.1", transport=transport, timeout=1, attempts=1, clock=lambda: now[0])
+        with self.assertRaises(ApiError) as raised:
+            client.request("GET", "/local", operation="local budget")
+        self.assertEqual(raised.exception.code, "transport_error")
+
+    def test_local_budget_exhaustion_before_shared_deadline_is_transport_error(self):
+        now = [0.0]
+        def transport(outgoing, timeout):
+            now[0] += timeout
+            raise TimeoutError
+        client = JsonClient("fixture", "http://127.0.0.1", transport=transport, timeout=1, attempts=1, clock=lambda: now[0], deadline=10.0)
+        with self.assertRaises(ApiError) as raised:
+            client.request("GET", "/local", operation="local budget")
+        self.assertEqual(raised.exception.code, "transport_error")
+        self.assertLess(now[0], 10.0)
 
     def test_shared_absolute_deadline_caps_sequential_requests_without_reset(self):
         now = [0.0]; timeouts = []

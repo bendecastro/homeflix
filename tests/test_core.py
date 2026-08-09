@@ -11,7 +11,7 @@ import unittest
 from unittest.mock import patch
 from urllib.parse import parse_qs, urlsplit
 
-from scripts.homeflix_setup.api import HttpResponse
+from scripts.homeflix_setup.api import ApiError, HttpResponse
 from scripts.homeflix_setup.cli import main
 from scripts.homeflix_setup.compose import CORE_SERVICES
 from scripts.homeflix_setup.core import (
@@ -838,6 +838,16 @@ class CoreVerificationAndResumeTests(unittest.TestCase):
             result = reconcile_core(".", readiness_timeout=5, clock=clock)
         self.assertEqual(result["status"], "timeout")
         self.assertEqual(clock.now, 5)
+
+    def test_reconcile_maps_only_outer_deadline_api_error_to_timeout(self):
+        for error_code, expected in (("deadline_exhausted", "timeout"), ("transport_error", "raise")):
+            with self.subTest(error_code=error_code), patch("scripts.homeflix_setup.core.deploy_core", return_value={"status": "already_ready"}), patch("scripts.homeflix_setup.core.configure_core", side_effect=ApiError("jellyfin", "initialize", None, error_code)):
+                if expected == "raise":
+                    with self.assertRaises(ApiError) as raised:
+                        reconcile_core(".")
+                    self.assertEqual(raised.exception.code, "transport_error")
+                else:
+                    self.assertEqual(reconcile_core(".")["status"], "timeout")
 
     def test_reconcile_continues_live_api_work_after_checkpoint_write_failure(self):
         temporary, root = self.make_root(); self.addCleanup(temporary.cleanup)

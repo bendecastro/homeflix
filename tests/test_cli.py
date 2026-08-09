@@ -119,6 +119,20 @@ class StatusCliTests(unittest.TestCase):
         self.assertEqual(payload["status"], "timeout")
         self.assertEqual([phase["status"] for phase in payload["phases"]], ["fail", "skipped", "skipped", "skipped", "skipped"])
 
+    def test_setup_maps_only_outer_deadline_api_error_to_timeout(self) -> None:
+        for error_code, expected in (("deadline_exhausted", "timeout"), ("transport_error", "initialization_failed")):
+            with self.subTest(error_code=error_code), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                (root / ".env").write_text("DATA_ROOT=/d\nCONFIG_ROOT=/c\nCACHE_ROOT=/k\nQUALITY_PROFILE=HD-1080p\n", encoding="utf-8")
+                (root / ".env").chmod(0o600)
+                preflight = PreflightReport("core", (CheckResult("fixture", "pass", "passed"),))
+                with patch("scripts.homeflix_setup.cli.discover_host", return_value=object()), patch("scripts.homeflix_setup.cli.configure", return_value={}), patch("scripts.homeflix_setup.cli.run_preflight", return_value=preflight), patch("scripts.homeflix_setup.cli.deploy_core", return_value={"status": "already_ready"}), patch("scripts.homeflix_setup.cli.configure_core", side_effect=ApiError("jellyfin", "initialize", None, error_code)):
+                    code, stdout, stderr = run_main("--json", "setup", "core", repository_root=root)
+                payload = parse_single_json(stdout)
+                self.assertEqual(code, 1); self.assertEqual(stderr, "")
+                self.assertEqual(payload["status"], expected)
+                self.assertEqual(payload["phases"][-1]["status"], "skipped")
+
     def test_setup_core_phase_failures_are_truthful_and_skip_later_work(self) -> None:
         cases = (
             ("configure", "configuration_failed", ["fail", "skipped", "skipped", "skipped", "skipped"]),
@@ -240,11 +254,12 @@ class StatusCliTests(unittest.TestCase):
             self.assertEqual(code, 0)
             self.assertEqual(stderr, "")
             self.assertEqual(json.loads(stdout)["status"], "configured")
-            with patch("scripts.homeflix_setup.cli.configure_core", side_effect=ApiError("radarr", "select quality profile", None, "profile_not_found")):
-                code, stdout, stderr = run_main("--json", "initialize", "core", repository_root=root)
-            self.assertEqual(code, 1)
-            self.assertEqual(stderr, "")
-            self.assertEqual(json.loads(stdout)["error"]["code"], "profile_not_found")
+            for error_code in ("profile_not_found", "transport_error", "deadline_exhausted"):
+                with self.subTest(error_code=error_code), patch("scripts.homeflix_setup.cli.configure_core", side_effect=ApiError("radarr", "initialize", None, error_code)):
+                    code, stdout, stderr = run_main("--json", "initialize", "core", repository_root=root)
+                self.assertEqual(code, 1)
+                self.assertEqual(stderr, "")
+                self.assertEqual(json.loads(stdout)["error"]["code"], error_code)
 
     def test_launcher_works_cross_cwd_without_changing_repository_state(self) -> None:
         state_path = REPOSITORY_ROOT / ".homeflix" / "setup.json"
