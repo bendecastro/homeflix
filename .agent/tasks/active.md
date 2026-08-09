@@ -8,7 +8,8 @@ Updated: 2026-08-09
 
 - **Completed slice:** [Agent-first core setup](../project/agent-first-core-setup-plan.md),
   covering local Debian/Ubuntu discovery through API-initialized and verified core on existing
-  mounted storage. All nine tasks passed fixture tests and independent spec/security review.
+  mounted storage. All nine tasks passed fixture tests and independent spec plus
+  quality/security/safety reviews.
 - **Verification boundary:** fixture-accepted only; disposable real-host Debian/Ubuntu
   acceptance remains required before claiming general production verification.
 - **Follow-ups:** guarded [encrypted storage](../project/agent-first-storage-plan.md) and
