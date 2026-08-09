@@ -7,7 +7,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from scripts.homeflix_setup.core import configure_core
+from scripts.homeflix_setup.core import ReadinessResult, configure_core
 
 from scripts.homeflix_setup.api import ApiError, HttpResponse, JellyseerrClient, read_settings_api_key
 
@@ -193,16 +193,16 @@ class ConfigureCoreTests(unittest.TestCase):
             (root / ".env").write_text(
                 "JELLYFIN_ADMIN_USER=old\nJELLYFIN_ADMIN_USER=fixture-admin\n"
                 "JELLYFIN_ADMIN_PASSWORD=FIXTURE_PASSWORD_NOT_REAL\n"
-                f"CONFIG_ROOT={config_root}\nPUID=99999\nPUID={os.getuid()}\nQUALITY_PROFILE=Fixture HD\nDOMAIN=fixture.test\n",
+                f"CONFIG_ROOT={config_root}\nDATA_ROOT={root}\nCOMPOSE_PROJECT_NAME=homeflix\nPUID=99999\nPUID={os.getuid()}\nQUALITY_PROFILE=Fixture HD\nDOMAIN=fixture.test\n",
                 encoding="utf-8",
             )
             (root / ".env").chmod(0o600)
+            (root / "docker-compose.yml").write_text("services: {}\n", encoding="utf-8")
             calls = []
             class FakeJellyfin:
                 def __init__(self, **kwargs): pass
-                def initialize(self, username, password):
-                    calls.append(("jf", username, password)); return True
-                def ensure_libraries(self): return ["Movies", "Shows", "Music"]
+                def reconcile(self, username, password):
+                    calls.append(("jf", username, password)); return True, ["Movies", "Shows", "Music"]
             class FakeArr:
                 def __init__(self, service, base, key, **kwargs):
                     self.service = service; calls.append((service, base, key, kwargs["headers"]))
@@ -221,8 +221,12 @@ class ConfigureCoreTests(unittest.TestCase):
             reader_uids = []
             def arr_key(config_root, service, uid): reader_uids.append(uid); return KEY
             def seerr_key(config_root, uid): reader_uids.append(uid); return KEY
+            class Runner:
+                def run(self, argv, **kwargs):
+                    records = [{"Service": service, "State": "running", "Health": "healthy", "Project": "homeflix"} for service in ("traefik", "jellyfin", "jellyseerr", "radarr", "sonarr")]
+                    return type("Result", (), {"returncode": 0, "stdout": json.dumps(records)})()
             with patch("scripts.homeflix_setup.core.JellyfinClient", FakeJellyfin), patch("scripts.homeflix_setup.core.ArrClient", FakeArr), patch("scripts.homeflix_setup.core.JellyseerrClient", FakeSeerr):
-                result = configure_core(root, api_key_reader=arr_key, settings_key_reader=seerr_key)
+                result = configure_core(root, runner=Runner(), http_waiter=lambda *args, **kwargs: ReadinessResult(True, "ready"), api_key_reader=arr_key, settings_key_reader=seerr_key)
             self.assertEqual(reader_uids, [os.getuid()] * 3)
             self.assertEqual(calls[0][1], "fixture-admin")
             self.assertEqual(calls[1][1], "http://127.0.0.1")
@@ -234,6 +238,29 @@ class ConfigureCoreTests(unittest.TestCase):
             self.assertNotIn(KEY, rendered)
             self.assertNotIn("FIXTURE_PASSWORD", rendered)
             self.assertEqual(result["status"], "configured")
+
+    def test_readiness_attestation_precedes_all_appdata_and_api_mutation(self):
+        for case in ("wrong_project", "noncore", "unready"):
+            with self.subTest(case=case), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                (root / ".env").write_text(
+                    "COMPOSE_PROJECT_NAME=homeflix\nDOMAIN=fixture.test\nJELLYFIN_ADMIN_USER=admin\n"
+                    "JELLYFIN_ADMIN_PASSWORD=NOT_REAL\nCONFIG_ROOT=/fixture/config\n"
+                    f"DATA_ROOT={root}\nPUID={os.getuid()}\nQUALITY_PROFILE=Fixture HD\n",
+                    encoding="utf-8",
+                )
+                (root / ".env").chmod(0o600)
+                (root / "docker-compose.yml").write_text("services: {}\n", encoding="utf-8")
+                class Runner:
+                    def run(self, argv, **kwargs):
+                        records = []
+                        for service in ("traefik", "jellyfin", "jellyseerr", "radarr", "sonarr"):
+                            records.append({"Service": service, "State": "exited" if case == "unready" and service == "radarr" else "running", "Health": "healthy", "Project": "other" if case == "wrong_project" else "homeflix"})
+                        if case == "noncore": records.append({"Service": "bazarr", "State": "running", "Health": "healthy", "Project": "homeflix"})
+                        return type("Result", (), {"returncode": 0, "stdout": json.dumps(records)})()
+                with patch("scripts.homeflix_setup.core.JellyfinClient", side_effect=AssertionError("no API mutation")):
+                    with self.assertRaises(ValueError):
+                        configure_core(root, runner=Runner(), http_waiter=lambda *args, **kwargs: ReadinessResult(True, "ready"), api_key_reader=lambda *args: self.fail("no appdata read"))
 
     def test_missing_credentials_fail_before_client_requests(self):
         with tempfile.TemporaryDirectory() as directory:

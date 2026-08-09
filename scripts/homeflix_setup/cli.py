@@ -361,7 +361,9 @@ def main(argv: Sequence[str] | None = None, *, repository_root: Path | None = No
                                     initialized = configure_core(root, deadline=operation_deadline)
                                 except TimeoutError:
                                     result = stop("timeout", "initialize:core")
-                                except (ApiError, OSError, RuntimeError, ValueError):
+                                except ApiError as error:
+                                    result = stop("timeout" if error.code == "deadline_exhausted" else "initialization_failed", "initialize:core")
+                                except (OSError, RuntimeError, ValueError):
                                     result = stop("initialization_failed", "initialize:core")
                                 else:
                                     phases.append({"phase": "initialize:core", "status": "complete"})

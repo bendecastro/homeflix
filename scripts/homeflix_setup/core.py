@@ -30,6 +30,15 @@ class ReadinessResult:
 
 
 @dataclass(frozen=True)
+class CoreReadinessEvidence:
+    repository_root: Path
+    project_name: str
+    snapshot: DeploymentSnapshot
+    services: tuple[str, ...]
+    deadline: float
+
+
+@dataclass(frozen=True)
 class ArtifactIdentity:
     device: int
     inode: int
@@ -225,6 +234,39 @@ def _readiness_targets(config: EnvDocument) -> dict[str, tuple[str, dict[str, st
     }
 
 
+def _attest_core_readiness(
+    root: Path,
+    config: EnvDocument,
+    runner: CommandRunner,
+    *,
+    deadline: float,
+    clock: Callable[[], float],
+    http_waiter: Callable[..., ReadinessResult],
+) -> CoreReadinessEvidence:
+    """Establish exact, current, private readiness evidence before API mutation."""
+    project_name = config.get("COMPOSE_PROJECT_NAME")
+    if project_name != "homeflix":
+        raise ValueError("expected Compose project identity was not configured")
+    snapshot = capture_deployment_snapshot(root, config)
+    remaining = deadline - clock()
+    if remaining <= 0:
+        raise TimeoutError("core operation deadline exhausted")
+    inventory = compose_inventory(root, runner, project_name=project_name, timeout=remaining)
+    if any(item["project"] != "homeflix" for item in inventory):
+        raise ValueError("live Compose project identity did not match")
+    if tuple(sorted(item["service"] for item in inventory)) != tuple(sorted(CORE_SERVICES)):
+        raise ValueError("live Compose core inventory was not exact")
+    states = {item["service"]: item for item in inventory}
+    readiness = _initial_readiness(
+        states, _readiness_targets(config), http_waiter, deadline=deadline, clock=clock
+    )
+    if not all(result.ready for result in readiness.values()):
+        raise ValueError("live core readiness was not established")
+    if capture_deployment_snapshot(root, config) != snapshot:
+        raise ValueError("deployment inputs changed during readiness attestation")
+    return CoreReadinessEvidence(root, project_name, snapshot, CORE_SERVICES, deadline)
+
+
 def _diagnostics(
     states: Mapping[str, Mapping[str, str]], readiness: Mapping[str, ReadinessResult]
 ) -> list[dict[str, object]]:
@@ -340,6 +382,9 @@ def configure_core(
     repository_root: str | Path,
     *,
     transports: Mapping[str, Transport] | None = None,
+    runner: CommandRunner | None = None,
+    http_waiter: Callable[..., ReadinessResult] = wait_for_http,
+    readiness_timeout: float = READINESS_TIMEOUT,
     deadline: float | None = None,
     clock: Callable[[], float] = time.monotonic,
     api_key_reader: Callable[[str | Path, str, int], str] = read_api_key,
@@ -364,16 +409,20 @@ def configure_core(
     if not re.fullmatch(r"[A-Za-z0-9](?:[A-Za-z0-9.-]{0,251}[A-Za-z0-9])?", domain):
         raise ValueError("DOMAIN is invalid")
     selected = values["QUALITY_PROFILE"] or ""
+    operation_deadline = deadline if deadline is not None else clock() + max(0.0, readiness_timeout)
+    _attest_core_readiness(
+        root, config, runner or CommandRunner(), deadline=operation_deadline,
+        clock=clock, http_waiter=http_waiter,
+    )
     runtime_keys = {
         service: api_key_reader(config_root, service, expected_uid)
         for service in ("radarr", "sonarr")
     }
     chosen_transports = dict(transports or {})
-    if deadline is not None and clock() >= deadline:
+    if clock() >= operation_deadline:
         raise TimeoutError("core operation deadline exhausted")
-    jellyfin = JellyfinClient(transport=chosen_transports.get("jellyfin", urllib_transport), deadline=deadline, clock=clock)
-    created_admin = jellyfin.initialize(values["JELLYFIN_ADMIN_USER"] or "", values["JELLYFIN_ADMIN_PASSWORD"] or "")
-    libraries = jellyfin.ensure_libraries()
+    jellyfin = JellyfinClient(transport=chosen_transports.get("jellyfin", urllib_transport), deadline=operation_deadline, clock=clock)
+    created_admin, libraries = jellyfin.reconcile(values["JELLYFIN_ADMIN_USER"] or "", values["JELLYFIN_ADMIN_PASSWORD"] or "")
 
     arr_results: dict[str, dict[str, object]] = {}
     runtime: dict[str, tuple[str, dict[str, object], dict[str, object]]] = {}
@@ -382,7 +431,7 @@ def configure_core(
         client = ArrClient(
             service, "http://127.0.0.1", key,
             headers={"Host": f"{service}.{domain}"},
-            transport=chosen_transports.get(service, urllib_transport), deadline=deadline, clock=clock,
+            transport=chosen_transports.get(service, urllib_transport), deadline=operation_deadline, clock=clock,
         )
         result = client.configure(selected, media_path)
         arr_results[service] = result
@@ -392,7 +441,7 @@ def configure_core(
 
     jellyseerr = JellyseerrClient(
         headers={"Host": f"jellyseerr.{domain}"},
-        transport=chosen_transports.get("jellyseerr", urllib_transport), deadline=deadline, clock=clock,
+        transport=chosen_transports.get("jellyseerr", urllib_transport), deadline=operation_deadline, clock=clock,
     )
     was_initialized = jellyseerr.initialized()
     if not was_initialized:
@@ -557,11 +606,18 @@ def verify_core(
         inspected_seerr = seerr.inspect(runtime)
         seerr_ok = all(value is True for value in inspected_seerr.values())
         checks.append(_check("jellyseerr", seerr_ok, "initialized with exact internal default services" if seerr_ok else "initialization or internal default services differ"))
-    except (ApiError, OSError, RuntimeError, ValueError, KeyError, TypeError):
+    except ApiError as caught:
         existing = {item["domain"] for item in checks}
+        reason = "time budget exhausted" if caught.code == "deadline_exhausted" else "state could not be inspected"
         for domain in ("jellyfin", "radarr", "sonarr", "jellyseerr"):
             if domain not in existing:
-                checks.append(_check(domain, None, f"{domain} state could not be inspected"))
+                checks.append(_check(domain, None, f"{domain} {reason}"))
+    except (OSError, RuntimeError, ValueError, KeyError, TypeError):
+        existing = {item["domain"] for item in checks}
+        reason = "time budget exhausted" if clock() >= operation_deadline else "state could not be inspected"
+        for domain in ("jellyfin", "radarr", "sonarr", "jellyseerr"):
+            if domain not in existing:
+                checks.append(_check(domain, None, f"{domain} {reason}"))
 
     try:
         if quicksync_inspector is _inspect_quicksync:
@@ -612,9 +668,13 @@ def reconcile_core(repository_root: str | Path, **kwargs: object) -> dict[str, o
     if operation_clock() >= operation_deadline:
         return {"status": "timeout", "deploy": deploy, "reason": "Core reconciliation deadline was exhausted"}
     try:
-        configured = configure_core(root, deadline=operation_deadline, clock=operation_clock, **{key: value for key, value in kwargs.items() if key in {"transports", "api_key_reader", "settings_key_reader"}})
+        configured = configure_core(root, deadline=operation_deadline, clock=operation_clock, **{key: value for key, value in kwargs.items() if key in {"runner", "http_waiter", "transports", "api_key_reader", "settings_key_reader"}})
     except TimeoutError:
         return {"status": "timeout", "deploy": deploy, "reason": "Core reconciliation deadline was exhausted"}
+    except ApiError as caught:
+        if caught.code == "deadline_exhausted":
+            return {"status": "timeout", "deploy": deploy, "reason": "Core reconciliation deadline was exhausted"}
+        raise
     if operation_clock() >= operation_deadline:
         return {"status": "timeout", "deploy": deploy, "configure": configured, "reason": "Core reconciliation deadline was exhausted"}
     verified = verify_core(root, deadline=operation_deadline, **{key: value for key, value in kwargs.items() if key in {"runner", "transports", "api_key_reader", "settings_key_reader", "http_waiter", "clock", "quicksync_inspector"}})

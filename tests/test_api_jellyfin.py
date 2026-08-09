@@ -171,8 +171,9 @@ class JsonClientTests(unittest.TestCase):
         client = JsonClient("fixture", "http://127.0.0.1", transport=transport, timeout=5, attempts=1, clock=lambda: now[0], deadline=1.0)
         client.request("GET", "/one", operation="one")
         client.request("GET", "/two", operation="two")
-        with self.assertRaises(ApiError):
+        with self.assertRaises(ApiError) as raised:
             client.request("GET", "/three", operation="three")
+        self.assertEqual(raised.exception.code, "deadline_exhausted")
         self.assertEqual(len(timeouts), 2)
         self.assertEqual(timeouts, [1.0, 0.4])
 
@@ -193,10 +194,13 @@ class JellyfinApiTests(unittest.TestCase):
             (200, fixture("jellyfin-auth.json")),
             (200, fixture("jellyfin-libraries-empty.json")),
             (204, {}), (204, {}), (204, {}),
+            (204, {}),
         ])
         client = JellyfinClient(transport=transport)
-        self.assertTrue(client.initialize("fixture-admin", "FIXTURE_PASSWORD_NOT_REAL"))
-        self.assertEqual(client.ensure_libraries(), ["Movies", "Shows", "Music"])
+        created, libraries = client.reconcile("fixture-admin", "FIXTURE_PASSWORD_NOT_REAL")
+        self.assertTrue(created)
+        self.assertEqual(libraries, ["Movies", "Shows", "Music"])
+        self.assertIsNone(client.token)
         paths = [request.full_url.split("127.0.0.1:8096", 1)[1] for request, _ in transport.requests]
         self.assertEqual(paths[:7], [
             "/System/Info/Public", "/Users/AuthenticateByName", "/Startup/Configuration",
@@ -218,9 +222,12 @@ class JellyfinApiTests(unittest.TestCase):
             (200, fixture("jellyfin-startup-incomplete.json")),
             (200, fixture("jellyfin-auth.json")),
             (204, {}), (204, {}), (204, {}),
+            (200, fixture("jellyfin-libraries-complete.json")), (204, {}),
         ])
         client = JellyfinClient(transport=transport)
-        self.assertFalse(client.initialize("fixture-admin", "FIXTURE_PASSWORD_NOT_REAL"))
+        created, _ = client.reconcile("fixture-admin", "FIXTURE_PASSWORD_NOT_REAL")
+        self.assertFalse(created)
+        self.assertIsNone(client.token)
         self.assertFalse(any(request.full_url.endswith("/Startup/User") for request, _ in transport.requests))
         self.assertEqual(sum(request.full_url.endswith("/Users/AuthenticateByName") for request, _ in transport.requests), 1)
 
@@ -229,10 +236,13 @@ class JellyfinApiTests(unittest.TestCase):
             (200, fixture("jellyfin-startup-complete.json")),
             (200, fixture("jellyfin-auth.json")),
             (200, fixture("jellyfin-libraries-complete.json")),
+            (204, {}),
         ])
         client = JellyfinClient(transport=transport)
-        self.assertFalse(client.initialize("fixture-admin", "FIXTURE_PASSWORD_NOT_REAL"))
-        self.assertEqual(client.ensure_libraries(), ["Movies", "Shows", "Music"])
+        created, libraries = client.reconcile("fixture-admin", "FIXTURE_PASSWORD_NOT_REAL")
+        self.assertFalse(created)
+        self.assertEqual(libraries, ["Movies", "Shows", "Music"])
+        self.assertIsNone(client.token)
         self.assertFalse(any(request.full_url.endswith("/Startup/User") for request, _ in transport.requests))
         self.assertFalse(any(request.method == "POST" and "/Library/VirtualFolders?" in request.full_url for request, _ in transport.requests))
 
@@ -251,11 +261,12 @@ class JellyfinApiTests(unittest.TestCase):
                     (200, fixture("jellyfin-startup-complete.json")),
                     (200, fixture("jellyfin-auth.json")),
                     (200, fixture(conflict)),
+                    (204, {}),
                 ])
                 client = JellyfinClient(transport=transport)
-                client.initialize("fixture-admin", "FIXTURE_PASSWORD_NOT_REAL")
                 with self.assertRaises(ApiError) as raised:
-                    client.ensure_libraries()
+                    client.reconcile("fixture-admin", "FIXTURE_PASSWORD_NOT_REAL")
+                self.assertIsNone(client.token)
                 self.assertEqual(raised.exception.code, "library_conflict")
                 self.assertFalse(any(request.method == "POST" and "/Library/VirtualFolders?" in request.full_url for request, _ in transport.requests))
                 rendered = str(raised.exception)
@@ -279,6 +290,41 @@ class JellyfinApiTests(unittest.TestCase):
         self.assertTrue(posts[1][1].endswith("/Sessions/Logout"))
         self.assertIsNone(client.token)
         self.assertFalse(any("Startup/" in path or "Library/VirtualFolders?" in path for _, path in methods_paths))
+
+    def test_partial_startup_failure_logs_out_without_masking_primary(self):
+        transport = FixtureTransport([
+            (200, fixture("jellyfin-startup-incomplete.json")),
+            (200, fixture("jellyfin-auth.json")),
+            (500, {}),
+            (204, {}),
+        ])
+        client = JellyfinClient(transport=transport)
+        with self.assertRaises(ApiError) as raised:
+            client.reconcile("fixture-admin", "FIXTURE_PASSWORD_NOT_REAL")
+        self.assertEqual(raised.exception.operation, "set startup configuration")
+        self.assertTrue(transport.requests[-1][0].full_url.endswith("/Sessions/Logout"))
+        self.assertIsNone(client.token)
+
+    def test_work_deadline_reserves_outer_budget_for_logout(self):
+        now = [0.0]; events = []
+        responses = iter((
+            HttpResponse(200, json.dumps(fixture("jellyfin-startup-complete.json")).encode()),
+            HttpResponse(200, json.dumps(fixture("jellyfin-auth.json")).encode()),
+            HttpResponse(200, json.dumps(fixture("jellyfin-libraries-complete.json")).encode()),
+            HttpResponse(204, b""),
+        ))
+        def transport(outgoing, timeout):
+            events.append((outgoing.full_url, timeout))
+            increments = (0.4, 0.4, 0.2, 0.1)
+            now[0] += increments[len(events) - 1]
+            return next(responses)
+        client = JellyfinClient(transport=transport, deadline=2.0, clock=lambda: now[0])
+        created, _ = client.reconcile("fixture-admin", "FIXTURE_PASSWORD_NOT_REAL")
+        self.assertFalse(created)
+        self.assertTrue(events[-1][0].endswith("/Sessions/Logout"))
+        self.assertLessEqual(now[0], 2.0)
+        self.assertGreater(events[-1][1], 0)
+        self.assertIsNone(client.token)
 
     def test_inspection_logout_failure_is_fail_closed_and_token_is_cleared(self):
         transport = FixtureTransport([
@@ -305,6 +351,18 @@ class JellyfinApiTests(unittest.TestCase):
         with self.assertRaises(ApiError) as raised:
             client.inspect("fixture-admin", "FIXTURE_PASSWORD_NOT_REAL")
         self.assertEqual(raised.exception.operation, "inspect libraries")
+        self.assertIsNone(client.token)
+
+    def test_repeated_reconcile_closes_every_ephemeral_session(self):
+        responses = []
+        for _ in range(2):
+            responses.extend(((200, fixture("jellyfin-startup-complete.json")), (200, fixture("jellyfin-auth.json")), (200, fixture("jellyfin-libraries-complete.json")), (204, {})))
+        transport = FixtureTransport(responses)
+        client = JellyfinClient(transport=transport)
+        for _ in range(2):
+            created, libraries = client.reconcile("fixture-admin", "FIXTURE_PASSWORD_NOT_REAL")
+            self.assertFalse(created); self.assertEqual(libraries, ["Movies", "Shows", "Music"])
+        self.assertEqual(sum(request.full_url.endswith("/Sessions/Logout") for request, _ in transport.requests), 2)
         self.assertIsNone(client.token)
 
     def test_repeated_inspection_closes_every_ephemeral_session(self):

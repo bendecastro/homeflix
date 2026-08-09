@@ -15,7 +15,14 @@ LIBRARIES = {"Movies": ("movies", "/data/media/movies"), "Shows": ("tvshows", "/
 
 class JellyfinClient:
     def __init__(self, base_url: str = "http://127.0.0.1:8096", *, transport: Transport = urllib_transport, deadline: float | None = None, clock: Callable[[], float] = time.monotonic) -> None:
-        self.http = JsonClient("jellyfin", base_url, transport=transport, deadline=deadline, clock=clock)
+        self.clock = clock
+        self.outer_deadline = deadline
+        if deadline is None:
+            work_deadline = None
+        else:
+            remaining = max(0.0, deadline - clock())
+            work_deadline = deadline - min(1.0, remaining)
+        self.http = JsonClient("jellyfin", base_url, transport=transport, deadline=work_deadline, clock=clock)
         self.token: str | None = None
 
     def startup_completed(self) -> bool:
@@ -78,13 +85,30 @@ class JellyfinClient:
         """Close the ephemeral verification session and always forget its token."""
         if self.token is None:
             return
+        work_deadline = self.http.deadline
+        self.http.deadline = self.outer_deadline
         try:
             self.http.request(
                 "POST", "/Sessions/Logout", operation="close verification session",
                 payload={}, headers=self._headers(),
             )
         finally:
+            self.http.deadline = work_deadline
             self.token = None
+
+    def reconcile(self, username: str, password: str) -> tuple[bool, list[str]]:
+        """Initialize and reconcile libraries within one ephemeral auth session."""
+        try:
+            created = self.initialize(username, password)
+            libraries = self.ensure_libraries()
+        except Exception:
+            try:
+                self.logout()
+            except Exception:
+                pass
+            raise
+        self.logout()
+        return created, libraries
 
     def inspect(self, username: str, password: str) -> dict[str, object]:
         """Authenticate ephemerally, inspect with GET, then close the session."""

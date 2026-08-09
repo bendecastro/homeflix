@@ -124,7 +124,7 @@ class JsonClient:
             try:
                 remaining = deadline - self.clock()
                 if remaining <= 0:
-                    raise TimeoutError
+                    raise ApiError(self.service, operation, None, "deadline_exhausted")
                 response = self.transport(outgoing, min(self.timeout, remaining))
                 if len(response.body) > 2 * 1024 * 1024:
                     raise ApiError(self.service, operation, response.status, "response_too_large")
@@ -149,7 +149,8 @@ class JsonClient:
             except (error.URLError, OSError, TimeoutError):
                 if attempt + 1 < count and wait_before_retry(attempt):
                     continue
-                raise ApiError(self.service, operation, None, "transport_error") from None
+                code = "deadline_exhausted" if self.clock() >= deadline else "transport_error"
+                raise ApiError(self.service, operation, None, code) from None
             except (UnicodeDecodeError, json.JSONDecodeError, ValueError):
                 raise ApiError(self.service, operation, response.status, "invalid_response") from None
         raise AssertionError("unreachable")

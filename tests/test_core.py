@@ -823,7 +823,9 @@ class CoreVerificationAndResumeTests(unittest.TestCase):
         self.assertEqual(clock.now, 5)
         self.assertEqual(timeouts, [5])
         self.assertEqual(http_calls, [])
-        self.assertEqual(next(item for item in result["checks"] if item["domain"] == "jellyfin")["status"], "unknown")
+        jellyfin = next(item for item in result["checks"] if item["domain"] == "jellyfin")
+        self.assertEqual(jellyfin["status"], "unknown")
+        self.assertIn("time budget exhausted", jellyfin["reason"])
         self.assertEqual(next(item for item in result["checks"] if item["domain"] == "quicksync")["status"], "unknown")
 
     def test_reconcile_deadline_does_not_reset_between_phases(self):
