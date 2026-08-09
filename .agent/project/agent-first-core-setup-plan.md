@@ -129,13 +129,13 @@ Updated: 2026-08-04
 
 ## Task 8: Add live verification and interruption-safe resume
 
-- [ ] Add failing tests for `verify core` checking Compose project identity, service health, Jellyfin initialization/libraries, Radarr/Sonarr roots and media settings, Jellyseerr initialization/default services, QuickSync mapping when selected, and acquisition-service absence.
-- [ ] Add resume tests starting from every checkpoint with one live resource missing; safe resources must be repaired and accounts/root folders must not duplicate.
-- [ ] Add tests proving checkpoint files containing secret-looking keys are rejected and status output never includes `.env` values.
-- [ ] Run `python3 -m unittest tests.test_core tests.test_state -v`; expect failures.
-- [ ] Implement `verify_core()`, `reconcile_core()`, checkpoint validation, and `setup core` as a convenience composition of configure → core preflight → deploy → API configure → verify. Keep the individual primitives public for agents that need alternate sequencing.
-- [ ] Run the full unit suite and a dry-run `scripts/homeflix --json setup core --dry-run | python3 -m json.tool`; expect green and no acquisition services in the plan.
-- [ ] Commit with `git add scripts/homeflix_setup scripts/homeflix tests/test_core.py tests/test_state.py && git commit -m "Verify and resume core setup"`.
+- [x] Add failing tests for `verify core` checking Compose project identity, service health, Jellyfin initialization/libraries, Radarr/Sonarr roots and media settings, Jellyseerr initialization/default services, QuickSync mapping when selected, and acquisition-service absence.
+- [x] Add resume tests starting from every checkpoint with one live resource missing; safe resources must be repaired and accounts/root folders must not duplicate.
+- [x] Add tests proving checkpoint files containing secret-looking keys are rejected and status output never includes `.env` values.
+- [x] Run `python3 -m unittest tests.test_core tests.test_state -v`; expect failures.
+- [x] Implement `verify_core()`, `reconcile_core()`, checkpoint validation, and `setup core` as a convenience composition of configure → core preflight → deploy → API configure → verify. Keep the individual primitives public for agents that need alternate sequencing.
+- [x] Run the full unit suite and a dry-run `scripts/homeflix --json setup core --dry-run | python3 -m json.tool`; expect green and no acquisition services in the plan.
+- [x] Commit with `git add scripts/homeflix_setup scripts/homeflix tests/test_core.py tests/test_state.py && git commit -m "Verify and resume core setup"`.
 
 ## Task 9: Publish agent guidance and acceptance coverage
 

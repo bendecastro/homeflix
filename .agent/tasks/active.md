@@ -10,8 +10,8 @@ Updated: 2026-08-04
   implementation has not started.
 - **In progress:** [Agent-first core setup](../project/agent-first-core-setup-plan.md),
   covering supported-host discovery through API-initialized Jellyfin/Jellyseerr/Radarr/Sonarr
-  on existing mounted storage. Tasks 1–7 passed spec and quality/security review; executing
-  task 8: live verification and interruption-safe resume orchestration.
+  on existing mounted storage. Tasks 1–8 passed spec and quality/security review; executing
+  task 9: agent guidance and fixture acceptance coverage.
 - **Follow-ups:** guarded [encrypted storage](../project/agent-first-storage-plan.md) and
   VPN-gated [acquisition setup](../project/agent-first-acquisition-plan.md).
 - **Approved defaults:** Debian/Ubuntu local or SSH target; secure terminal secret handoff;

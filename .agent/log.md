@@ -265,3 +265,13 @@ redirects, and URL escapes; app secrets are read through owner-checked no-follow
 including normal read-only 0644 files. Initialized Jellyseerr must verify its internal
 Jellyfin connection. One hundred forty-eight fixture/localhost tests and fresh spec/security
 reviews passed; no live APIs or appdata were accessed.
+
+## [2026-08-09] implementation | Agent setup task 8 — verification and resume
+
+Added ordered `setup core` orchestration, checkpoint-independent reconciliation, and a
+strictly evidence-driven verifier for the exact Homeflix project, five core services, API
+state, conditional QuickSync mapping, and acquisition absence. Standalone initialization
+attests live deployment readiness before mutation; one global deadline bounds work, and
+Jellyfin authentication sessions are always closed. Checkpoint/state output is typed,
+bounded, and secret-free. One hundred eighty-one fixture/temp tests and fresh spec/security
+reviews passed; no live deployment, API, or appdata operation was run.
