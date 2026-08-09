@@ -175,6 +175,8 @@ class CoreFixtureAcceptanceTests(unittest.TestCase):
             self.assertTrue(fixture.servers["sonarr"][0]["isDefault"])
 
             before = (dict(fixture.creations), {kind: dict(values) for kind, values in fixture.updates.items()})
+            configuration_mutations_before_rerun = tuple(fixture.configuration_mutations)
+            api_calls_before_rerun = len(fixture.api_calls)
             rerun = reconcile_core(
                 root, preflight_runner=lambda config, phase, command_runner: run_preflight(config, phase, command_runner),
                 container_waiter=container_waiter,
@@ -182,6 +184,48 @@ class CoreFixtureAcceptanceTests(unittest.TestCase):
             )
             self.assertEqual(rerun["status"], "verified")
             self.assertEqual((fixture.creations, fixture.updates), before)
+            self.assertEqual(tuple(fixture.configuration_mutations), configuration_mutations_before_rerun)
+            rerun_calls = fixture.api_calls[api_calls_before_rerun:]
+            expected_rerun_calls = [
+                ("jellyfin", "GET", "/System/Info/Public"),
+                ("jellyfin", "POST", "/Users/AuthenticateByName"),
+                ("jellyfin", "GET", "/Library/VirtualFolders"),
+                ("jellyfin", "POST", "/Sessions/Logout"),
+            ]
+            for service in ("radarr", "sonarr"):
+                expected_rerun_calls.extend((
+                    (service, "GET", "/api/v3/qualityprofile"),
+                    (service, "GET", "/api/v3/rootfolder"),
+                    (service, "GET", "/api/v3/config/mediamanagement"),
+                    (service, "GET", "/api/v3/config/downloadclient"),
+                ))
+            expected_rerun_calls.extend((
+                ("jellyseerr", "GET", "/api/v1/settings/public"),
+                ("jellyseerr", "GET", "/api/v1/settings/jellyfin"),
+                ("jellyseerr", "POST", "/api/v1/settings/radarr/test"),
+                ("jellyseerr", "GET", "/api/v1/settings/radarr"),
+                ("jellyseerr", "POST", "/api/v1/settings/sonarr/test"),
+                ("jellyseerr", "GET", "/api/v1/settings/sonarr"),
+                ("jellyseerr", "GET", "/api/v1/settings/public"),
+                ("jellyfin", "GET", "/System/Info/Public"),
+                ("jellyfin", "POST", "/Users/AuthenticateByName"),
+                ("jellyfin", "GET", "/Library/VirtualFolders"),
+                ("jellyfin", "POST", "/Sessions/Logout"),
+            ))
+            for service in ("radarr", "sonarr"):
+                expected_rerun_calls.extend((
+                    (service, "GET", "/api/v3/qualityprofile"),
+                    (service, "GET", "/api/v3/rootfolder"),
+                    (service, "GET", "/api/v3/config/mediamanagement"),
+                    (service, "GET", "/api/v3/config/downloadclient"),
+                ))
+            expected_rerun_calls.extend((
+                ("jellyseerr", "GET", "/api/v1/settings/public"),
+                ("jellyseerr", "GET", "/api/v1/settings/jellyfin"),
+                ("jellyseerr", "GET", "/api/v1/settings/radarr"),
+                ("jellyseerr", "GET", "/api/v1/settings/sonarr"),
+            ))
+            self.assertEqual(rerun_calls, expected_rerun_calls)
             self.assertEqual(len(fixture.roots["radarr"]), 1)
             self.assertEqual(len(fixture.roots["sonarr"]), 1)
             self.assertEqual(len(fixture.servers["radarr"]), 1)

@@ -583,6 +583,9 @@ class StatefulCoreFixture:
             self.jellyfin_connected = True
         self.fail_next_sonarr_root = False
         self.commands = []
+        self.api_calls = []
+        self.configuration_mutations = []
+        self.repository_root = None
         self.creations = {"account": 0, "library": 0, "root": 0, "settings": 0, "server": 0}
         self.updates = {
             "media": {"radarr": 0, "sonarr": 0},
@@ -605,74 +608,132 @@ class StatefulCoreFixture:
         return result
 
     def run(self, argv, **kwargs):
-        command = tuple(argv); self.commands.append(command)
-        if "up" in command:
+        command = tuple(argv)
+        if len(command) < 10 or command[:3] != ("docker", "compose", "--project-directory"):
+            raise AssertionError(f"unexpected fixture command {command}")
+        root = Path(command[3]).resolve()
+        expected_prefix = (
+            "docker", "compose", "--project-directory", str(root),
+            "--env-file", str(root / ".env"), "--project-name", "homeflix",
+        )
+        if command[:8] != expected_prefix or not (root / ".env").is_file() or not (root / "docker-compose.yml").is_file():
+            raise AssertionError(f"unexpected fixture Compose context {command}")
+        override = root / "docker-compose.override.yml"
+        if override.exists() and not override.is_file():
+            raise AssertionError("fixture Compose override is not a regular file")
+        if self.repository_root is None:
+            self.repository_root = root
+        elif self.repository_root != root:
+            raise AssertionError("fixture command changed repository root")
+        operation = command[8:]
+        self.commands.append(command)
+        if operation == ("up", "--detach", "--no-deps", *CORE_SERVICES):
             self.containers.update(CORE_SERVICES)
             return subprocess.CompletedProcess(command, 0, "", "")
-        if "config" in command:
+        if operation == ("config", "--format", "json"):
             return subprocess.CompletedProcess(command, 0, json.dumps({"services": {"jellyfin": {"devices": []}}}), "")
-        if "ps" in command:
+        if operation in {("ps", "--format", "json"), ("ps", "--all", "--format", "json")}:
+            include_project = operation[1] == "--all"
             records = [
-                {"Service": service, "State": "running", "Health": "healthy", **({"Project": "homeflix"} if "--all" in command else {})}
+                {"Service": service, "State": "running", "Health": "healthy", **({"Project": "homeflix"} if include_project else {})}
                 for service in CORE_SERVICES if service in self.containers
             ]
             return subprocess.CompletedProcess(command, 0, json.dumps(records), "")
-        raise AssertionError(f"unexpected fixture command {command}")
+        raise AssertionError(f"unexpected fixture Compose operation {operation}")
 
     @staticmethod
     def _response(status, payload):
         return HttpResponse(status, json.dumps(payload).encode())
 
     def jellyfin(self, outgoing, timeout):
-        path = urlsplit(outgoing.full_url).path
-        if outgoing.method == "GET" and path == "/System/Info/Public":
+        split = urlsplit(outgoing.full_url)
+        path = split.path
+        call = ("jellyfin", outgoing.method, path)
+        self.api_calls.append(call)
+        if outgoing.method == "GET" and path == "/System/Info/Public" and not split.query:
             return self._response(200, {"StartupWizardCompleted": self.startup})
-        if outgoing.method == "POST" and path == "/Users/AuthenticateByName":
+        if outgoing.method == "POST" and path == "/Users/AuthenticateByName" and not split.query:
             return self._response(200, {"AccessToken": "MEMORY_ONLY_TOKEN"}) if self.admin else self._response(401, {})
-        if outgoing.method == "POST" and path == "/Startup/User":
+        if outgoing.method == "POST" and path == "/Startup/Configuration" and not split.query:
+            self.configuration_mutations.append(call)
+            return self._response(204, {})
+        if outgoing.method == "POST" and path == "/Startup/User" and not split.query:
             self.admin = True; self.creations["account"] += 1
-        elif outgoing.method == "POST" and path == "/Startup/Complete": self.startup = True
-        elif outgoing.method == "GET" and path == "/Library/VirtualFolders":
+            self.configuration_mutations.append(call)
+            return self._response(204, {})
+        if outgoing.method == "POST" and path == "/Startup/RemoteAccess" and not split.query:
+            self.configuration_mutations.append(call)
+            return self._response(204, {})
+        if outgoing.method == "POST" and path == "/Startup/Complete" and not split.query:
+            self.startup = True
+            self.configuration_mutations.append(call)
+            return self._response(204, {})
+        if outgoing.method == "POST" and path == "/Sessions/Logout" and not split.query:
+            return self._response(204, {})
+        if outgoing.method == "GET" and path == "/Library/VirtualFolders" and not split.query:
             payload = [{"Name": name, "CollectionType": kind, "Locations": [location]} for name, (kind, location) in self.libraries.items()]
             return self._response(200, payload)
-        elif outgoing.method == "POST" and path == "/Library/VirtualFolders":
-            query = parse_qs(urlsplit(outgoing.full_url).query)
+        if outgoing.method == "POST" and path == "/Library/VirtualFolders":
+            query = parse_qs(split.query)
+            if set(query) != {"name", "collectionType", "paths", "refreshLibrary"} or query["refreshLibrary"] != ["false"]:
+                raise AssertionError("unexpected Jellyfin library query")
             self.libraries[query["name"][0]] = (query["collectionType"][0], query["paths"][0]); self.creations["library"] += 1
-        return self._response(204, {})
+            self.configuration_mutations.append(call)
+            return self._response(204, {})
+        raise AssertionError(f"unexpected Jellyfin fixture request {outgoing.method} {outgoing.full_url}")
 
     def arr(self, service):
+        if service not in {"radarr", "sonarr"}:
+            raise AssertionError("unexpected Arr fixture service")
         def transport(outgoing, timeout):
-            path = urlsplit(outgoing.full_url).path
+            split = urlsplit(outgoing.full_url)
+            path = split.path
+            call = (service, outgoing.method, path)
+            self.api_calls.append(call)
+            if split.query:
+                raise AssertionError("unexpected Arr fixture query")
             root = "/data/media/movies" if service == "radarr" else "/data/media/tv"
             rename = "renameMovies" if service == "radarr" else "renameEpisodes"
-            if outgoing.method == "GET" and path.endswith("/qualityprofile"):
+            if outgoing.method == "GET" and path == "/api/v3/qualityprofile":
                 return self._response(200, [{"id": 19, "name": "Fixture HD"}])
-            if outgoing.method == "GET" and path.endswith("/rootfolder"):
+            if outgoing.method == "GET" and path == "/api/v3/rootfolder":
                 return self._response(200, [{"id": index + 1, "path": value} for index, value in enumerate(self.roots[service])])
-            if outgoing.method == "POST" and path.endswith("/rootfolder"):
+            if outgoing.method == "POST" and path == "/api/v3/rootfolder":
                 if service == "sonarr" and self.fail_next_sonarr_root:
                     self.fail_next_sonarr_root = False
                     raise OSError("bounded sonarr root fixture interruption")
                 self.roots[service].append(root); self.creations["root"] += 1
+                self.configuration_mutations.append(call)
                 return self._response(200, {"id": 8, "path": root})
-            if outgoing.method == "GET" and path.endswith("/mediamanagement"):
+            if outgoing.method == "GET" and path == "/api/v3/config/mediamanagement":
                 return self._response(200, {"id": 1, rename: self.media_ok[service], "copyUsingHardlinks": self.media_ok[service]})
-            if outgoing.method == "PUT" and path.endswith("/mediamanagement"):
+            if outgoing.method == "PUT" and path == "/api/v3/config/mediamanagement":
                 self.media_ok[service] = True; self.creations["settings"] += 1
                 self.updates["media"][service] += 1
-            if outgoing.method == "GET" and path.endswith("/downloadclient"):
+                self.configuration_mutations.append(call)
+                return self._response(200, {})
+            if outgoing.method == "GET" and path == "/api/v3/config/downloadclient":
                 return self._response(200, {"id": 2, "enableCompletedDownloadHandling": self.completed_ok[service]})
-            if outgoing.method == "PUT" and path.endswith("/downloadclient"):
+            if outgoing.method == "PUT" and path == "/api/v3/config/downloadclient":
                 self.completed_ok[service] = True
                 self.updates["completed"][service] += 1
-            return self._response(200, {})
+                self.configuration_mutations.append(call)
+                return self._response(200, {})
+            raise AssertionError(f"unexpected {service} fixture request {outgoing.method} {outgoing.full_url}")
         return transport
 
     def jellyseerr(self, outgoing, timeout):
-        path = urlsplit(outgoing.full_url).path
-        if outgoing.method == "GET" and path == "/api/v1/settings/public": return self._response(200, {"initialized": self.initialized})
+        split = urlsplit(outgoing.full_url)
+        path = split.path
+        call = ("jellyseerr", outgoing.method, path)
+        self.api_calls.append(call)
+        if split.query:
+            raise AssertionError("unexpected Jellyseerr fixture query")
+        if outgoing.method == "GET" and path == "/api/v1/settings/public":
+            return self._response(200, {"initialized": self.initialized})
         if outgoing.method == "POST" and path == "/api/v1/auth/jellyfin":
             self.jellyfin_connected = True
+            self.configuration_mutations.append(call)
             return self._response(200, {})
         if outgoing.method == "GET" and path == "/api/v1/settings/jellyfin":
             if not self.jellyfin_connected:
@@ -680,20 +741,42 @@ class StatefulCoreFixture:
             return self._response(200, {"hostname": "jellyfin", "port": 8096, "useSsl": False, "urlBase": "", "serverType": 2})
         if outgoing.method == "POST" and path == "/api/v1/settings/initialize":
             self.initialized = True
+            self.configuration_mutations.append(call)
             return self._response(200, {})
         for service in ("radarr", "sonarr"):
             base = f"/api/v1/settings/{service}"
-            if outgoing.method == "POST" and path == base + "/test": return self._response(200, {"success": True})
-            if outgoing.method == "GET" and path == base: return self._response(200, self.servers[service])
+            if outgoing.method == "POST" and path == base + "/test":
+                return self._response(200, {"success": True})
+            if outgoing.method == "GET" and path == base:
+                return self._response(200, self.servers[service])
             if outgoing.method == "POST" and path == base:
                 payload = json.loads(outgoing.data); payload["id"] = 9
                 self.servers[service].append(payload); self.creations["server"] += 1
+                self.configuration_mutations.append(call)
                 return self._response(200, payload)
-            if outgoing.method == "PUT" and path.startswith(base + "/"):
+            expected_updates = {f"{base}/{server['id']}" for server in self.servers[service]}
+            if outgoing.method == "PUT" and path in expected_updates:
                 payload = json.loads(outgoing.data); self.servers[service] = [payload]
                 self.updates["server"][service] += 1
+                self.configuration_mutations.append(call)
                 return self._response(200, payload)
-        return self._response(200, {})
+        raise AssertionError(f"unexpected Jellyseerr fixture request {outgoing.method} {outgoing.full_url}")
+
+
+class StatefulFixtureStrictnessTests(unittest.TestCase):
+    def test_rejects_inexact_commands_and_unknown_api_routes(self):
+        from urllib.request import Request
+
+        fixture = StatefulCoreFixture("", clean=True)
+        with self.assertRaises(AssertionError):
+            fixture.run(("docker", "compose", "ps", "--format", "json"))
+        for transport, request in (
+            (fixture.jellyfin, Request("http://127.0.0.1/unknown", method="GET")),
+            (fixture.arr("radarr"), Request("http://127.0.0.1/api/v3/rootfolder/extra", method="POST", data=b"{}")),
+            (fixture.jellyseerr, Request("http://127.0.0.1/api/v1/settings/radarr/extra/bad", method="PUT", data=b"{}")),
+        ):
+            with self.subTest(url=request.full_url), self.assertRaises(AssertionError):
+                transport(request, 1)
 
 
 class CoreVerificationAndResumeTests(unittest.TestCase):

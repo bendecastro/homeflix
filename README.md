@@ -62,34 +62,10 @@ reviewed mutation plans, secure human gates, and live evidence before completion
 
 ## Manual quickstart fallback
 
-Prefer the agent-assisted path above on its supported hosts. Manual operation requires a Linux
-host with Docker and the Compose plugin.
-
-```bash
-git clone https://github.com/bendecastro/homeflix.git
-cd homeflix
-cp .env.example .env
-```
-
-Edit `.env` — at minimum `DATA_ROOT`, `CONFIG_ROOT`, `CACHE_ROOT`, and your VPN
-credentials. Then create the storage layout:
-
-```bash
-sudo mkdir -p "$DATA_ROOT"/{torrents/{movies,tv,music},usenet/{incomplete,complete/{movies,tv,music}},media/{movies,tv,music}}
-sudo chown -R $USER:$USER "$DATA_ROOT"
-```
-
-Verify the host is correctly set up, then start:
-
-```bash
-./scripts/preflight.sh
-docker compose up -d
-```
-
-**Run `preflight.sh`.** It doesn't just check that files exist — it creates a real
-hardlink between `torrents/` and `media/` and confirms they share an inode. That single
-check catches the failure mode that quietly ruins most setups of this kind. Full
-walkthrough: [`docs/quickstart.md`](docs/quickstart.md).
+Prefer the agent-assisted path above on its supported hosts. For manual operation, follow the
+[complete manual quickstart](docs/quickstart.md). It covers Docker prerequisites, explicitly
+selecting and checking the mounted storage path, creating the layout, configuring `.env`,
+preflight, startup, and application wiring without relying on unset shell variables.
 
 ## What you get
 

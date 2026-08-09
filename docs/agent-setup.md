@@ -58,8 +58,10 @@ credential handling.
 The agent may compose these capabilities after discovery and approval:
 
 1. Plan or prepare missing Docker/Compose prerequisites with `host prepare`.
-2. Use `configure` with the three reviewed existing paths and a discovered quality-profile
-   name. DNS failure produces deterministic direct Jellyseerr/Radarr/Sonarr setup ports;
+2. Use `configure` with the three reviewed existing paths and a chosen quality-profile name.
+   During `initialize core`, that exact name is resolved and validated independently against
+   live Radarr and Sonarr; initialization fails safely if either service does not provide it.
+   DNS failure produces deterministic direct Jellyseerr/Radarr/Sonarr setup ports;
    QuickSync is selected only when discovery proves the Intel render device usable.
 3. Run `preflight --phase core` and review every failure or warning.
 4. Reconcile only the core allowlist with `deploy core`.
@@ -78,8 +80,9 @@ Run `scripts/homeflix --json status` to read ignored, non-secret checkpoint evid
 checkpoint is not proof that a live resource still exists. After interruption, rediscover the
 host, review current configuration, and use `scripts/homeflix setup core` or the individual
 primitive matching the failed stage. Deployment and API reconciliation inspect live state and
-repair safe missing resources. A second run should report an already-ready deployment and must
-not duplicate the administrator, libraries, root folders, servers, or services.
+repair safe missing resources. On a no-change rerun, `deploy core` reports `already_ready`, while
+`setup core` completes as `verified` without changes. Neither may duplicate the administrator,
+libraries, root folders, servers, or services.
 
 Do not delete appdata, rewrite user-owned application choices, start the whole Compose project,
 or run acquisition to recover core. If verification cannot inspect a domain, report it as
