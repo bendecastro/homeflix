@@ -550,26 +550,45 @@ class CoreDeploymentTests(unittest.TestCase):
 class StatefulCoreFixture:
     key = "FIXTURE_API_KEY_1234567890ABCDE"
 
-    def __init__(self, missing: str) -> None:
-        self.containers = set(CORE_SERVICES)
-        if missing == "container": self.containers.remove("radarr")
-        self.startup = missing != "jellyfin_startup"
-        self.admin = self.startup
-        self.libraries = {
-            "Movies": ("movies", "/data/media/movies"),
-            "Shows": ("tvshows", "/data/media/tv"),
-            "Music": ("music", "/data/media/music"),
-        }
-        if missing == "jellyfin_library": self.libraries.pop("Music")
-        self.roots = {"radarr": ["/data/media/movies"], "sonarr": ["/data/media/tv"]}
-        if missing == "arr_root": self.roots["radarr"] = []
-        self.media_ok = {"radarr": missing != "arr_settings", "sonarr": True}
-        self.completed_ok = {"radarr": True, "sonarr": True}
-        self.servers = {"radarr": [self._server("radarr")], "sonarr": [self._server("sonarr")]}
-        if missing == "jellyseerr_server": self.servers["sonarr"] = []
-        self.initialized = True
+    def __init__(self, missing: str, *, clean: bool = False) -> None:
+        if clean:
+            self.containers = set()
+            self.startup = False
+            self.admin = False
+            self.libraries = {}
+            self.roots = {"radarr": [], "sonarr": []}
+            self.media_ok = {"radarr": False, "sonarr": False}
+            self.completed_ok = {"radarr": False, "sonarr": False}
+            self.servers = {"radarr": [], "sonarr": []}
+            self.initialized = False
+            self.jellyfin_connected = False
+        else:
+            self.containers = set(CORE_SERVICES)
+            if missing == "container": self.containers.remove("radarr")
+            self.startup = missing != "jellyfin_startup"
+            self.admin = self.startup
+            self.libraries = {
+                "Movies": ("movies", "/data/media/movies"),
+                "Shows": ("tvshows", "/data/media/tv"),
+                "Music": ("music", "/data/media/music"),
+            }
+            if missing == "jellyfin_library": self.libraries.pop("Music")
+            self.roots = {"radarr": ["/data/media/movies"], "sonarr": ["/data/media/tv"]}
+            if missing == "arr_root": self.roots["radarr"] = []
+            self.media_ok = {"radarr": missing != "arr_settings", "sonarr": True}
+            self.completed_ok = {"radarr": True, "sonarr": True}
+            self.servers = {"radarr": [self._server("radarr")], "sonarr": [self._server("sonarr")]}
+            if missing == "jellyseerr_server": self.servers["sonarr"] = []
+            self.initialized = True
+            self.jellyfin_connected = True
+        self.fail_next_sonarr_root = False
         self.commands = []
         self.creations = {"account": 0, "library": 0, "root": 0, "settings": 0, "server": 0}
+        self.updates = {
+            "media": {"radarr": 0, "sonarr": 0},
+            "completed": {"radarr": 0, "sonarr": 0},
+            "server": {"radarr": 0, "sonarr": 0},
+        }
 
     @staticmethod
     def _server(service):
@@ -631,23 +650,37 @@ class StatefulCoreFixture:
             if outgoing.method == "GET" and path.endswith("/rootfolder"):
                 return self._response(200, [{"id": index + 1, "path": value} for index, value in enumerate(self.roots[service])])
             if outgoing.method == "POST" and path.endswith("/rootfolder"):
+                if service == "sonarr" and self.fail_next_sonarr_root:
+                    self.fail_next_sonarr_root = False
+                    raise OSError("bounded sonarr root fixture interruption")
                 self.roots[service].append(root); self.creations["root"] += 1
                 return self._response(200, {"id": 8, "path": root})
             if outgoing.method == "GET" and path.endswith("/mediamanagement"):
                 return self._response(200, {"id": 1, rename: self.media_ok[service], "copyUsingHardlinks": self.media_ok[service]})
             if outgoing.method == "PUT" and path.endswith("/mediamanagement"):
                 self.media_ok[service] = True; self.creations["settings"] += 1
+                self.updates["media"][service] += 1
             if outgoing.method == "GET" and path.endswith("/downloadclient"):
                 return self._response(200, {"id": 2, "enableCompletedDownloadHandling": self.completed_ok[service]})
             if outgoing.method == "PUT" and path.endswith("/downloadclient"):
                 self.completed_ok[service] = True
+                self.updates["completed"][service] += 1
             return self._response(200, {})
         return transport
 
     def jellyseerr(self, outgoing, timeout):
         path = urlsplit(outgoing.full_url).path
         if outgoing.method == "GET" and path == "/api/v1/settings/public": return self._response(200, {"initialized": self.initialized})
-        if outgoing.method == "GET" and path == "/api/v1/settings/jellyfin": return self._response(200, {"hostname": "jellyfin", "port": 8096, "useSsl": False, "urlBase": "", "serverType": 2})
+        if outgoing.method == "POST" and path == "/api/v1/auth/jellyfin":
+            self.jellyfin_connected = True
+            return self._response(200, {})
+        if outgoing.method == "GET" and path == "/api/v1/settings/jellyfin":
+            if not self.jellyfin_connected:
+                return self._response(200, {})
+            return self._response(200, {"hostname": "jellyfin", "port": 8096, "useSsl": False, "urlBase": "", "serverType": 2})
+        if outgoing.method == "POST" and path == "/api/v1/settings/initialize":
+            self.initialized = True
+            return self._response(200, {})
         for service in ("radarr", "sonarr"):
             base = f"/api/v1/settings/{service}"
             if outgoing.method == "POST" and path == base + "/test": return self._response(200, {"success": True})
@@ -658,6 +691,7 @@ class StatefulCoreFixture:
                 return self._response(200, payload)
             if outgoing.method == "PUT" and path.startswith(base + "/"):
                 payload = json.loads(outgoing.data); self.servers[service] = [payload]
+                self.updates["server"][service] += 1
                 return self._response(200, payload)
         return self._response(200, {})
 
