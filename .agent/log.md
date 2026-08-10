@@ -190,3 +190,10 @@ placeholder, and updated repository links and maintainer guidance for the new la
 Added a lean root `AGENTS.md` that routes coding agents into the maintained `.agent/`
 wiki, states the load-bearing project constraints, and documents safe validation commands.
 Added `CLAUDE.md` as a symlink to the same file so Claude receives identical guidance.
+
+## [2026-08-10] build | Added a household first-use guide
+
+Added `docs/first-use.md` to bridge the gap between service configuration and actually
+using Homeflix: household accounts, Jellyfin client setup, released versus upcoming
+requests, administrator request tracing, qBittorrent first login, playback, and hardlink
+verification. Linked it from the README, quickstart, and wiki index.

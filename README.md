@@ -72,6 +72,10 @@ hardlink between `torrents/` and `media/` and confirms they share an inode. That
 check catches the failure mode that quietly ruins most setups of this kind. Full
 walkthrough: [`docs/quickstart.md`](docs/quickstart.md).
 
+Once the services are configured, use the [first-use guide](docs/first-use.md) to create
+household accounts, connect Jellyfin clients, test a released request, and understand why
+an accepted upcoming title may not download yet.
+
 ## What you get
 
 | Service | Purpose | Default host |
