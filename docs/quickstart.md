@@ -128,7 +128,11 @@ Or skip it: Jellyfin is also published directly on `http://<host-ip>:8096`.
      `localhost` — the VPN'd services share Gluetun's network namespace.
 4. **Jellyfin** (`jellyfin.local`) — create the admin account, add libraries pointing at
    `/data/media/movies`, `/data/media/tv`, `/data/media/music`.
-5. **Jellyseerr** (`jellyseerr.local`) — connect it to Jellyfin, then to Radarr/Sonarr.
+5. **Radarr / Sonarr → Jellyfin** — create a dedicated Jellyfin API key, then add and test
+   an **Emby / Jellyfin** connection in each *arr app so imports trigger library refreshes.
+   Use internal host `jellyfin`, port `8096`; see the
+   [first-use settings](first-use.md#4-make-imports-appear-promptly).
+6. **Jellyseerr** (`jellyseerr.local`) — connect it to Jellyfin, then to Radarr/Sonarr.
    This is the only URL most of your household needs.
 
 Next, follow the [first-use guide](first-use.md) to create household accounts, connect a

@@ -51,7 +51,31 @@ Sign in with a non-administrator Jellyfin account. Prefer **direct play** where 
 transcoding consumes more host resources and should be tested separately if you rely on
 it.
 
-## 4. Make a useful first request
+## 4. Make imports appear promptly
+
+Jellyfin's real-time folder monitoring may not notice every containerized import. Wire the
+*arr applications to Jellyfin so they request a refresh when an import completes:
+
+1. In Jellyfin, open **Dashboard → Advanced → API Keys**, create a dedicated key such as
+   `Radarr and Sonarr`, and copy it. Treat the key as a secret; keep it in service
+   configuration and never commit it.
+2. In Radarr, open **Settings → Connect**, add **Emby / Jellyfin**, and set:
+   - Host: `jellyfin`
+   - Port: `8096`
+   - Use SSL: off
+   - API key: the dedicated Jellyfin key
+   - Send notifications: off
+   - Update library: on
+   - Events: **On Download**, **On Upgrade**, and **On Rename**
+3. In Sonarr, add the same connection, but enable **On Import Complete** and **On Rename**.
+   Import Complete refreshes once after a batch instead of once per episode in a season
+   pack.
+4. Run each connection's built-in **Test**, then save only after it succeeds.
+
+The internal host is `jellyfin`, not `localhost`: Radarr, Sonarr, and Jellyfin are separate
+containers on the same Docker network.
+
+## 5. Make a useful first request
 
 For the first test, request a small title that is already released and that your
 configured indexers can find. An upcoming movie is still a valid request, but it will not
@@ -63,7 +87,8 @@ The normal path is:
 2. Radarr (movie) or Sonarr (show) monitors the title and searches indexers.
 3. qBittorrent or NZBGet downloads a matching release.
 4. Radarr or Sonarr imports and renames it under `/data/media`.
-5. Jellyfin scans the library and makes it available to clients.
+5. Radarr or Sonarr asks Jellyfin to refresh the library, making the title available to
+   clients.
 
 Typical request states:
 
@@ -78,7 +103,7 @@ A released request can also remain pending when no configured indexer returns a 
 that satisfies the selected quality profile. Check Radarr or Sonarr before assuming the
 request pipeline is broken.
 
-## 5. Follow a request as an administrator
+## 6. Follow a request as an administrator
 
 Check the pipeline in this order:
 
@@ -100,8 +125,9 @@ Check the pipeline in this order:
    ```
 
    Change it under **Tools → Options → Web UI**.
-4. **Jellyfin:** check the relevant library and run **Scan Library** if an imported title
-   does not appear after the normal scan interval.
+4. **Jellyfin:** check the relevant library. If an imported title is missing, retest the
+   *arr application's **Emby / Jellyfin** connection, then run **Scan Library** to recover
+   the current item while diagnosing the event-driven refresh.
 
 If a download never starts, inspect Gluetun first:
 
@@ -113,7 +139,7 @@ docker compose logs --tail 100 gluetun
 The VPN kill switch intentionally prevents the download and indexer services from using
 the network when the tunnel is unhealthy.
 
-## 6. Verify the first import
+## 7. Verify the first import
 
 Play the imported title from a real household device. Then verify that the import used a
 hardlink rather than consuming a second copy of the file:
@@ -130,6 +156,7 @@ for the inode-level check.
 
 - [ ] A non-administrator Jellyfin account can sign in.
 - [ ] A real playback device can reach Jellyfin and play a title.
+- [ ] Radarr and Sonarr both pass their **Emby / Jellyfin** connection tests.
 - [ ] A released Jellyseerr request reaches Radarr or Sonarr.
 - [ ] The download client receives and completes the job.
 - [ ] The title appears in Jellyfin after import.
