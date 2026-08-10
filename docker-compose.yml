@@ -77,7 +77,10 @@ services:
       OPENVPN_PASSWORD: ${VPN_PASSWORD}
       SERVER_COUNTRIES: ${VPN_SERVER_COUNTRIES}
       FIREWALL: "on"
-      FIREWALL_OUTBOUND_SUBNETS: ${LAN_SUBNET:-192.168.0.0/16,10.0.0.0/8}
+      # Deliberately has no fallback: a default wide enough to suit every LAN also covers
+      # the VPN provider's own gateway, which silently breaks NAT-PMP port forwarding.
+      # See .env.example.
+      FIREWALL_OUTBOUND_SUBNETS: ${LAN_SUBNET:?set LAN_SUBNET to your LAN and proxy network CIDRs — see .env.example}
       FIREWALL_INPUT_PORTS: ${TORRENT_PORT:-6881},${QBITTORRENT_PORT:-6969},${NZBGET_PORT:-6789},${PROWLARR_PORT:-9696}
       DNS_ADDRESS: ${VPN_DNS:-1.1.1.1}
       LOG_LEVEL: ${LOG_LEVEL:-info}

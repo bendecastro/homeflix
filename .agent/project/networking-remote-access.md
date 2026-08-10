@@ -17,7 +17,9 @@ remote-access gap). Source: prior private design package (see `references/source
 
 - Image `qmcgaw/gluetun:latest`, `cap_add: NET_ADMIN`, `/dev/net/tun`.
 - ProtonVPN, OpenVPN, `SERVER_COUNTRIES=Netherlands`.
-- `FIREWALL=on` (kill switch), `FIREWALL_OUTBOUND_SUBNETS=192.168.0.0/16,10.0.0.0/8`,
+- `FIREWALL=on` (kill switch), `FIREWALL_OUTBOUND_SUBNETS` from a **required** `LAN_SUBNET`
+  (the operator's real LAN plus the proxy network — never a whole private block, or it
+  covers the provider's VPN gateway and breaks NAT-PMP; see `references/gotchas.md`),
   `FIREWALL_INPUT_PORTS=6881,6969,6789,9696`, DNS 1.1.1.1 / 1.0.0.1.
 - Owns the netns for qBittorrent + NZBGet + Prowlarr and publishes their ports.
 - Healthcheck hits the Gluetun control server (`:8888/v1/openvpn/status`); the three

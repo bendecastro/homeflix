@@ -50,3 +50,15 @@ bite.
 
 ## Hit in practice
 > _Add dated, specific gotchas here as they happen, with the fix that worked._
+
+- **[2026-08-10] A catch-all `LAN_SUBNET` silently disables VPN port forwarding.**
+  `FIREWALL_OUTBOUND_SUBNETS` was shipped as `192.168.0.0/16,10.0.0.0/8`, but VPN
+  providers place their gateway inside private address space — ProtonVPN's WireGuard
+  gateway is `10.2.0.1`, inside `10.0.0.0/8`. Gluetun therefore added a route sending the
+  provider's own gateway out `eth0`, and NAT-PMP requests to `10.2.0.1:5351` timed out.
+  Everything else looked correct: container healthy, tunnel up, expected public IP, no
+  leak. The only symptom was a missing `/tmp/gluetun/forwarded_port`, and Gluetun's
+  explanatory error only appears after roughly nine silent retries (~2 minutes).
+  `LAN_SUBNET` is now required with no compose fallback, and
+  `tests/test_compose.py::VpnFirewallTests` fails if any shipped allowed subnet covers a
+  known provider gateway.

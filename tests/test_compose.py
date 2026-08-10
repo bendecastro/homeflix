@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+import ipaddress
 import json
 import os
 from pathlib import Path
@@ -292,6 +293,39 @@ class StorageBindTests(unittest.TestCase):
             self.assertEqual(len(roots), 1, service_name)
             self.assertEqual(roots[0]["target"], "/data")
             self.assertFalse(any(volume.get("target") in {"/data/media", "/data/torrents", "/data/usenet"} for volume in volumes))
+
+
+class VpnFirewallTests(unittest.TestCase):
+    # ProtonVPN's WireGuard gateway. NAT-PMP is negotiated with it over the tunnel, so any
+    # allowed-subnet entry covering it diverts those packets to the LAN interface instead.
+    VPN_GATEWAYS = (ipaddress.ip_address("10.2.0.1"),)
+
+    def test_allowed_subnets_do_not_cover_the_vpn_gateway(self) -> None:
+        repository_root = Path(__file__).resolve().parents[1]
+        result = subprocess.run(
+            ["docker", "compose", "--env-file", str(repository_root / ".env.example"), "config", "--format", "json"],
+            cwd=repository_root,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        rendered = json.loads(result.stdout)
+        allowed = rendered["services"]["gluetun"]["environment"]["FIREWALL_OUTBOUND_SUBNETS"]
+        networks = [ipaddress.ip_network(entry.strip()) for entry in allowed.split(",") if entry.strip()]
+        self.assertTrue(networks)
+        for network in networks:
+            for gateway in self.VPN_GATEWAYS:
+                self.assertNotIn(
+                    gateway,
+                    network,
+                    f"{network} covers VPN gateway {gateway}; NAT-PMP port forwarding would fail silently",
+                )
+
+    def test_lan_subnet_has_no_compose_fallback(self) -> None:
+        compose = (Path(__file__).resolve().parents[1] / "docker-compose.yml").read_text(encoding="utf-8")
+        self.assertNotIn("${LAN_SUBNET:-", compose)
+        self.assertIn("${LAN_SUBNET:?", compose)
 
 
 if __name__ == "__main__":
