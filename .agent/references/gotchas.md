@@ -59,6 +59,12 @@ bite.
   Everything else looked correct: container healthy, tunnel up, expected public IP, no
   leak. The only symptom was a missing `/tmp/gluetun/forwarded_port`, and Gluetun's
   explanatory error only appears after roughly nine silent retries (~2 minutes).
-  `LAN_SUBNET` is now required with no compose fallback, and
+  `LAN_SUBNET` is now required with no compose fallback and discovered from the host's
+  default route, the Compose network is pinned via a separate `PROXY_SUBNET` so neither
+  value has to be widened to cover the other, and
   `tests/test_compose.py::VpnFirewallTests` fails if any shipped allowed subnet covers a
   known provider gateway.
+- **[2026-08-10] Don't infer a LAN subnet from just any interface address.** A host can
+  carry a Tailscale `/32`, several Docker bridges, and the real LAN on one machine. Derive
+  it from the interface named by the IPv4 **default route**, skip `/32` addresses (they
+  carry no subnet), and skip non-private ranges. Verified against a host with all three.

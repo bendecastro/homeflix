@@ -12,13 +12,21 @@ from unittest import mock
 from unittest.mock import patch
 
 from scripts.homeflix_setup.compose import (
-    CORE_SERVICES, _atomic_write, build_override, compose_inventory, compose_ps, compose_up, configure,
+    CORE_SERVICES, PROXY_SUBNET_CANDIDATES, _atomic_write, build_override, compose_inventory,
+    compose_ps, compose_up, configure,
 )
-from scripts.homeflix_setup.discover import GraphicsDeviceFact, GraphicsFact, HostFacts, MountFact
+from scripts.homeflix_setup.discover import (
+    GraphicsDeviceFact, GraphicsFact, HostFacts, LanNetworkFact, MountFact,
+)
 from scripts.homeflix_setup.envfile import EnvDocument
 
 
-def facts(*, mount: str = "/", quicksync: bool = False) -> HostFacts:
+def facts(
+    *,
+    mount: str = "/",
+    quicksync: bool = False,
+    lan_network: LanNetworkFact = LanNetworkFact("enp1s0", "192.168.1.0/24", "ok", None),
+) -> HostFacts:
     return HostFacts(
         os_id="debian", os_version_id="12", os_pretty_name="Debian", supported=True,
         uid=1234, gid=2345, timezone="Europe/Lisbon", memory_bytes=1, architecture="x86_64",
@@ -33,7 +41,7 @@ def facts(*, mount: str = "/", quicksync: bool = False) -> HostFacts:
         docker_daemon_reachable=True, docker_daemon_status="ok", docker_daemon_reason=None,
         host_nameservers=("192.0.2.1",), host_search_domains=(), host_dns_status="ok",
         host_dns_reason=None, ssh_context=False,
-        lan_dns_domain="local", lan_dns_status="resolved",
+        lan_dns_domain="local", lan_dns_status="resolved", lan_network=lan_network,
     )
 
 
@@ -326,6 +334,69 @@ class VpnFirewallTests(unittest.TestCase):
         compose = (Path(__file__).resolve().parents[1] / "docker-compose.yml").read_text(encoding="utf-8")
         self.assertNotIn("${LAN_SUBNET:-", compose)
         self.assertIn("${LAN_SUBNET:?", compose)
+        self.assertNotIn("${PROXY_SUBNET:-", compose)
+        self.assertIn("${PROXY_SUBNET:?", compose)
+
+    def test_proxy_network_is_pinned_to_the_allowlisted_subnet(self) -> None:
+        repository_root = Path(__file__).resolve().parents[1]
+        result = subprocess.run(
+            ["docker", "compose", "--env-file", str(repository_root / ".env.example"), "config", "--format", "json"],
+            cwd=repository_root,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        rendered = json.loads(result.stdout)
+        pinned = rendered["networks"]["traefik-network"]["ipam"]["config"]
+        self.assertEqual(len(pinned), 1, pinned)
+        proxy_subnet = ipaddress.ip_network(pinned[0]["subnet"])
+        allowed = rendered["services"]["gluetun"]["environment"]["FIREWALL_OUTBOUND_SUBNETS"]
+        networks = [ipaddress.ip_network(entry.strip()) for entry in allowed.split(",") if entry.strip()]
+        self.assertIn(proxy_subnet, networks, "Traefik could not reach the services behind Gluetun")
+
+
+class SubnetSelectionTests(unittest.TestCase):
+    def configured(self, lan_network: LanNetworkFact) -> EnvDocument:
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        root = Path(temporary.name)
+        example = Path(__file__).resolve().parents[1] / ".env.example"
+        (root / ".env.example").write_bytes(example.read_bytes())
+        data = root / "storage" / "data"
+        config = root / "config"
+        cache = root / "cache"
+        for path in (data, config, cache):
+            path.mkdir(parents=True)
+        configure(
+            root,
+            facts(mount=str(root), lan_network=lan_network),
+            data_root=str(data),
+            config_root=str(config),
+            cache_root=str(cache),
+        )
+        return EnvDocument.load(root / ".env")
+
+    def test_configure_writes_discovered_lan_and_a_non_overlapping_proxy_subnet(self) -> None:
+        document = self.configured(LanNetworkFact("enp1s0", "192.168.1.0/24", "ok", None))
+        self.assertEqual(document.get("LAN_SUBNET"), "192.168.1.0/24")
+        proxy = ipaddress.ip_network(document.get("PROXY_SUBNET"))
+        self.assertFalse(proxy.overlaps(ipaddress.ip_network("192.168.1.0/24")))
+
+    def test_proxy_subnet_avoids_a_lan_that_claims_the_first_candidate(self) -> None:
+        document = self.configured(LanNetworkFact("enp1s0", PROXY_SUBNET_CANDIDATES[0], "ok", None))
+        self.assertEqual(document.get("LAN_SUBNET"), PROXY_SUBNET_CANDIDATES[0])
+        self.assertEqual(document.get("PROXY_SUBNET"), PROXY_SUBNET_CANDIDATES[1])
+
+    def test_configure_refuses_when_lan_discovery_did_not_resolve(self) -> None:
+        with self.assertRaises(ValueError) as error:
+            self.configured(LanNetworkFact("enp1s0", None, "unresolved", "no IPv4 default route was found"))
+        self.assertIn("LAN_SUBNET cannot be determined", str(error.exception))
+
+    def test_configure_refuses_a_lan_that_contains_the_vpn_gateway(self) -> None:
+        with self.assertRaises(ValueError) as error:
+            self.configured(LanNetworkFact("enp1s0", "10.0.0.0/8", "ok", None))
+        self.assertIn("contains VPN gateway", str(error.exception))
 
 
 if __name__ == "__main__":

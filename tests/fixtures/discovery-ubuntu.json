@@ -22,6 +22,8 @@
     "getent ahosts sonarr.local": [2, "", ""],
     "ss -H -lntu": [0, "udp UNCONN 0 0 127.0.0.53:53 0.0.0.0:*\n", ""],
     "findmnt --list --json --bytes --output TARGET,SOURCE,FSTYPE,AVAIL": [0, "{\"filesystems\":[{\"target\":\"/\",\"source\":\"/dev/nvme0n1p2\",\"fstype\":\"ext4\",\"avail\":\"26843545600\"}]}\n", ""],
+    "ip -j -4 route show default": [0, "[{\"dst\": \"default\", \"gateway\": \"192.168.1.1\", \"dev\": \"enp1s0\", \"protocol\": \"dhcp\", \"metric\": 100}]", ""],
+    "ip -j -4 addr show dev enp1s0": [0, "[{\"ifindex\": 2, \"ifname\": \"enp1s0\", \"operstate\": \"UP\", \"addr_info\": [{\"family\": \"inet\", \"local\": \"192.168.1.23\", \"prefixlen\": 24, \"scope\": \"global\"}]}]", ""],
     "cat /etc/resolv.conf": [0, "nameserver 127.0.0.53\n", ""]
   },
   "environment": {}

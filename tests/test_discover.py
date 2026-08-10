@@ -299,6 +299,40 @@ class HostDiscoveryTests(unittest.TestCase):
 
                 self.assertEqual(mounts, {"status": "error", "items": [], "reason": reason})
 
+    def test_lan_network_is_derived_from_the_default_route_interface(self) -> None:
+        runner = FixtureRunner("discovery-debian.json")
+
+        lan_network = discover_host(runner).to_dict()["lan_network"]
+
+        self.assertEqual(
+            lan_network, {"interface": "enp1s0", "cidr": "192.168.1.0/24", "status": "ok"}
+        )
+
+    def test_lan_network_probe_failures_are_structured_and_never_guess(self) -> None:
+        addresses = json.dumps([{
+            "ifname": "enp1s0",
+            "addr_info": [{"family": "inet", "local": "100.64.0.5", "prefixlen": 32}],
+        }])
+        cases = (
+            ({"ip -j -4 route show default": [1, "", "private route detail"]},
+             "error", "default-route probe exited with status 1"),
+            ({"ip -j -4 route show default": [0, "[]", ""]},
+             "unresolved", "no IPv4 default route was found"),
+            ({"ip -j -4 addr show dev enp1s0": [0, addresses, ""]},
+             "unresolved", "no private IPv4 subnet is configured on enp1s0"),
+        )
+        for overrides, status, reason in cases:
+            with self.subTest(status=status, reason=reason):
+                runner = FixtureRunner("discovery-debian.json")
+                runner.commands.update(overrides)
+
+                lan_network = discover_host(runner).to_dict()["lan_network"]
+
+                self.assertEqual(lan_network["status"], status)
+                self.assertEqual(lan_network["reason"], reason)
+                self.assertIsNone(lan_network["cidr"])
+                self.assertNotIn("private route detail", json.dumps(lan_network))
+
     def test_failed_dns_probe_has_structured_error_without_leaking_stderr(self) -> None:
         runner = FixtureRunner("discovery-debian.json")
         runner.commands["cat /etc/resolv.conf"] = [1, "", "private resolver detail"]

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import ipaddress
 import json
 import os
 from pathlib import Path
@@ -113,6 +114,26 @@ class LanDnsServiceFact:
 
 
 @dataclass(frozen=True)
+class LanNetworkFact:
+    """The IPv4 network behind the default route, used to scope the VPN kill switch."""
+
+    interface: str | None = None
+    cidr: str | None = None
+    status: str = "unknown"
+    reason: str | None = None
+
+    def to_dict(self) -> dict[str, object]:
+        result: dict[str, object] = {
+            "interface": self.interface,
+            "cidr": self.cidr,
+            "status": self.status,
+        }
+        if self.reason is not None:
+            result["reason"] = self.reason
+        return result
+
+
+@dataclass(frozen=True)
 class HostFacts:
     os_id: str
     os_version_id: str
@@ -148,6 +169,7 @@ class HostFacts:
     lan_dns_domain: str = "local"
     lan_dns_status: str = "unknown"
     lan_dns_services: tuple[LanDnsServiceFact, ...] = ()
+    lan_network: LanNetworkFact = LanNetworkFact()
     os_codename: str = ""
     deployment_user: str | None = None
     user_groups: tuple[str, ...] = ()
@@ -203,6 +225,7 @@ class HostFacts:
             "status": self.lan_dns_status,
             "services": [service.to_dict() for service in self.lan_dns_services],
         }
+        lan_network = self.lan_network.to_dict()
         if self.host_dns_reason is not None:
             host_dns["reason"] = self.host_dns_reason
         docker: dict[str, object] = {
@@ -258,6 +281,7 @@ class HostFacts:
             "docker": docker,
             "host_dns": host_dns,
             "lan_dns": lan_dns,
+            "lan_network": lan_network,
             "docker_dns": docker_dns,
             "execution_context": {"ssh": self.ssh_context},
             "probe_errors": self.probe_errors,
@@ -354,6 +378,52 @@ def _parse_mounts(contents: str) -> tuple[MountFact, ...] | None:
             free_bytes = None
         mounts.append(MountFact(target, source, filesystem, free_bytes))
     return tuple(mounts)
+
+
+def _parse_default_interface(contents: str) -> str | None:
+    try:
+        payload = json.loads(contents)
+    except (json.JSONDecodeError, TypeError):
+        return None
+    if not isinstance(payload, list):
+        return None
+    for route in payload:
+        if not isinstance(route, dict):
+            continue
+        device = route.get("dev")
+        if isinstance(device, str) and device:
+            return device
+    return None
+
+
+def _parse_interface_network(contents: str, interface: str) -> str | None:
+    """Return the IPv4 network containing the interface's address, as a CIDR string."""
+
+    try:
+        payload = json.loads(contents)
+    except (json.JSONDecodeError, TypeError):
+        return None
+    if not isinstance(payload, list):
+        return None
+    for entry in payload:
+        if not isinstance(entry, dict) or entry.get("ifname") != interface:
+            continue
+        for address in entry.get("addr_info", []) or []:
+            if not isinstance(address, dict) or address.get("family") != "inet":
+                continue
+            local = address.get("local")
+            prefix = address.get("prefixlen")
+            if not isinstance(local, str) or not isinstance(prefix, int):
+                continue
+            try:
+                network = ipaddress.ip_interface(f"{local}/{prefix}").network
+            except ValueError:
+                continue
+            # A /32 carries no subnet information; Tailscale and similar interfaces use it.
+            if network.prefixlen >= 32 or not network.is_private:
+                continue
+            return str(network)
+    return None
 
 
 def _parse_resolver(contents: str) -> tuple[tuple[str, ...], tuple[str, ...]]:
@@ -568,6 +638,39 @@ def discover_host(runner: Runner, *, domain: str = "local") -> HostFacts:
     mounts = _parse_mounts(mounts_result.stdout) if mounts_reason is None else None
     if mounts is None and mounts_reason is None:
         mounts_reason = "mount probe returned invalid data"
+    route_result = _run(runner, "ip", "-j", "-4", "route", "show", "default")
+    route_reason = _probe_failure_reason(route_result, "default-route")
+    default_interface = (
+        _parse_default_interface(route_result.stdout) if route_reason is None else None
+    )
+    if route_reason is not None:
+        lan_network = LanNetworkFact(status="error", reason=route_reason)
+    elif default_interface is None:
+        lan_network = LanNetworkFact(
+            status="unresolved", reason="no IPv4 default route was found"
+        )
+    else:
+        address_result = _run(runner, "ip", "-j", "-4", "addr", "show", "dev", default_interface)
+        address_reason = _probe_failure_reason(address_result, "LAN-address")
+        lan_cidr = (
+            _parse_interface_network(address_result.stdout, default_interface)
+            if address_reason is None
+            else None
+        )
+        if address_reason is not None:
+            lan_network = LanNetworkFact(
+                interface=default_interface, status="error", reason=address_reason
+            )
+        elif lan_cidr is None:
+            lan_network = LanNetworkFact(
+                interface=default_interface,
+                status="unresolved",
+                reason=f"no private IPv4 subnet is configured on {default_interface}",
+            )
+        else:
+            lan_network = LanNetworkFact(
+                interface=default_interface, cidr=lan_cidr, status="ok"
+            )
     resolver_result = _run(runner, "cat", "/etc/resolv.conf")
     dns_reason = _probe_failure_reason(resolver_result, "host-DNS")
     nameservers, search_domains = _parse_resolver(
@@ -712,6 +815,7 @@ def discover_host(runner: Runner, *, domain: str = "local") -> HostFacts:
         lan_dns_domain=normalized_domain,
         lan_dns_status=lan_dns_status,
         lan_dns_services=tuple(lan_dns_services),
+        lan_network=lan_network,
         os_codename=os_release.get("VERSION_CODENAME", ""),
         deployment_user=deployment_user,
         user_groups=user_groups,

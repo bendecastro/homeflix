@@ -55,7 +55,8 @@ media/{movies,tv,music}
 |---|---|---|
 | `DOMAIN` | `local` | Services answer at `<service>.${DOMAIN}`. Needs LAN DNS. |
 | `JELLYFIN_PUBLISHED_URL` | `http://jellyfin.local` | What Jellyfin advertises to clients. |
-| `LAN_SUBNET` | — (required) | Subnets that bypass the tunnel: your LAN plus the Traefik Docker network. Must **not** cover your provider's VPN gateway (ProtonVPN uses `10.2.0.1`), or NAT-PMP port forwarding fails while the tunnel still looks healthy. |
+| `LAN_SUBNET` | — (required) | Your LAN's CIDR, allowed to bypass the VPN tunnel. `homeflix setup` discovers it from the default route. Must **not** cover your provider's VPN gateway (ProtonVPN uses `10.2.0.1`), or NAT-PMP port forwarding fails while the tunnel still looks healthy. |
+| `PROXY_SUBNET` | — (required) | CIDR pinned to the Compose network, so Traefik can reach the services behind Gluetun. Pinned rather than left to Docker, which would otherwise reallocate it on recreate and invalidate the allowlist. |
 
 ## VPN
 

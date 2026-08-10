@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ipaddress
 import json
 import os
 from pathlib import Path
@@ -16,6 +17,13 @@ from .secrets import ensure_service_credentials
 
 
 DIRECT_PORTS = (("jellyseerr", 5055), ("radarr", 7878), ("sonarr", 8989))
+# VPN providers terminate the tunnel on a gateway inside private address space. Allowing a
+# subnet that contains one makes Gluetun route the provider's own gateway to the LAN, which
+# breaks NAT-PMP port forwarding while the tunnel still reports healthy.
+VPN_GATEWAYS = (ipaddress.ip_address("10.2.0.1"),)
+# Candidates for the Docker proxy network, tried in order. Pinning it keeps the firewall
+# allowlist stable; an unpinned bridge can be reallocated on any recreate.
+PROXY_SUBNET_CANDIDATES = ("172.30.0.0/24", "172.31.0.0/24", "192.168.246.0/24")
 CORE_SERVICES = ("traefik", "jellyfin", "jellyseerr", "radarr", "sonarr")
 _COMPOSE_STATES = {"created", "dead", "exited", "paused", "removing", "restarting", "running"}
 _COMPOSE_HEALTH = {"", "healthy", "starting", "unhealthy"}
@@ -80,6 +88,37 @@ def _atomic_write(path: Path, contents: str, mode: int) -> None:
             Path(temporary_name).unlink(missing_ok=True)
 
 
+def _validated_lan_subnet(facts: HostFacts) -> ipaddress.IPv4Network | ipaddress.IPv6Network:
+    network = facts.lan_network
+    if network.status != "ok" or not network.cidr:
+        raise ValueError(
+            "LAN_SUBNET cannot be determined because LAN discovery is unavailable "
+            f"({network.reason or network.status}); set it manually before configuring Homeflix"
+        )
+    subnet = ipaddress.ip_network(network.cidr)
+    for gateway in VPN_GATEWAYS:
+        if gateway in subnet:
+            raise ValueError(
+                f"discovered LAN subnet {subnet} contains VPN gateway {gateway}; "
+                "port forwarding cannot work on this network"
+            )
+    return subnet
+
+
+def _selected_proxy_subnet(lan_subnet: ipaddress.IPv4Network | ipaddress.IPv6Network) -> str:
+    for candidate in PROXY_SUBNET_CANDIDATES:
+        subnet = ipaddress.ip_network(candidate)
+        if subnet.overlaps(lan_subnet):
+            continue
+        if any(gateway in subnet for gateway in VPN_GATEWAYS):
+            continue
+        return candidate
+    raise ValueError(
+        f"no proxy subnet candidate is free alongside LAN subnet {lan_subnet}; "
+        "set PROXY_SUBNET manually"
+    )
+
+
 def _validated_path(name: str, value: str, facts: HostFacts) -> str:
     path = Path(value).expanduser()
     if not path.is_absolute():
@@ -130,6 +169,8 @@ def configure(
         "CONFIG_ROOT": _validated_path("CONFIG_ROOT", config_root, facts),
         "CACHE_ROOT": _validated_path("CACHE_ROOT", cache_root, facts),
     }
+    lan_subnet = _validated_lan_subnet(facts)
+    proxy_subnet = _selected_proxy_subnet(lan_subnet)
     if "\n" in quality_profile or "\r" in quality_profile or "\0" in quality_profile:
         raise ValueError("quality profile contains forbidden control characters")
     root = Path(repository_root)
@@ -144,6 +185,8 @@ def configure(
         "TZ": facts.timezone,
         "COMPOSE_PROJECT_NAME": "homeflix",
         "QUALITY_PROFILE": quality_profile,
+        "LAN_SUBNET": str(lan_subnet),
+        "PROXY_SUBNET": proxy_subnet,
     }
     environment_result = update_env(env_path, updates)
     credentials_result = ensure_service_credentials(env_path)
