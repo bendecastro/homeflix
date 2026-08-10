@@ -116,9 +116,10 @@ Or skip it: Jellyfin is also published directly on `http://<host-ip>:8096`.
 
 1. **Prowlarr** (`prowlarr.local`) — add your indexers, then add Radarr/Sonarr/Lidarr
    under *Settings → Apps* so indexers sync automatically.
-2. **qBittorrent** (`qbittorrent.local`) — default login `admin`; the initial password is
-   in `docker compose logs qbittorrent`. Change it. Set the save path to
-   `/data/torrents`.
+2. **qBittorrent** (`qbittorrent.local`) — default login `admin`; print only the current
+   temporary password with
+   `docker compose logs qbittorrent 2>&1 | sed -n 's/.*session: //p' | tail -1`.
+   Change it, then set the save path to `/data/torrents`.
 3. **Radarr / Sonarr / Lidarr** —
    - *Media Management* → root folder `/data/media/movies` (resp. `tv`, `music`)
    - *Media Management* → enable **Rename**, and confirm **Use Hardlinks instead of
@@ -127,8 +128,15 @@ Or skip it: Jellyfin is also published directly on `http://<host-ip>:8096`.
      `localhost` — the VPN'd services share Gluetun's network namespace.
 4. **Jellyfin** (`jellyfin.local`) — create the admin account, add libraries pointing at
    `/data/media/movies`, `/data/media/tv`, `/data/media/music`.
-5. **Jellyseerr** (`jellyseerr.local`) — connect it to Jellyfin, then to Radarr/Sonarr.
+5. **Radarr / Sonarr → Jellyfin** — create a dedicated Jellyfin API key, then add and test
+   an **Emby / Jellyfin** connection in each *arr app so imports trigger library refreshes.
+   Use internal host `jellyfin`, port `8096`; see the
+   [first-use settings](first-use.md#4-make-imports-appear-promptly).
+6. **Jellyseerr** (`jellyseerr.local`) — connect it to Jellyfin, then to Radarr/Sonarr.
    This is the only URL most of your household needs.
+
+Next, follow the [first-use guide](first-use.md) to create household accounts, connect a
+Jellyfin client, and trace a released test request through the stack.
 
 ## 9. Verify hardlinks end to end
 
