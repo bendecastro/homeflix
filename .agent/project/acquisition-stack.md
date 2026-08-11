@@ -1,6 +1,6 @@
 # homeflix — Acquisition Stack
 
-Updated: 2026-06-14
+Updated: 2026-08-11
 Decision: [ADR-0005](../decisions/adr-0005-arr-stack-gluetun-protonvpn.md). Source:
 the prior private design package (see `references/source-research.md`).
 
@@ -54,6 +54,28 @@ indefinitely.
 > makes them distinct mountpoints and hardlinks silently fail. See
 > `references/gotchas.md`.
 
+## Bazarr (subtitles)
+
+Bazarr is in `docker-compose.yml` and starts with the stack, but an empty config does
+**not** download anything until it is wired. Portable first-time setup:
+
+- Human guide: [`docs/bazarr.md`](../../docs/bazarr.md)
+- Automation: [`scripts/configure-bazarr.sh`](../../scripts/configure-bazarr.sh)
+
+Recommended defaults encoded there (and in the script):
+
+| Concern | Homeflix default |
+|---|---|
+| Radarr / Sonarr host | Docker DNS names `radarr` / `sonarr` (never `localhost`) |
+| Path mappings | **None** under stock mounts — Bazarr has `${DATA_ROOT}/media` → `/data/media`, matching Radarr/Sonarr media paths |
+| Language profile | **English**: forced (foreign parts only) + full dialogue; default for new movies/series |
+| Subtitle files | Alongside media, multi-language filenames (`Movie.en.srt`, `Movie.en.forced.srt`) |
+| Providers | Free set: yifysubtitles, gestdown, bsplayer, tvsubtitles, supersubtitles, embeddedsubtitles; optional OpenSubtitles.com with a free account |
+| Jellyfin | Optional immediate library refresh via a dedicated API key |
+
+Existing titles need a mass-edit profile assignment once; titles added after the defaults
+are set inherit them. Wanted search runs on Bazarr’s schedule after sync.
+
 ## Indexers / credentials
 
 Indexer logins, API keys, ProtonVPN + usenet provider creds are **secrets** — only in
@@ -61,5 +83,6 @@ the host `.env`, never here. Record *which* indexers/providers are configured, n
 keys. See `conventions/secrets.md`.
 
 ## Links
+- [Bazarr setup (docs)](../../docs/bazarr.md) · [Bazarr wiki](https://wiki.bazarr.media/)
 - [Storage](storage.md) · [Media naming](../conventions/media-naming.md) · [Secrets](../conventions/secrets.md)
 - [Networking / VPN](networking-remote-access.md) · [Media server](media-server.md) · [Paths](../references/paths.md)

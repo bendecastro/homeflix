@@ -190,3 +190,15 @@ placeholder, and updated repository links and maintainer guidance for the new la
 Added a lean root `AGENTS.md` that routes coding agents into the maintained `.agent/`
 wiki, states the load-bearing project constraints, and documents safe validation commands.
 Added `CLAUDE.md` as a symlink to the same file so Claude receives identical guidance.
+
+
+## [2026-08-11] build | Portable Bazarr first-time wiring
+
+Bazarr was shipping in compose with an empty config, so installs never got subtitles
+until manual UI setup. Added portable guidance without production state:
+
+- `docs/bazarr.md` — English forced + full profile, free providers, Docker DNS hosts,
+  no path mappings under stock mounts, optional Jellyfin refresh.
+- `scripts/configure-bazarr.sh` — re-runnable automation reading keys from `$CONFIG_ROOT`.
+- Quickstart step and README pointer; acquisition-stack/gotchas/media-naming/external-links
+  updated.

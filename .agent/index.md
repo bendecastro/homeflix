@@ -13,7 +13,8 @@ running homeflix.
 **Two doors.** This wiki explains *why* homeflix is built the way it is. If you just want
 to run it, you want [`docs/`](../docs/) instead —
 [quickstart](../docs/quickstart.md) · [hardware](../docs/hardware.md) ·
-[configuration](../docs/configuration.md). Nothing here is required reading to deploy.
+[configuration](../docs/configuration.md) · [bazarr](../docs/bazarr.md). Nothing here is
+required reading to deploy.
 
 ## Start here
 

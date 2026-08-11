@@ -1,6 +1,6 @@
 # References — Gotchas
 
-Updated: 2026-08-04
+Updated: 2026-08-11
 
 Traps specific to the homeflix design, plus the generic classics. Add real ones as they
 bite.
@@ -41,6 +41,19 @@ bite.
   hostnames won't resolve on family devices.
 - **Talk to `gluetun:<port>`, not localhost.** The VPN'd services share Gluetun's netns;
   the *arr apps must reference `gluetun:6969/6789/9696`.
+- **Bazarr starts empty.** The container is `Up` after `compose up`, but without Radarr/
+  Sonarr links, a language profile, and providers it never searches. Run
+  `./scripts/configure-bazarr.sh` or follow [`docs/bazarr.md`](../../docs/bazarr.md).
+- **Bazarr must not use `localhost` for Radarr/Sonarr.** From inside the container that is
+  Bazarr itself. Use the compose service names (`radarr`, `sonarr`) on `traefik-network`.
+- **No path mappings under stock Homeflix mounts.** Radarr/Sonarr use `/data/media/...`;
+  Bazarr mounts `${DATA_ROOT}/media` at `/data/media`. Adding identity mappings or wrong
+  pairs causes “file not found” on search. Only map when the roots truly differ.
+- **Bazarr’s media mount is writable on purpose.** It writes `.srt` next to video files.
+  Only Jellyfin should mount media read-only.
+- **Forced vs full English.** “Forced” = foreign-language lines only; full English is the
+  complete track. The recommended profile asks for both so players can offer
+  `English - Forced` without forcing always-on captions.
 
 ## Generic classics (watch for)
 
