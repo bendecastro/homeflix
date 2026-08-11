@@ -285,3 +285,18 @@ fixture journey spanning Debian discovery, ext4 preflight, exact core deployment
 partial API failure, resume, verification, and no-op rerun. One hundred eighty-seven tests and
 fresh spec/quality reviews passed. The core slice is fixture-accepted only; no disposable real
 Debian/Ubuntu host, live Docker deployment, appdata, or service API was accessed.
+
+## [2026-08-10] fix | Hardened LAN and proxy subnet discovery after review
+
+Remediated the review blockers in the NAT-PMP collision fix. LAN discovery now chooses the
+lowest-metric default route, uses its preferred source or gateway to disambiguate
+multi-address interfaces, and permits only RFC1918/CGNAT networks in Gluetun's bypass.
+Public, `/32`, loopback, link-local and multicast selections fail closed. Proxy selection
+inventories IPv4 routes across all routing tables, avoids foreign overlaps, and inspects the
+Homeflix-owned Compose network so setup reruns preserve its existing subnet instead of
+silently switching candidates.
+
+Corrected stale Gluetun healthcheck guidance and expanded manual subnet instructions. Two
+independent re-reviews drove the remediation; 205 fixture/temp tests, Python compilation,
+Compose rendering and shell syntax passed. No live network, container or host configuration
+was changed.

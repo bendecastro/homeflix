@@ -4,6 +4,7 @@
     "docker --version": [0, "Docker version 27.5.1, build fixture\n", ""],
     "docker compose version": [0, "Docker Compose version v2.32.4\n", ""],
     "docker info --format {{json .ServerVersion}}": [0, "\"27.5.1\"\n", ""],
+    "docker network inspect homeflix_traefik-network --format {{json .IPAM.Config}}": [1, "", "Error: No such network"],
     "systemctl is-enabled docker": [0, "enabled\n", ""],
     "dpkg-query --show --showformat=${binary:Package}\\t${db:Status-Abbrev}\\n": [0, "bash\tii \nca-certificates\tii \n", ""],
     "id -u": [0, "1000\n", ""],
@@ -26,6 +27,7 @@
     "ss -H -lntu": [0, "tcp LISTEN 0 4096 0.0.0.0:80 0.0.0.0:*\ntcp LISTEN 0 4096 [::]:8096 [::]:*\n", ""],
     "findmnt --list --json --bytes --output TARGET,SOURCE,FSTYPE,AVAIL": [0, "{\"filesystems\":[{\"target\":\"/\",\"source\":\"/dev/vda1\",\"fstype\":\"ext4\",\"avail\":\"53687091200\"},{\"target\":\"/srv/media\",\"source\":\"/dev/mapper/media\",\"fstype\":\"ext4\",\"avail\":\"1099511627776\"}]}\n", ""],
     "ip -j -4 route show default": [0, "[{\"dst\": \"default\", \"gateway\": \"192.168.1.1\", \"dev\": \"enp1s0\", \"protocol\": \"dhcp\", \"metric\": 100}]", ""],
+    "ip -j -4 route show table all": [0, "[{\"dst\": \"default\", \"gateway\": \"192.168.1.1\", \"dev\": \"enp1s0\"}, {\"dst\": \"192.168.1.0/24\", \"dev\": \"enp1s0\"}]", ""],
     "ip -j -4 addr show dev enp1s0": [0, "[{\"ifindex\": 2, \"ifname\": \"enp1s0\", \"operstate\": \"UP\", \"addr_info\": [{\"family\": \"inet\", \"local\": \"192.168.1.23\", \"prefixlen\": 24, \"scope\": \"global\"}]}]", ""],
     "cat /etc/resolv.conf": [0, "search lan.example\nnameserver 192.0.2.53\n", ""]
   },

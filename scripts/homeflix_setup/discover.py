@@ -14,6 +14,12 @@ from typing import Mapping, Protocol, Sequence
 
 PROBE_TIMEOUT_SECONDS = 5.0
 SUPPORTED_DISTRIBUTIONS = {"debian", "ubuntu"}
+# Only local-use address space may bypass Gluetun. A public prefix here would let
+# acquisition containers route matching internet destinations outside the VPN.
+ALLOWED_LAN_NETWORKS = tuple(
+    ipaddress.ip_network(cidr)
+    for cidr in ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "100.64.0.0/10")
+)
 CONFLICTING_DOCKER_PACKAGES = {
     "docker.io",
     "docker-compose",
@@ -121,6 +127,7 @@ class LanNetworkFact:
     cidr: str | None = None
     status: str = "unknown"
     reason: str | None = None
+    routed_cidrs: tuple[str, ...] = ()
 
     def to_dict(self) -> dict[str, object]:
         result: dict[str, object] = {
@@ -131,6 +138,15 @@ class LanNetworkFact:
         if self.reason is not None:
             result["reason"] = self.reason
         return result
+
+
+@dataclass(frozen=True)
+class ProxyNetworkFact:
+    """The existing Homeflix-owned Compose proxy network, when present."""
+
+    cidr: str | None = None
+    status: str = "unknown"
+    reason: str | None = None
 
 
 @dataclass(frozen=True)
@@ -170,6 +186,7 @@ class HostFacts:
     lan_dns_status: str = "unknown"
     lan_dns_services: tuple[LanDnsServiceFact, ...] = ()
     lan_network: LanNetworkFact = LanNetworkFact()
+    proxy_network: ProxyNetworkFact = ProxyNetworkFact()
     os_codename: str = ""
     deployment_user: str | None = None
     user_groups: tuple[str, ...] = ()
@@ -380,24 +397,59 @@ def _parse_mounts(contents: str) -> tuple[MountFact, ...] | None:
     return tuple(mounts)
 
 
-def _parse_default_interface(contents: str) -> str | None:
+def _parse_proxy_network_cidr(contents: str) -> str | None:
+    try:
+        payload = json.loads(contents)
+    except (json.JSONDecodeError, TypeError):
+        return None
+    if not isinstance(payload, list) or len(payload) != 1:
+        return None
+    subnet = payload[0].get("Subnet") if isinstance(payload[0], dict) else None
+    if not isinstance(subnet, str):
+        return None
+    try:
+        network = ipaddress.ip_network(subnet)
+    except ValueError:
+        return None
+    return str(network) if network.version == 4 else None
+
+
+def _parse_default_route(contents: str) -> tuple[str, str | None, str | None] | None:
+    """Return the lowest-metric default route's interface, source and gateway."""
+
     try:
         payload = json.loads(contents)
     except (json.JSONDecodeError, TypeError):
         return None
     if not isinstance(payload, list):
         return None
-    for route in payload:
+    candidates: list[tuple[int, int, str, str | None, str | None]] = []
+    for position, route in enumerate(payload):
         if not isinstance(route, dict):
             continue
         device = route.get("dev")
-        if isinstance(device, str) and device:
-            return device
-    return None
+        metric = route.get("metric", 0)
+        preferred_source = route.get("prefsrc")
+        gateway = route.get("gateway")
+        if not isinstance(device, str) or not device or not isinstance(metric, int):
+            continue
+        candidates.append(
+            (
+                metric,
+                position,
+                device,
+                preferred_source if isinstance(preferred_source, str) else None,
+                gateway if isinstance(gateway, str) else None,
+            )
+        )
+    if not candidates:
+        return None
+    _, _, device, preferred_source, gateway = min(candidates)
+    return device, preferred_source, gateway
 
 
-def _parse_interface_network(contents: str, interface: str) -> str | None:
-    """Return the IPv4 network containing the interface's address, as a CIDR string."""
+def _parse_routed_cidrs(contents: str) -> tuple[str, ...] | None:
+    """Return deterministic non-default IPv4 routes that proxy CIDRs must avoid."""
 
     try:
         payload = json.loads(contents)
@@ -405,6 +457,45 @@ def _parse_interface_network(contents: str, interface: str) -> str | None:
         return None
     if not isinstance(payload, list):
         return None
+    networks: set[str] = set()
+    for route in payload:
+        if not isinstance(route, dict):
+            continue
+        destination = route.get("dst")
+        if not isinstance(destination, str) or destination == "default":
+            continue
+        try:
+            network = ipaddress.ip_network(destination, strict=False)
+        except ValueError:
+            continue
+        if network.version == 4:
+            networks.add(str(network))
+    return tuple(sorted(networks))
+
+
+def _parse_interface_network(
+    contents: str,
+    interface: str,
+    preferred_source: str | None = None,
+    gateway: str | None = None,
+) -> str | None:
+    """Return the usable IPv4 network selected by the effective default route."""
+
+    try:
+        payload = json.loads(contents)
+    except (json.JSONDecodeError, TypeError):
+        return None
+    if not isinstance(payload, list):
+        return None
+    gateway_ip: ipaddress.IPv4Address | None = None
+    if preferred_source is None:
+        try:
+            parsed_gateway = ipaddress.ip_address(gateway) if gateway is not None else None
+        except ValueError:
+            return None
+        if not isinstance(parsed_gateway, ipaddress.IPv4Address):
+            return None
+        gateway_ip = parsed_gateway
     for entry in payload:
         if not isinstance(entry, dict) or entry.get("ifname") != interface:
             continue
@@ -413,16 +504,30 @@ def _parse_interface_network(contents: str, interface: str) -> str | None:
                 continue
             local = address.get("local")
             prefix = address.get("prefixlen")
+            scope = address.get("scope")
             if not isinstance(local, str) or not isinstance(prefix, int):
                 continue
+            if preferred_source is not None and local != preferred_source:
+                continue
+            if isinstance(scope, str) and scope != "global":
+                continue
             try:
-                network = ipaddress.ip_interface(f"{local}/{prefix}").network
+                selected = ipaddress.ip_interface(f"{local}/{prefix}")
             except ValueError:
                 continue
-            # A /32 carries no subnet information; Tailscale and similar interfaces use it.
-            if network.prefixlen >= 32 or not network.is_private:
+            address_ip = selected.ip
+            if gateway_ip is not None and gateway_ip not in selected.network:
                 continue
-            return str(network)
+            if (
+                selected.network.prefixlen >= 32
+                or address_ip.is_unspecified
+                or address_ip.is_loopback
+                or address_ip.is_link_local
+                or address_ip.is_multicast
+                or not any(address_ip in allowed for allowed in ALLOWED_LAN_NETWORKS)
+            ):
+                continue
+            return str(selected.network)
     return None
 
 
@@ -546,6 +651,36 @@ def discover_host(runner: Runner, *, domain: str = "local") -> HostFacts:
     docker_present = _presence_for_status(docker_status)
     compose_present = _presence_for_status(compose_status)
     daemon_reachable = _presence_for_status(daemon_status)
+    if daemon_status == "ok":
+        proxy_result = _run(
+            runner,
+            "docker",
+            "network",
+            "inspect",
+            "homeflix_traefik-network",
+            "--format",
+            "{{json .IPAM.Config}}",
+        )
+        if proxy_result.returncode == 0:
+            proxy_cidr = _parse_proxy_network_cidr(proxy_result.stdout)
+            proxy_network = (
+                ProxyNetworkFact(proxy_cidr, "ok")
+                if proxy_cidr is not None
+                else ProxyNetworkFact(
+                    status="error", reason="Homeflix proxy network returned invalid IPAM data"
+                )
+            )
+        elif proxy_result.returncode == 1:
+            proxy_network = ProxyNetworkFact(status="absent")
+        else:
+            proxy_network = ProxyNetworkFact(
+                status="error",
+                reason=_probe_failure_reason(proxy_result, "Homeflix proxy network"),
+            )
+    else:
+        proxy_network = ProxyNetworkFact(
+            status="unknown", reason="Docker daemon is not reachable"
+        )
 
     uid_result = _run(runner, "id", "-u")
     gid_result = _run(runner, "id", "-g")
@@ -640,20 +775,26 @@ def discover_host(runner: Runner, *, domain: str = "local") -> HostFacts:
         mounts_reason = "mount probe returned invalid data"
     route_result = _run(runner, "ip", "-j", "-4", "route", "show", "default")
     route_reason = _probe_failure_reason(route_result, "default-route")
-    default_interface = (
-        _parse_default_interface(route_result.stdout) if route_reason is None else None
-    )
+    default_route = _parse_default_route(route_result.stdout) if route_reason is None else None
+    routes_result = _run(runner, "ip", "-j", "-4", "route", "show", "table", "all")
+    routes_reason = _probe_failure_reason(routes_result, "route-inventory")
+    routed_cidrs = _parse_routed_cidrs(routes_result.stdout) if routes_reason is None else None
+    if routed_cidrs is None and routes_reason is None:
+        routes_reason = "route-inventory probe returned invalid data"
     if route_reason is not None:
         lan_network = LanNetworkFact(status="error", reason=route_reason)
-    elif default_interface is None:
+    elif default_route is None:
         lan_network = LanNetworkFact(
             status="unresolved", reason="no IPv4 default route was found"
         )
     else:
+        default_interface, preferred_source, gateway = default_route
         address_result = _run(runner, "ip", "-j", "-4", "addr", "show", "dev", default_interface)
         address_reason = _probe_failure_reason(address_result, "LAN-address")
         lan_cidr = (
-            _parse_interface_network(address_result.stdout, default_interface)
+            _parse_interface_network(
+                address_result.stdout, default_interface, preferred_source, gateway
+            )
             if address_reason is None
             else None
         )
@@ -665,11 +806,20 @@ def discover_host(runner: Runner, *, domain: str = "local") -> HostFacts:
             lan_network = LanNetworkFact(
                 interface=default_interface,
                 status="unresolved",
-                reason=f"no private IPv4 subnet is configured on {default_interface}",
+                reason=f"no allowed local IPv4 subnet is configured on {default_interface}",
+            )
+        elif routes_reason is not None:
+            lan_network = LanNetworkFact(
+                interface=default_interface,
+                status="error",
+                reason=routes_reason,
             )
         else:
             lan_network = LanNetworkFact(
-                interface=default_interface, cidr=lan_cidr, status="ok"
+                interface=default_interface,
+                cidr=lan_cidr,
+                status="ok",
+                routed_cidrs=routed_cidrs or (),
             )
     resolver_result = _run(runner, "cat", "/etc/resolv.conf")
     dns_reason = _probe_failure_reason(resolver_result, "host-DNS")
@@ -816,6 +966,7 @@ def discover_host(runner: Runner, *, domain: str = "local") -> HostFacts:
         lan_dns_status=lan_dns_status,
         lan_dns_services=tuple(lan_dns_services),
         lan_network=lan_network,
+        proxy_network=proxy_network,
         os_codename=os_release.get("VERSION_CODENAME", ""),
         deployment_user=deployment_user,
         user_groups=user_groups,

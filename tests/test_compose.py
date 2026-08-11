@@ -17,6 +17,7 @@ from scripts.homeflix_setup.compose import (
 )
 from scripts.homeflix_setup.discover import (
     GraphicsDeviceFact, GraphicsFact, HostFacts, LanNetworkFact, MountFact,
+    ProxyNetworkFact,
 )
 from scripts.homeflix_setup.envfile import EnvDocument
 
@@ -26,6 +27,7 @@ def facts(
     mount: str = "/",
     quicksync: bool = False,
     lan_network: LanNetworkFact = LanNetworkFact("enp1s0", "192.168.1.0/24", "ok", None),
+    proxy_network: ProxyNetworkFact = ProxyNetworkFact(),
 ) -> HostFacts:
     return HostFacts(
         os_id="debian", os_version_id="12", os_pretty_name="Debian", supported=True,
@@ -42,6 +44,7 @@ def facts(
         host_nameservers=("192.0.2.1",), host_search_domains=(), host_dns_status="ok",
         host_dns_reason=None, ssh_context=False,
         lan_dns_domain="local", lan_dns_status="resolved", lan_network=lan_network,
+        proxy_network=proxy_network,
     )
 
 
@@ -357,7 +360,11 @@ class VpnFirewallTests(unittest.TestCase):
 
 
 class SubnetSelectionTests(unittest.TestCase):
-    def configured(self, lan_network: LanNetworkFact) -> EnvDocument:
+    def configured(
+        self,
+        lan_network: LanNetworkFact,
+        proxy_network: ProxyNetworkFact = ProxyNetworkFact(),
+    ) -> EnvDocument:
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
         root = Path(temporary.name)
@@ -370,7 +377,11 @@ class SubnetSelectionTests(unittest.TestCase):
             path.mkdir(parents=True)
         configure(
             root,
-            facts(mount=str(root), lan_network=lan_network),
+            facts(
+                mount=str(root),
+                lan_network=lan_network,
+                proxy_network=proxy_network,
+            ),
             data_root=str(data),
             config_root=str(config),
             cache_root=str(cache),
@@ -388,10 +399,51 @@ class SubnetSelectionTests(unittest.TestCase):
         self.assertEqual(document.get("LAN_SUBNET"), PROXY_SUBNET_CANDIDATES[0])
         self.assertEqual(document.get("PROXY_SUBNET"), PROXY_SUBNET_CANDIDATES[1])
 
+    def test_proxy_subnet_avoids_other_routed_host_networks(self) -> None:
+        document = self.configured(LanNetworkFact(
+            "enp1s0",
+            "192.168.1.0/24",
+            "ok",
+            None,
+            (PROXY_SUBNET_CANDIDATES[0],),
+        ))
+
+        self.assertEqual(document.get("PROXY_SUBNET"), PROXY_SUBNET_CANDIDATES[1])
+
+    def test_existing_homeflix_proxy_subnet_is_preserved_on_rerun(self) -> None:
+        proxy_cidr = PROXY_SUBNET_CANDIDATES[0]
+        document = self.configured(
+            LanNetworkFact(
+                "enp1s0",
+                "192.168.1.0/24",
+                "ok",
+                None,
+                (proxy_cidr,),
+            ),
+            ProxyNetworkFact(proxy_cidr, "ok"),
+        )
+
+        self.assertEqual(document.get("PROXY_SUBNET"), proxy_cidr)
+
+    def test_configure_refuses_when_existing_proxy_network_cannot_be_inspected(self) -> None:
+        with self.assertRaises(ValueError) as error:
+            self.configured(
+                LanNetworkFact("enp1s0", "192.168.1.0/24", "ok", None),
+                ProxyNetworkFact(status="error", reason="inspect failed"),
+            )
+
+        self.assertIn("PROXY_SUBNET cannot be verified", str(error.exception))
+
     def test_configure_refuses_when_lan_discovery_did_not_resolve(self) -> None:
         with self.assertRaises(ValueError) as error:
             self.configured(LanNetworkFact("enp1s0", None, "unresolved", "no IPv4 default route was found"))
         self.assertIn("LAN_SUBNET cannot be determined", str(error.exception))
+
+    def test_configure_refuses_public_lan_bypass_even_if_facts_claim_success(self) -> None:
+        with self.assertRaises(ValueError) as error:
+            self.configured(LanNetworkFact("enp2s0", "93.184.216.0/24", "ok", None))
+
+        self.assertIn("local-use address space", str(error.exception))
 
     def test_configure_refuses_a_lan_that_contains_the_vpn_gateway(self) -> None:
         with self.assertRaises(ValueError) as error:

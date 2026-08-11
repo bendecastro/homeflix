@@ -18,14 +18,17 @@ remote-access gap). Source: prior private design package (see `references/source
 - Image `qmcgaw/gluetun:latest`, `cap_add: NET_ADMIN`, `/dev/net/tun`.
 - ProtonVPN, OpenVPN, `SERVER_COUNTRIES=Netherlands`.
 - `FIREWALL=on` (kill switch), `FIREWALL_OUTBOUND_SUBNETS` composed from two **required**
-  variables — `LAN_SUBNET` (discovered from the host's default route) and `PROXY_SUBNET`
-  (pinned onto the Compose network). Kept separate so neither must be widened to cover the
+  variables — `LAN_SUBNET` (an RFC1918/CGNAT network discovered from the lowest-metric
+  default route and its preferred source or gateway) and `PROXY_SUBNET` (selected away
+  from existing host routes, then pinned onto the Compose network; an existing
+  Homeflix-owned network is preserved on reruns). Kept separate so neither must be widened to cover the
   other; a whole private block would cover the provider's VPN gateway and break NAT-PMP.
   See `references/gotchas.md`. Also `FIREWALL_INPUT_PORTS=6881,6969,6789,9696`,
   DNS 1.1.1.1 / 1.0.0.1.
 - Owns the netns for qBittorrent + NZBGet + Prowlarr and publishes their ports.
-- Healthcheck hits the Gluetun control server (`:8888/v1/openvpn/status`); the three
-  VPN services `depends_on: gluetun: condition: service_healthy`.
+- Gluetun's built-in healthcheck probes tunnel health; the three VPN services
+  `depends_on: gluetun: condition: service_healthy`. The inherited control-server probe
+  was removed because its port, route and unauthenticated-access assumptions were stale.
 - Creds (`PROTONVPN_USERNAME/PASSWORD`) come from the host `.env` — never here.
 
 ## Local DNS

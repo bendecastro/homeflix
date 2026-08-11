@@ -72,6 +72,8 @@ Edit `.env`. Minimum to change:
 - `VPN_USER`, `VPN_PASSWORD` — see below
 - `TZ` — your timezone
 - `PUID` / `PGID` — run `id -u` and `id -g`
+- `LAN_SUBNET` — your narrow RFC1918/CGNAT LAN CIDR; never a whole private block
+- `PROXY_SUBNET` — a private `/24` that does not overlap any existing host or Docker route
 
 **VPN credentials.** Gluetun supports ~40 providers; set `VPN_SERVICE_PROVIDER`
 accordingly and check the [Gluetun wiki](https://github.com/qdm12/gluetun-wiki) for what

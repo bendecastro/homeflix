@@ -11,7 +11,7 @@ import subprocess
 import tempfile
 from typing import Mapping, Protocol, Sequence
 
-from .discover import HostFacts
+from .discover import ALLOWED_LAN_NETWORKS, HostFacts
 from .envfile import EnvDocument, update_env
 from .secrets import ensure_service_credentials
 
@@ -24,6 +24,10 @@ VPN_GATEWAYS = (ipaddress.ip_address("10.2.0.1"),)
 # Candidates for the Docker proxy network, tried in order. Pinning it keeps the firewall
 # allowlist stable; an unpinned bridge can be reallocated on any recreate.
 PROXY_SUBNET_CANDIDATES = ("172.30.0.0/24", "172.31.0.0/24", "192.168.246.0/24")
+ALLOWED_PROXY_NETWORKS = tuple(
+    ipaddress.ip_network(cidr)
+    for cidr in ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16")
+)
 CORE_SERVICES = ("traefik", "jellyfin", "jellyseerr", "radarr", "sonarr")
 _COMPOSE_STATES = {"created", "dead", "exited", "paused", "removing", "restarting", "running"}
 _COMPOSE_HEALTH = {"", "healthy", "starting", "unhealthy"}
@@ -93,9 +97,17 @@ def _validated_lan_subnet(facts: HostFacts) -> ipaddress.IPv4Network | ipaddress
     if network.status != "ok" or not network.cidr:
         raise ValueError(
             "LAN_SUBNET cannot be determined because LAN discovery is unavailable "
-            f"({network.reason or network.status}); set it manually before configuring Homeflix"
+            f"({network.reason or network.status}); reconnect the LAN and retry discovery, "
+            "or use the manual quickstart"
         )
     subnet = ipaddress.ip_network(network.cidr)
+    if subnet.version != 4 or not any(
+        subnet.subnet_of(allowed) for allowed in ALLOWED_LAN_NETWORKS
+    ):
+        raise ValueError(
+            f"discovered LAN subnet {subnet} is outside allowed local-use address space; "
+            "public VPN bypasses are refused"
+        )
     for gateway in VPN_GATEWAYS:
         if gateway in subnet:
             raise ValueError(
@@ -105,17 +117,52 @@ def _validated_lan_subnet(facts: HostFacts) -> ipaddress.IPv4Network | ipaddress
     return subnet
 
 
-def _selected_proxy_subnet(lan_subnet: ipaddress.IPv4Network | ipaddress.IPv6Network) -> str:
+def _selected_proxy_subnet(
+    lan_subnet: ipaddress.IPv4Network | ipaddress.IPv6Network,
+    routed_cidrs: Sequence[str],
+    existing_cidr: str | None,
+) -> str:
+    routed_networks = tuple(ipaddress.ip_network(cidr) for cidr in routed_cidrs)
+
+    def safe(subnet: ipaddress.IPv4Network | ipaddress.IPv6Network) -> bool:
+        return (
+            subnet.version == 4
+            and any(subnet.subnet_of(allowed) for allowed in ALLOWED_PROXY_NETWORKS)
+            and not subnet.overlaps(lan_subnet)
+            and not any(gateway in subnet for gateway in VPN_GATEWAYS)
+        )
+
+    if existing_cidr is not None:
+        existing = ipaddress.ip_network(existing_cidr)
+        if not safe(existing):
+            raise ValueError(
+                f"existing Homeflix proxy subnet {existing} conflicts with the LAN or VPN gateway"
+            )
+        if any(
+            routed.version == existing.version
+            and routed.overlaps(existing)
+            and not routed.subnet_of(existing)
+            for routed in routed_networks
+        ):
+            raise ValueError(
+                f"existing Homeflix proxy subnet {existing} overlaps another host route"
+            )
+        return str(existing)
+
     for candidate in PROXY_SUBNET_CANDIDATES:
         subnet = ipaddress.ip_network(candidate)
-        if subnet.overlaps(lan_subnet):
+        if not safe(subnet):
             continue
-        if any(gateway in subnet for gateway in VPN_GATEWAYS):
+        if any(
+            subnet.version == routed.version and subnet.overlaps(routed)
+            for routed in routed_networks
+        ):
             continue
         return candidate
     raise ValueError(
-        f"no proxy subnet candidate is free alongside LAN subnet {lan_subnet}; "
-        "set PROXY_SUBNET manually"
+        f"no supported proxy subnet candidate is free alongside LAN subnet {lan_subnet} "
+        "and the host's existing IPv4 routes; remove the conflicting route or use the "
+        "manual quickstart with a verified PROXY_SUBNET"
     )
 
 
@@ -170,7 +217,19 @@ def configure(
         "CACHE_ROOT": _validated_path("CACHE_ROOT", cache_root, facts),
     }
     lan_subnet = _validated_lan_subnet(facts)
-    proxy_subnet = _selected_proxy_subnet(lan_subnet)
+    if facts.proxy_network.status == "error":
+        raise ValueError(
+            "PROXY_SUBNET cannot be verified because the existing Homeflix proxy network "
+            f"could not be inspected ({facts.proxy_network.reason or 'unknown error'})"
+        )
+    existing_proxy_cidr = (
+        facts.proxy_network.cidr if facts.proxy_network.status == "ok" else None
+    )
+    proxy_subnet = _selected_proxy_subnet(
+        lan_subnet,
+        facts.lan_network.routed_cidrs,
+        existing_proxy_cidr,
+    )
     if "\n" in quality_profile or "\r" in quality_profile or "\0" in quality_profile:
         raise ValueError("quality profile contains forbidden control characters")
     root = Path(repository_root)

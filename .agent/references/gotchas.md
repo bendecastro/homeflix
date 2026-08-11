@@ -60,11 +60,16 @@ bite.
   leak. The only symptom was a missing `/tmp/gluetun/forwarded_port`, and Gluetun's
   explanatory error only appears after roughly nine silent retries (~2 minutes).
   `LAN_SUBNET` is now required with no compose fallback and discovered from the host's
-  default route, the Compose network is pinned via a separate `PROXY_SUBNET` so neither
-  value has to be widened to cover the other, and
+  default route, the Compose network is pinned via a separate `PROXY_SUBNET` chosen to
+  avoid every non-default IPv4 route already present on the host, so neither value has to
+  be widened to cover the other, and
   `tests/test_compose.py::VpnFirewallTests` fails if any shipped allowed subnet covers a
   known provider gateway.
 - **[2026-08-10] Don't infer a LAN subnet from just any interface address.** A host can
-  carry a Tailscale `/32`, several Docker bridges, and the real LAN on one machine. Derive
-  it from the interface named by the IPv4 **default route**, skip `/32` addresses (they
-  carry no subnet), and skip non-private ranges. Verified against a host with all three.
+  carry a Tailscale `/32`, several Docker bridges, and the real LAN on one machine. Use the
+  lowest-metric IPv4 **default route** and its preferred source address (or match its
+  gateway when no preferred source is reported). Only RFC1918 and CGNAT ranges may enter
+  the VPN bypass; public, `/32`, loopback, link-local and multicast addresses fail closed.
+  Proxy subnet selection must separately avoid all existing IPv4 routes across routing
+  tables, including Docker bridges, VLANs and secondary LANs, while recognizing and
+  preserving Homeflix's own existing proxy network on reruns.

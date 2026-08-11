@@ -299,6 +299,17 @@ class HostDiscoveryTests(unittest.TestCase):
 
                 self.assertEqual(mounts, {"status": "error", "items": [], "reason": reason})
 
+    def test_existing_homeflix_proxy_network_is_discovered_for_idempotent_setup(self) -> None:
+        runner = FixtureRunner("discovery-debian.json")
+        runner.commands[
+            "docker network inspect homeflix_traefik-network --format {{json .IPAM.Config}}"
+        ] = [0, '[{"Subnet":"172.30.0.0/24","Gateway":"172.30.0.1"}]\n', ""]
+
+        proxy_network = discover_host(runner).proxy_network
+
+        self.assertEqual(proxy_network.status, "ok")
+        self.assertEqual(proxy_network.cidr, "172.30.0.0/24")
+
     def test_lan_network_is_derived_from_the_default_route_interface(self) -> None:
         runner = FixtureRunner("discovery-debian.json")
 
@@ -307,6 +318,114 @@ class HostDiscoveryTests(unittest.TestCase):
         self.assertEqual(
             lan_network, {"interface": "enp1s0", "cidr": "192.168.1.0/24", "status": "ok"}
         )
+
+    def test_lan_network_records_non_default_routed_cidrs_for_proxy_selection(self) -> None:
+        runner = FixtureRunner("discovery-debian.json")
+        runner.commands["ip -j -4 route show table all"] = [
+            0,
+            json.dumps([
+                {"dst": "default", "gateway": "192.168.1.1", "dev": "enp1s0"},
+                {"dst": "192.168.1.0/24", "dev": "enp1s0"},
+                {"dst": "172.30.0.0/24", "dev": "br-existing"},
+                {"dst": "unreachable", "dev": "ignored"},
+            ]),
+            "",
+        ]
+
+        lan_network = discover_host(runner).lan_network
+
+        self.assertEqual(
+            lan_network.routed_cidrs, ("172.30.0.0/24", "192.168.1.0/24")
+        )
+
+    def test_lan_network_uses_effective_route_and_preferred_source(self) -> None:
+        runner = FixtureRunner("discovery-debian.json")
+        runner.commands["ip -j -4 route show default"] = [
+            0,
+            json.dumps([
+                {"dst": "default", "dev": "tailscale0", "prefsrc": "100.64.0.5", "metric": 100},
+                {"dst": "default", "gateway": "192.168.50.1", "dev": "enp2s0", "prefsrc": "192.168.50.23", "metric": 10},
+            ]),
+            "",
+        ]
+        runner.commands["ip -j -4 addr show dev enp2s0"] = [
+            0,
+            json.dumps([{
+                "ifname": "enp2s0",
+                "addr_info": [
+                    {"family": "inet", "local": "169.254.10.4", "prefixlen": 16},
+                    {"family": "inet", "local": "192.168.50.23", "prefixlen": 24},
+                ],
+            }]),
+            "",
+        ]
+
+        lan_network = discover_host(runner).to_dict()["lan_network"]
+
+        self.assertEqual(
+            lan_network, {"interface": "enp2s0", "cidr": "192.168.50.0/24", "status": "ok"}
+        )
+
+    def test_lan_network_uses_gateway_when_default_route_has_no_preferred_source(self) -> None:
+        runner = FixtureRunner("discovery-debian.json")
+        runner.commands["ip -j -4 route show default"] = [
+            0,
+            json.dumps([{
+                "dst": "default",
+                "gateway": "192.168.50.1",
+                "dev": "enp2s0",
+                "metric": 10,
+            }]),
+            "",
+        ]
+        runner.commands["ip -j -4 addr show dev enp2s0"] = [
+            0,
+            json.dumps([{
+                "ifname": "enp2s0",
+                "addr_info": [
+                    {"family": "inet", "local": "192.168.60.23", "prefixlen": 24},
+                    {"family": "inet", "local": "192.168.50.23", "prefixlen": 24},
+                ],
+            }]),
+            "",
+        ]
+
+        lan_network = discover_host(runner).to_dict()["lan_network"]
+
+        self.assertEqual(lan_network["cidr"], "192.168.50.0/24")
+
+    def test_lan_network_rejects_public_prefixes_from_the_vpn_bypass(self) -> None:
+        runner = FixtureRunner("discovery-debian.json")
+        runner.commands["ip -j -4 route show default"] = [
+            0,
+            json.dumps([{
+                "dst": "default",
+                "gateway": "93.184.216.1",
+                "dev": "enp2s0",
+                "prefsrc": "93.184.216.23",
+                "metric": 10,
+            }]),
+            "",
+        ]
+        runner.commands["ip -j -4 addr show dev enp2s0"] = [
+            0,
+            json.dumps([{
+                "ifname": "enp2s0",
+                "addr_info": [{
+                    "family": "inet",
+                    "local": "93.184.216.23",
+                    "prefixlen": 24,
+                    "scope": "global",
+                }],
+            }]),
+            "",
+        ]
+
+        lan_network = discover_host(runner).to_dict()["lan_network"]
+
+        self.assertEqual(lan_network["status"], "unresolved")
+        self.assertIsNone(lan_network["cidr"])
+        self.assertIn("no allowed local IPv4 subnet", lan_network["reason"])
 
     def test_lan_network_probe_failures_are_structured_and_never_guess(self) -> None:
         addresses = json.dumps([{
@@ -319,7 +438,9 @@ class HostDiscoveryTests(unittest.TestCase):
             ({"ip -j -4 route show default": [0, "[]", ""]},
              "unresolved", "no IPv4 default route was found"),
             ({"ip -j -4 addr show dev enp1s0": [0, addresses, ""]},
-             "unresolved", "no private IPv4 subnet is configured on enp1s0"),
+             "unresolved", "no allowed local IPv4 subnet is configured on enp1s0"),
+            ({"ip -j -4 route show table all": [1, "", "private route inventory"]},
+             "error", "route-inventory probe exited with status 1"),
         )
         for overrides, status, reason in cases:
             with self.subTest(status=status, reason=reason):
