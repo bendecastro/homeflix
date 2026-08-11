@@ -300,3 +300,17 @@ Corrected stale Gluetun healthcheck guidance and expanded manual subnet instruct
 independent re-reviews drove the remediation; 205 fixture/temp tests, Python compilation,
 Compose rendering and shell syntax passed. No live network, container or host configuration
 was changed.
+## [2026-08-10] build | Added a household first-use guide
+
+Added `docs/first-use.md` to bridge the gap between service configuration and actually
+using Homeflix: household accounts, Jellyfin client setup, released versus upcoming
+requests, administrator request tracing, qBittorrent first login, playback, and hardlink
+verification. Linked it from the README, quickstart, and wiki index.
+
+## [2026-08-10] fix | Documented event-driven Jellyfin library refreshes
+
+A production import proved that readable media can remain absent from Jellyfin when its
+last scan predates the import, even with real-time monitoring enabled. Added the portable
+fix to the first-use guide and quickstart: create a dedicated Jellyfin API key, configure
+and test **Emby / Jellyfin** connections in Radarr and Sonarr, use batch-level Sonarr
+Import Complete events, and keep the key out of Git.

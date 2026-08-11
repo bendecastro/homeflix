@@ -67,6 +67,10 @@ Prefer the agent-assisted path above on its supported hosts. For manual operatio
 selecting and checking the mounted storage path, creating the layout, configuring `.env`,
 preflight, startup, and application wiring without relying on unset shell variables.
 
+Once the services are configured, use the [first-use guide](docs/first-use.md) to create
+household accounts, connect Jellyfin clients, test a released request, and understand why
+an accepted upcoming title may not download yet.
+
 ## What you get
 
 | Service | Purpose | Default host |
