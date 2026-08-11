@@ -105,3 +105,15 @@ A live-host completion report should include, without secrets or private address
 Until this is performed on a disposable real Debian/Ubuntu host, report only fixture acceptance,
 not production verification. For a fully manual alternative, use the [manual quickstart](quickstart.md).
 Configuration and local-artifact details are in the [configuration reference](configuration.md).
+
+## After core (subtitles)
+
+Bazarr is intentionally **non-core** (with Lidarr and the VPN acquisition services). Once
+Radarr is initialized and media exists, wire subtitles with:
+
+```bash
+./scripts/configure-bazarr.sh
+```
+
+Guide: [bazarr.md](bazarr.md). Do not treat empty Bazarr config as a core verification
+failure; it is a separate first-use step.
