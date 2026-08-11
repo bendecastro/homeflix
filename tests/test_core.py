@@ -547,6 +547,11 @@ class CoreDeploymentTests(unittest.TestCase):
         self.assertFalse((root / ".homeflix" / "setup.json").exists())
 
 
+# Jellyfin creates libraries that write artwork/NFO/trickplay beside the media files.
+DEFAULT_LIBRARY_OPTIONS = {"SaveLocalMetadata": True, "MetadataSavers": ["Nfo"], "SaveTrickplayWithMedia": True}
+COMPLIANT_LIBRARY_OPTIONS = {"SaveLocalMetadata": False, "MetadataSavers": [], "SaveTrickplayWithMedia": False}
+
+
 class StatefulCoreFixture:
     key = "FIXTURE_API_KEY_1234567890ABCDE"
 
@@ -556,6 +561,7 @@ class StatefulCoreFixture:
             self.startup = False
             self.admin = False
             self.libraries = {}
+            self.library_options = {}
             self.roots = {"radarr": [], "sonarr": []}
             self.media_ok = {"radarr": False, "sonarr": False}
             self.completed_ok = {"radarr": False, "sonarr": False}
@@ -573,6 +579,7 @@ class StatefulCoreFixture:
                 "Music": ("music", "/data/media/music"),
             }
             if missing == "jellyfin_library": self.libraries.pop("Music")
+            self.library_options = {name: dict(COMPLIANT_LIBRARY_OPTIONS) for name in self.libraries}
             self.roots = {"radarr": ["/data/media/movies"], "sonarr": ["/data/media/tv"]}
             if missing == "arr_root": self.roots["radarr"] = []
             self.media_ok = {"radarr": missing != "arr_settings", "sonarr": True}
@@ -586,7 +593,7 @@ class StatefulCoreFixture:
         self.api_calls = []
         self.configuration_mutations = []
         self.repository_root = None
-        self.creations = {"account": 0, "library": 0, "root": 0, "settings": 0, "server": 0}
+        self.creations = {"account": 0, "library": 0, "library_options": 0, "root": 0, "settings": 0, "server": 0}
         self.updates = {
             "media": {"radarr": 0, "sonarr": 0},
             "completed": {"radarr": 0, "sonarr": 0},
@@ -671,13 +678,27 @@ class StatefulCoreFixture:
         if outgoing.method == "POST" and path == "/Sessions/Logout" and not split.query:
             return self._response(204, {})
         if outgoing.method == "GET" and path == "/Library/VirtualFolders" and not split.query:
-            payload = [{"Name": name, "CollectionType": kind, "Locations": [location]} for name, (kind, location) in self.libraries.items()]
+            payload = [
+                {"Name": name, "CollectionType": kind, "Locations": [location],
+                 "ItemId": f"fixture-{name.lower()}", "LibraryOptions": dict(self.library_options[name])}
+                for name, (kind, location) in self.libraries.items()
+            ]
             return self._response(200, payload)
+        if outgoing.method == "POST" and path == "/Library/VirtualFolders/LibraryOptions" and not split.query:
+            body = json.loads(outgoing.data)
+            names = [name for name in self.libraries if f"fixture-{name.lower()}" == body["Id"]]
+            if len(names) != 1:
+                raise AssertionError("unexpected Jellyfin library options target")
+            self.library_options[names[0]] = dict(body["LibraryOptions"])
+            self.creations["library_options"] += 1
+            self.configuration_mutations.append(call)
+            return self._response(204, {})
         if outgoing.method == "POST" and path == "/Library/VirtualFolders":
             query = parse_qs(split.query)
             if set(query) != {"name", "collectionType", "paths", "refreshLibrary"} or query["refreshLibrary"] != ["false"]:
                 raise AssertionError("unexpected Jellyfin library query")
             self.libraries[query["name"][0]] = (query["collectionType"][0], query["paths"][0]); self.creations["library"] += 1
+            self.library_options[query["name"][0]] = dict(DEFAULT_LIBRARY_OPTIONS)
             self.configuration_mutations.append(call)
             return self._response(204, {})
         raise AssertionError(f"unexpected Jellyfin fixture request {outgoing.method} {outgoing.full_url}")
@@ -1090,6 +1111,9 @@ class CoreVerificationAndResumeTests(unittest.TestCase):
                     self.assertEqual(second["status"], "verified")
                     expected = {name: 0 for name in fixture.creations}
                     if created_kind is not None: expected[created_kind] = 1
+                    # A recreated library arrives writing into the read-only media mount,
+                    # so exactly one options repair follows it.
+                    if created_kind == "library": expected["library_options"] = 1
                     self.assertEqual(counts_after_first, expected)
                     self.assertEqual(fixture.creations, expected)
                     self.assertEqual(set(fixture.containers), set(CORE_SERVICES))

@@ -22,6 +22,12 @@ When a user asks to set up, resume, or verify Homeflix, route to
 `scripts/homeflix --help`, review generated plans before any mutation, and never run acquisition
 as part of core setup. Use the guide's capability-based workflow rather than duplicating it here.
 
+When a user separately asks to add titles to the library, read
+[`docs/media-library.md`](docs/media-library.md) first. Adding titles is acquisition, so it is
+never bundled into setup, and the *arr APIs have several behaviours that make a naive bulk add
+silently wrong — most importantly, Sonarr reverts season monitoring written immediately after
+an add. Pin every title to a TVDB/TMDB id, dry-run before applying, and confirm the result.
+
 ## Project constraints
 
 - Keep `.agent/` current in the same change when work alters project state, establishes a

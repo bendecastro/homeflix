@@ -347,3 +347,58 @@ until manual UI setup. Added portable guidance without production state:
 - `scripts/configure-bazarr.sh` — re-runnable automation reading keys from `$CONFIG_ROOT`.
 - Quickstart step and README pointer; acquisition-stack/gotchas/media-naming/external-links
   updated.
+
+## [2026-08-11] fix | Jellyfin discovery, hardware transcoding and read-only metadata
+
+Generalized from a downstream deployment, where the first real TV import exposed three
+independent defects. No deployment state, host paths or credentials were carried over.
+
+- **Automatic discovery is structurally broken for new titles.** The *arr "Update Library"
+  connection resolves the item in Jellyfin *before* asking for a refresh, so a title Jellyfin
+  has never seen resolves to nothing and the refresh silently no-ops with `204` while the
+  connection Test still passes. Jellyfin also starts no real-time watcher for a library
+  folder with no items, so the first item in an empty library has no fallback.
+  `docs/first-use.md` now documents a second **Webhook** connection posting to
+  `/Library/Refresh`, with the key in an `X-Emby-Token` header, and explains why the
+  documented setup alone cannot work.
+- **Device passthrough is not hardware transcoding.** `docs/hardware.md` previously implied
+  that uncommenting `/dev/dri` plus a glance at *Dashboard → Playback* was enough. It now
+  states that Jellyfin defaults to no acceleration regardless of passthrough, gives the
+  QuickSync settings that matter for HEVC, and gives a log-based verification that
+  distinguishes `h264_qsv` from `libx264`.
+- **Libraries wrote metadata into the read-only media mount.** `JellyfinClient` now
+  reconciles `SaveLocalMetadata`, `MetadataSavers` and `SaveTrickplayWithMedia` for each
+  managed library, so scans stop generating `IOException` noise. Idempotent: compliant
+  libraries are left untouched.
+
+All 212 fixture tests pass (two new Jellyfin cases) plus Compose rendering. Nothing was run
+against a live host from this repository.
+
+## [2026-08-11] build | Portable library adds and the *arr API behaviours behind them
+
+**What:** Added `scripts/homeflix_setup/api/library.py` (`LibraryClient`) for adding titles
+to a configured Radarr/Sonarr by external id, plus `docs/media-library.md` and 13 regression
+tests in `tests/test_api_library.py`.
+
+**Why it is a separate module:** adding titles is acquisition, which core setup must never
+perform. `arr.py` stays limited to setup-owned configuration reconciliation; callers opt into
+`library.py` explicitly.
+
+**Design:** every title is pinned to a TMDB/TVDB id and the lookup response is checked to
+carry the id that was requested, so a title can never resolve to the wrong item. Adds are
+idempotent — an existing title reports `present` and issues no write. Season monitoring is
+settled before any search is queued.
+
+**Behaviours encoded, each with a regression test:**
+- Sonarr applies `addOptions.monitor` from a deferred refresh task and reverts monitoring
+  written straight after the add. The client re-asserts and requires the state to hold across
+  two reads separated by a delay, then searches; otherwise it fails `monitoring_unstable`.
+  A test drives the exact regression shape — a good first read that later reverts.
+- `series/lookup` can rank an unrelated exact-title match first; a test asserts the id-pinned
+  match wins over a same-titled decoy.
+- Requesting a season the series does not have fails before anything is added.
+- Searches are never issued for a series whose monitoring did not settle.
+
+**Verification:** full suite 225 passed / 306 subtests; `docker compose --env-file
+.env.example config --quiet` clean; new files scanned for deployment specifics (host paths,
+addresses, timezone, VPN details) — none present.

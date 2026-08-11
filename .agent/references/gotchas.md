@@ -86,3 +86,48 @@ bite.
   Proxy subnet selection must separately avoid all existing IPv4 routes across routing
   tables, including Docker bridges, VLANs and secondary LANs, while recognizing and
   preserving Homeflix's own existing proxy network on reruns.
+- **[2026-08-11] The *arr "Update Library" connection cannot discover a title Jellyfin has
+  never seen.** Before requesting a refresh, Radarr/Sonarr ask Jellyfin where the movie or
+  series already lives. For a brand-new title that lookup returns an empty set, so the
+  follow-up update targets nothing and Jellyfin answers `204`. No error is logged anywhere,
+  and the connection **Test** still passes because it only proves reachability. The same is
+  true of `POST /Library/Series/Updated` with an unknown TVDB id. Jellyfin's real-time
+  `LibraryMonitor` compounds it: it starts no filesystem watcher for a library folder that
+  contains no items, so the very first item added to an empty library has no safety net
+  either. The fix is a second **Webhook** connection posting to `/Library/Refresh`, which
+  scans unconditionally; keep the targeted connection for titles that already exist.
+- **[2026-08-11] Passing `/dev/dri` into Jellyfin does not enable hardware transcoding.**
+  The device mapping only makes the GPU available. Jellyfin still defaults to
+  `HardwareAccelerationType: none` and transcodes on the CPU, silently. Hardware
+  acceleration must also be selected in **Dashboard → Playback → Transcoding**, with HEVC
+  and HEVC 10-bit decoding enabled. Verify from the transcode log (`h264_qsv`/`h264_vaapi`
+  versus `libx264`) rather than from the setting.
+- **[2026-08-11] Jellyfin's media mount is read-only, so libraries must not save metadata
+  beside the media.** Library defaults that write artwork, NFO or trickplay images into the
+  library folder produce a burst of `IOException saving to /data/media/...` on every scan;
+  artwork silently falls back to the config directory and the rest just fails. Core setup
+  now sets `SaveLocalMetadata=false`, `MetadataSavers=[]` and `SaveTrickplayWithMedia=false`
+  on each managed library.
+- **[2026-08-11] Sonarr applies `addOptions.monitor` asynchronously, so season monitoring
+  written immediately after an add is silently reverted.** The refresh task that applies the
+  add options finishes *after* the `POST` returns, so a corrective `PUT` of
+  `seasons[].monitored` is overwritten a moment later, leaving the series unmonitored. The
+  read taken straight after the `PUT` returns exactly what was written, so the write looks
+  successful; nothing logs an error, and the regression is only visible later. A single read
+  after a write is not evidence here. `LibraryClient` re-asserts monitoring and requires the
+  desired state to hold across **two reads separated by a delay** before issuing any search,
+  failing with `monitoring_unstable` rather than leaving a half-configured series.
+- **[2026-08-11] `series/lookup` can rank an unrelated exact-title match above the intended
+  show.** A same-named series can outrank the one being sought, including when the intended
+  series carries a disambiguating suffix in its own title. Resolving a name to an id by
+  string equality picks the wrong series. Titles must be pinned to a TVDB/TMDB id and the
+  lookup response checked to carry the id that was requested.
+- **[2026-08-11] A Sonarr season-pack download produces one queue record per episode.**
+  Identical release names repeated across queue rows are episode records sharing a single
+  `downloadId`, not duplicate grabs. Group by `downloadId` before diagnosing duplication.
+- **[2026-08-11] Radarr and Sonarr are not published on the host.** Only the proxy, Jellyfin
+  and Jellyseerr are bound, so host-loopback `curl` against an *arr port returns nothing —
+  which reads like a hung service rather than a closed port. Reach them with
+  `docker exec <service> curl http://localhost:<port>/...`. The LinuxServer images ship
+  BusyBox `grep`, which has no `-P`, so shell extraction of `<ApiKey>` needs `sed`. Send the
+  key as an `X-Api-Key` header; `?apikey=` writes a credential into logs and shell history.

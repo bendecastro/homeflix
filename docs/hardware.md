@@ -84,8 +84,7 @@ devices:
   - /dev/dri:/dev/dri
 ```
 
-Then enable hardware acceleration in Jellyfin under *Dashboard → Playback*. Verify the
-device exists first:
+Verify the device exists first:
 
 ```bash
 ls -l /dev/dri        # expect renderD128
@@ -93,6 +92,31 @@ ls -l /dev/dri        # expect renderD128
 
 It's commented out by default because passing through a device that doesn't exist stops
 the container from starting.
+
+**Passing the device through does not enable hardware transcoding.** It only makes the GPU
+*available*; Jellyfin still defaults to `Hardware acceleration: None` and will transcode on
+the CPU, silently and slowly. You must also set it under *Dashboard → Playback →
+Transcoding*: choose **Intel QuickSync (QSV)**, set the device to `/dev/dri/renderD128`, and
+enable decoding for the codecs you actually have — **HEVC** and **HEVC 10-bit** matter most,
+because x265 releases are common and browsers cannot decode HEVC, so those titles always
+transcode.
+
+Confirm the GPU is genuinely in use rather than trusting the setting. Play an HEVC title on
+a client that must transcode, then inspect the newest transcode log:
+
+```bash
+docker exec jellyfin sh -c 'ls -t /config/log/FFmpeg.Transcode-*.log | head -1 | xargs grep -m1 -o "h264_qsv\|h264_vaapi\|libx264"'
+```
+
+`h264_qsv` or `h264_vaapi` means hardware encoding; `libx264` means it is still on the CPU.
+The same log's `speed=` values show the margin — comfortably above `1x` is what you want.
+
+If the render device is present but Jellyfin cannot use it, check that the container user is
+in the group owning `/dev/dri/renderD128` and that the driver loads:
+
+```bash
+docker exec jellyfin /usr/lib/jellyfin-ffmpeg/vainfo --display drm --device /dev/dri/renderD128
+```
 
 ## USB-attached drives
 

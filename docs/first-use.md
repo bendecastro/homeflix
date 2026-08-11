@@ -53,8 +53,9 @@ it.
 
 ## 4. Make imports appear promptly
 
-Jellyfin's real-time folder monitoring may not notice every containerized import. Wire the
-*arr applications to Jellyfin so they request a refresh when an import completes:
+Jellyfin's real-time folder monitoring may not notice every containerized import, so the
+*arr applications should ask Jellyfin to refresh when an import completes. This needs **two**
+connections per application, and the reason matters — see the warning after the steps.
 
 1. In Jellyfin, open **Dashboard → Advanced → API Keys**, create a dedicated key such as
    `Radarr and Sonarr`, and copy it. Treat the key as a secret; keep it in service
@@ -70,10 +71,29 @@ Jellyfin's real-time folder monitoring may not notice every containerized import
 3. In Sonarr, add the same connection, but enable **On Import Complete** and **On Rename**.
    Import Complete refreshes once after a batch instead of once per episode in a season
    pack.
-4. Run each connection's built-in **Test**, then save only after it succeeds.
+4. In Radarr, add a second connection of type **Webhook**, named for example
+   `Jellyfin library scan`:
+   - URL: `http://jellyfin:8096/Library/Refresh`
+   - Method: `POST`
+   - Headers: key `X-Emby-Token`, value the dedicated Jellyfin key
+   - Events: the same ones as the Emby / Jellyfin connection
+5. Add the identical Webhook to Sonarr, on **On Import Complete** and **On Rename**.
+6. Run each connection's built-in **Test**, then save only after it succeeds.
 
 The internal host is `jellyfin`, not `localhost`: Radarr, Sonarr, and Jellyfin are separate
-containers on the same Docker network.
+containers on the same Docker network. Put the key in the `X-Emby-Token` header rather than
+in the URL, so it does not end up in logs or proxy access records.
+
+> **Why the second connection is required.** The **Emby / Jellyfin** connection cannot make
+> Jellyfin discover a title it has never seen. Before requesting a refresh, the *arr
+> application asks Jellyfin where that series or movie already lives; for a brand-new title
+> the answer is "nowhere", so the refresh has no target and Jellyfin returns a success with
+> no scan. Nothing logs an error and the connection **Test** still passes — the test only
+> proves Jellyfin is reachable, not that an import triggers a scan. The first item added to
+> an empty library is doubly affected, because Jellyfin also starts no real-time filesystem
+> watcher for a library folder that contains no items. `Library/Refresh` scans regardless of
+> what Jellyfin already knows, which is why the Webhook covers the gap. Keep both: the
+> targeted connection is cheaper for titles that already exist.
 
 ## 5. Make a useful first request
 
@@ -125,9 +145,10 @@ Check the pipeline in this order:
    ```
 
    Change it under **Tools → Options → Web UI**.
-4. **Jellyfin:** check the relevant library. If an imported title is missing, retest the
-   *arr application's **Emby / Jellyfin** connection, then run **Scan Library** to recover
-   the current item while diagnosing the event-driven refresh.
+4. **Jellyfin:** check the relevant library. If an imported title is missing, run
+   **Dashboard → Libraries → Scan All Libraries** to recover the current item, then confirm
+   both connections from step 4 exist — a missing **Webhook** connection is the usual reason
+   a genuinely new series or movie never appears on its own.
 
 If a download never starts, inspect Gluetun first:
 
@@ -156,7 +177,8 @@ for the inode-level check.
 
 - [ ] A non-administrator Jellyfin account can sign in.
 - [ ] A real playback device can reach Jellyfin and play a title.
-- [ ] Radarr and Sonarr both pass their **Emby / Jellyfin** connection tests.
+- [ ] Radarr and Sonarr both pass their **Emby / Jellyfin** and **Webhook** connection tests.
+- [ ] A title that Jellyfin has never seen before appears without a manual scan.
 - [ ] A released Jellyseerr request reaches Radarr or Sonarr.
 - [ ] The download client receives and completes the job.
 - [ ] The title appears in Jellyfin after import.
