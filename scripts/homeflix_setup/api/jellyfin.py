@@ -12,6 +12,10 @@ from .client import ApiError, JsonClient, Transport, urllib_transport
 
 LIBRARIES = {"Movies": ("movies", "/data/media/movies"), "Shows": ("tvshows", "/data/media/tv"), "Music": ("music", "/data/media/music")}
 
+# /data/media is mounted read-only, so every write Jellyfin aims beside the media files
+# fails. Keep artwork, NFO and trickplay under /config instead.
+LIBRARY_OPTIONS = {"SaveLocalMetadata": False, "MetadataSavers": [], "SaveTrickplayWithMedia": False}
+
 
 class JellyfinClient:
     def __init__(self, base_url: str = "http://127.0.0.1:8096", *, transport: Transport = urllib_transport, deadline: float | None = None, clock: Callable[[], float] = time.monotonic) -> None:
@@ -101,6 +105,7 @@ class JellyfinClient:
         try:
             created = self.initialize(username, password)
             libraries = self.ensure_libraries()
+            self.ensure_library_options()
         except Exception:
             try:
                 self.logout()
@@ -133,6 +138,26 @@ class JellyfinClient:
             raise
         self.logout()
         return {"initialized": True, "libraries_exact": exact}
+
+    def ensure_library_options(self) -> list[str]:
+        existing = self.http.request("GET", "/Library/VirtualFolders", operation="list library options", headers=self._headers())
+        if not isinstance(existing, list):
+            raise ApiError("jellyfin", "list library options", None, "invalid_response")
+        adjusted: list[str] = []
+        for item in existing:
+            if not isinstance(item, dict) or item.get("Name") not in LIBRARIES:
+                continue
+            identifier, options = item.get("ItemId"), item.get("LibraryOptions")
+            if not isinstance(identifier, str) or not identifier or not isinstance(options, dict):
+                raise ApiError("jellyfin", "read library options", None, "invalid_response")
+            if all(options.get(key) == value for key, value in LIBRARY_OPTIONS.items()):
+                continue
+            self.http.request(
+                "POST", "/Library/VirtualFolders/LibraryOptions", operation="update library options",
+                payload={"Id": identifier, "LibraryOptions": {**options, **LIBRARY_OPTIONS}}, headers=self._headers(),
+            )
+            adjusted.append(item["Name"])
+        return adjusted
 
     def ensure_libraries(self) -> list[str]:
         existing = self.http.request("GET", "/Library/VirtualFolders", operation="list libraries", headers=self._headers())

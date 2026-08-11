@@ -151,7 +151,7 @@ class CoreFixtureAcceptanceTests(unittest.TestCase):
             self.assertTrue(fixture.admin)
             self.assertEqual(set(fixture.libraries), {"Movies", "Shows", "Music"})
             self.assertEqual(fixture.roots, {"radarr": ["/data/media/movies"], "sonarr": []})
-            self.assertEqual(fixture.creations, {"account": 1, "library": 3, "root": 1, "settings": 1, "server": 0})
+            self.assertEqual(fixture.creations, {"account": 1, "library": 3, "library_options": 3, "root": 1, "settings": 1, "server": 0})
             self.assertEqual(fixture.media_ok, {"radarr": True, "sonarr": False})
             self.assertEqual(fixture.completed_ok, {"radarr": True, "sonarr": False})
             self.assertFalse(fixture.initialized)
@@ -169,7 +169,7 @@ class CoreFixtureAcceptanceTests(unittest.TestCase):
             self.assertTrue(fixture.jellyfin_connected)
             self.assertEqual(fixture.media_ok, {"radarr": True, "sonarr": True})
             self.assertEqual(fixture.completed_ok, {"radarr": True, "sonarr": True})
-            self.assertEqual(fixture.creations, {"account": 1, "library": 3, "root": 2, "settings": 2, "server": 2})
+            self.assertEqual(fixture.creations, {"account": 1, "library": 3, "library_options": 3, "root": 2, "settings": 2, "server": 2})
             self.assertEqual(len(fixture.libraries), 3)
             self.assertEqual(fixture.roots, {"radarr": ["/data/media/movies"], "sonarr": ["/data/media/tv"]})
             self.assertEqual(fixture.updates["media"], {"radarr": 1, "sonarr": 1})
@@ -195,6 +195,7 @@ class CoreFixtureAcceptanceTests(unittest.TestCase):
             expected_rerun_calls = [
                 ("jellyfin", "GET", "/System/Info/Public"),
                 ("jellyfin", "POST", "/Users/AuthenticateByName"),
+                ("jellyfin", "GET", "/Library/VirtualFolders"),
                 ("jellyfin", "GET", "/Library/VirtualFolders"),
                 ("jellyfin", "POST", "/Sessions/Logout"),
             ]

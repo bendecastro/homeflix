@@ -216,6 +216,7 @@ class JellyfinApiTests(unittest.TestCase):
             (200, fixture("jellyfin-auth.json")),
             (200, fixture("jellyfin-libraries-empty.json")),
             (204, {}), (204, {}), (204, {}),
+            (200, fixture("jellyfin-libraries-options.json")),
             (204, {}),
         ])
         client = JellyfinClient(transport=transport)
@@ -244,7 +245,8 @@ class JellyfinApiTests(unittest.TestCase):
             (200, fixture("jellyfin-startup-incomplete.json")),
             (200, fixture("jellyfin-auth.json")),
             (204, {}), (204, {}), (204, {}),
-            (200, fixture("jellyfin-libraries-complete.json")), (204, {}),
+            (200, fixture("jellyfin-libraries-complete.json")),
+            (200, fixture("jellyfin-libraries-options.json")), (204, {}),
         ])
         client = JellyfinClient(transport=transport)
         created, _ = client.reconcile("fixture-admin", "FIXTURE_PASSWORD_NOT_REAL")
@@ -258,6 +260,7 @@ class JellyfinApiTests(unittest.TestCase):
             (200, fixture("jellyfin-startup-complete.json")),
             (200, fixture("jellyfin-auth.json")),
             (200, fixture("jellyfin-libraries-complete.json")),
+            (200, fixture("jellyfin-libraries-options.json")),
             (204, {}),
         ])
         client = JellyfinClient(transport=transport)
@@ -267,6 +270,45 @@ class JellyfinApiTests(unittest.TestCase):
         self.assertIsNone(client.token)
         self.assertFalse(any(request.full_url.endswith("/Startup/User") for request, _ in transport.requests))
         self.assertFalse(any(request.method == "POST" and "/Library/VirtualFolders?" in request.full_url for request, _ in transport.requests))
+
+    def test_library_options_stop_writes_into_the_read_only_media_mount(self):
+        transport = FixtureTransport([
+            (200, fixture("jellyfin-startup-complete.json")),
+            (200, fixture("jellyfin-auth.json")),
+            (200, fixture("jellyfin-libraries-complete.json")),
+            (200, fixture("jellyfin-libraries-options-writing.json")),
+            (204, {}), (204, {}),
+            (204, {}),
+        ])
+        client = JellyfinClient(transport=transport)
+        client.reconcile("fixture-admin", "FIXTURE_PASSWORD_NOT_REAL")
+        updates = [
+            json.loads(request.data) for request, _ in transport.requests
+            if request.data and request.full_url.endswith("/Library/VirtualFolders/LibraryOptions")
+        ]
+        self.assertEqual([update["Id"] for update in updates], [
+            "f137a2dd21bbc1b99aa5c0f6bf02a805", "a656b907eb3a73532e40e44b968d0225",
+        ])
+        for update in updates:
+            self.assertEqual(update["LibraryOptions"]["SaveLocalMetadata"], False)
+            self.assertEqual(update["LibraryOptions"]["MetadataSavers"], [])
+            self.assertEqual(update["LibraryOptions"]["SaveTrickplayWithMedia"], False)
+            self.assertEqual(update["LibraryOptions"]["PreferredMetadataLanguage"], "en")
+
+    def test_compliant_library_options_are_left_untouched(self):
+        transport = FixtureTransport([
+            (200, fixture("jellyfin-startup-complete.json")),
+            (200, fixture("jellyfin-auth.json")),
+            (200, fixture("jellyfin-libraries-complete.json")),
+            (200, fixture("jellyfin-libraries-options.json")),
+            (204, {}),
+        ])
+        client = JellyfinClient(transport=transport)
+        client.reconcile("fixture-admin", "FIXTURE_PASSWORD_NOT_REAL")
+        self.assertFalse(any(
+            request.full_url.endswith("/Library/VirtualFolders/LibraryOptions")
+            for request, _ in transport.requests
+        ))
 
     def test_library_duplicates_wrong_types_and_extra_locations_conflict_before_writes(self):
         conflicts = (
@@ -333,11 +375,12 @@ class JellyfinApiTests(unittest.TestCase):
             HttpResponse(200, json.dumps(fixture("jellyfin-startup-complete.json")).encode()),
             HttpResponse(200, json.dumps(fixture("jellyfin-auth.json")).encode()),
             HttpResponse(200, json.dumps(fixture("jellyfin-libraries-complete.json")).encode()),
+            HttpResponse(200, json.dumps(fixture("jellyfin-libraries-options.json")).encode()),
             HttpResponse(204, b""),
         ))
         def transport(outgoing, timeout):
             events.append((outgoing.full_url, timeout))
-            increments = (0.4, 0.4, 0.2, 0.1)
+            increments = (0.3, 0.3, 0.2, 0.1, 0.1)
             now[0] += increments[len(events) - 1]
             return next(responses)
         client = JellyfinClient(transport=transport, deadline=2.0, clock=lambda: now[0])
@@ -378,7 +421,7 @@ class JellyfinApiTests(unittest.TestCase):
     def test_repeated_reconcile_closes_every_ephemeral_session(self):
         responses = []
         for _ in range(2):
-            responses.extend(((200, fixture("jellyfin-startup-complete.json")), (200, fixture("jellyfin-auth.json")), (200, fixture("jellyfin-libraries-complete.json")), (204, {})))
+            responses.extend(((200, fixture("jellyfin-startup-complete.json")), (200, fixture("jellyfin-auth.json")), (200, fixture("jellyfin-libraries-complete.json")), (200, fixture("jellyfin-libraries-options.json")), (204, {})))
         transport = FixtureTransport(responses)
         client = JellyfinClient(transport=transport)
         for _ in range(2):

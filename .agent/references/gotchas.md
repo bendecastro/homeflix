@@ -86,3 +86,25 @@ bite.
   Proxy subnet selection must separately avoid all existing IPv4 routes across routing
   tables, including Docker bridges, VLANs and secondary LANs, while recognizing and
   preserving Homeflix's own existing proxy network on reruns.
+- **[2026-08-11] The *arr "Update Library" connection cannot discover a title Jellyfin has
+  never seen.** Before requesting a refresh, Radarr/Sonarr ask Jellyfin where the movie or
+  series already lives. For a brand-new title that lookup returns an empty set, so the
+  follow-up update targets nothing and Jellyfin answers `204`. No error is logged anywhere,
+  and the connection **Test** still passes because it only proves reachability. The same is
+  true of `POST /Library/Series/Updated` with an unknown TVDB id. Jellyfin's real-time
+  `LibraryMonitor` compounds it: it starts no filesystem watcher for a library folder that
+  contains no items, so the very first item added to an empty library has no safety net
+  either. The fix is a second **Webhook** connection posting to `/Library/Refresh`, which
+  scans unconditionally; keep the targeted connection for titles that already exist.
+- **[2026-08-11] Passing `/dev/dri` into Jellyfin does not enable hardware transcoding.**
+  The device mapping only makes the GPU available. Jellyfin still defaults to
+  `HardwareAccelerationType: none` and transcodes on the CPU, silently. Hardware
+  acceleration must also be selected in **Dashboard → Playback → Transcoding**, with HEVC
+  and HEVC 10-bit decoding enabled. Verify from the transcode log (`h264_qsv`/`h264_vaapi`
+  versus `libx264`) rather than from the setting.
+- **[2026-08-11] Jellyfin's media mount is read-only, so libraries must not save metadata
+  beside the media.** Library defaults that write artwork, NFO or trickplay images into the
+  library folder produce a burst of `IOException saving to /data/media/...` on every scan;
+  artwork silently falls back to the config directory and the rest just fails. Core setup
+  now sets `SaveLocalMetadata=false`, `MetadataSavers=[]` and `SaveTrickplayWithMedia=false`
+  on each managed library.
