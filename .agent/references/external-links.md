@@ -1,6 +1,6 @@
 # References — External Links
 
-Updated: 2026-06-14
+Updated: 2026-08-11
 
 Authoritative external resources. Prefer official docs; note when a link was last
 useful since homelab tooling drifts.
@@ -20,7 +20,8 @@ useful since homelab tooling drifts.
 - Jellyseerr — https://github.com/Fallenbagel/jellyseerr · Overseerr — https://docs.overseerr.dev/
 - qBittorrent — https://github.com/qbittorrent/qBittorrent/wiki
 - SABnzbd — https://sabnzbd.org/wiki/ · NZBGet — https://nzbget.com/documentation/
-- Bazarr — https://wiki.bazarr.media/
+- Bazarr — https://wiki.bazarr.media/ · setup guide https://wiki.bazarr.media/Getting-Started/Setup-Guide/
+- TRaSH Bazarr scoring — https://trash-guides.info/Bazarr/Bazarr-suggested-scoring/
 
 ## Infra / remote access
 

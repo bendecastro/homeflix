@@ -71,6 +71,14 @@ Once the services are configured, use the [first-use guide](docs/first-use.md) t
 household accounts, connect Jellyfin clients, test a released request, and understand why
 an accepted upcoming title may not download yet.
 
+After Radarr is initialized, wire subtitles in one shot:
+
+```bash
+./scripts/configure-bazarr.sh
+```
+
+Details: [`docs/bazarr.md`](docs/bazarr.md).
+
 ## What you get
 
 | Service | Purpose | Default host |

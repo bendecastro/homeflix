@@ -336,3 +336,14 @@ Landing review found that automated setup rejected provider-gateway overlap but 
 quickstart described only host-route overlap. Both manual references now explicitly forbid
 `PROXY_SUBNET` from containing the VPN gateway (including ProtonVPN's `10.2.0.1`), and the
 updated wiki pages carry current freshness dates.
+
+## [2026-08-11] build | Portable Bazarr first-time wiring
+
+Bazarr was shipping in compose with an empty config, so installs never got subtitles
+until manual UI setup. Added portable guidance without production state:
+
+- `docs/bazarr.md` — English forced + full profile, free providers, Docker DNS hosts,
+  no path mappings under stock mounts, optional Jellyfin refresh.
+- `scripts/configure-bazarr.sh` — re-runnable automation reading keys from `$CONFIG_ROOT`.
+- Quickstart step and README pointer; acquisition-stack/gotchas/media-naming/external-links
+  updated.

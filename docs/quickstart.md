@@ -131,11 +131,22 @@ Or skip it: Jellyfin is also published directly on `http://<host-ip>:8096`.
      `localhost` — the VPN'd services share Gluetun's network namespace.
 4. **Jellyfin** (`jellyfin.local`) — create the admin account, add libraries pointing at
    `/data/media/movies`, `/data/media/tv`, `/data/media/music`.
-5. **Radarr / Sonarr → Jellyfin** — create a dedicated Jellyfin API key, then add and test
+5. **Bazarr** (`bazarr.local`) — compose starts the container, but it still needs one-time
+   wiring to Radarr/Sonarr, a language profile, and subtitle providers. After Radarr (and
+   ideally Jellyfin) are up:
+
+   ```bash
+   ./scripts/configure-bazarr.sh
+   ```
+
+   That installs an **English forced + English full** profile as the default, enables free
+   providers, and connects the *arr apps over the Docker network. Optional
+   OpenSubtitles.com account and full manual steps: [bazarr.md](bazarr.md).
+6. **Radarr / Sonarr → Jellyfin** — create a dedicated Jellyfin API key, then add and test
    an **Emby / Jellyfin** connection in each *arr app so imports trigger library refreshes.
    Use internal host `jellyfin`, port `8096`; see the
    [first-use settings](first-use.md#4-make-imports-appear-promptly).
-6. **Jellyseerr** (`jellyseerr.local`) — connect it to Jellyfin, then to Radarr/Sonarr.
+7. **Jellyseerr** (`jellyseerr.local`) — connect it to Jellyfin, then to Radarr/Sonarr.
    This is the only URL most of your household needs.
 
 Next, follow the [first-use guide](first-use.md) to create household accounts, connect a
@@ -186,5 +197,9 @@ separate mounts. It needs the single root `${DATA_ROOT}:/data`.
 the kill switch is doing its job and those services have no network by design.
 
 **`*.local` doesn't resolve** — step 7. Traefik routes; it doesn't do DNS.
+
+**No subtitles appear** — Bazarr is running but unconfigured until step 8.5 (or
+[docs/bazarr.md](bazarr.md)). Confirm Radarr is reachable as host `radarr`, not
+`localhost`, and that a language profile is assigned to the title.
 
 More: [`.agent/references/gotchas.md`](../.agent/references/gotchas.md).
