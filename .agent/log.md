@@ -329,3 +329,10 @@ Added focused coverage for ownership collisions, status-1 list failures, unknown
 foreign subroutes and equal-metric defaults. All 210 fixture/temp tests, Python compilation,
 Compose rendering and shell syntax passed. No live network, container or host configuration
 was changed.
+
+## [2026-08-10] fix | Closed manual subnet documentation gap
+
+Landing review found that automated setup rejected provider-gateway overlap but the manual
+quickstart described only host-route overlap. Both manual references now explicitly forbid
+`PROXY_SUBNET` from containing the VPN gateway (including ProtonVPN's `10.2.0.1`), and the
+updated wiki pages carry current freshness dates.

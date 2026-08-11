@@ -1,6 +1,6 @@
 # homeflix — Networking, VPN & Remote Access
 
-Updated: 2026-06-14
+Updated: 2026-08-10
 Decisions: [ADR-0005](../decisions/adr-0005-arr-stack-gluetun-protonvpn.md) (VPN),
 [ADR-0006](../decisions/adr-0006-traefik-local-remote-access-open.md) (proxy + the open
 remote-access gap). Source: prior private design package (see `references/source-research.md`).

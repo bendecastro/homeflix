@@ -1,6 +1,6 @@
 # References — Gotchas
 
-Updated: 2026-08-04
+Updated: 2026-08-10
 
 Traps specific to the homeflix design, plus the generic classics. Add real ones as they
 bite.
