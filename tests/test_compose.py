@@ -27,7 +27,7 @@ def facts(
     mount: str = "/",
     quicksync: bool = False,
     lan_network: LanNetworkFact = LanNetworkFact("enp1s0", "192.168.1.0/24", "ok", None),
-    proxy_network: ProxyNetworkFact = ProxyNetworkFact(),
+    proxy_network: ProxyNetworkFact = ProxyNetworkFact(status="absent"),
 ) -> HostFacts:
     return HostFacts(
         os_id="debian", os_version_id="12", os_pretty_name="Debian", supported=True,
@@ -363,7 +363,7 @@ class SubnetSelectionTests(unittest.TestCase):
     def configured(
         self,
         lan_network: LanNetworkFact,
-        proxy_network: ProxyNetworkFact = ProxyNetworkFact(),
+        proxy_network: ProxyNetworkFact = ProxyNetworkFact(status="absent"),
     ) -> EnvDocument:
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
@@ -425,6 +425,31 @@ class SubnetSelectionTests(unittest.TestCase):
 
         self.assertEqual(document.get("PROXY_SUBNET"), proxy_cidr)
 
+    def test_existing_proxy_refuses_foreign_more_specific_route(self) -> None:
+        proxy_cidr = PROXY_SUBNET_CANDIDATES[0]
+        with self.assertRaises(ValueError) as error:
+            self.configured(
+                LanNetworkFact(
+                    "enp1s0",
+                    "192.168.1.0/24",
+                    "ok",
+                    None,
+                    (proxy_cidr, "172.30.0.128/25"),
+                ),
+                ProxyNetworkFact(proxy_cidr, "ok"),
+            )
+
+        self.assertIn("overlaps another host route", str(error.exception))
+
+    def test_configure_refuses_when_proxy_network_ownership_is_unknown(self) -> None:
+        with self.assertRaises(ValueError) as error:
+            self.configured(
+                LanNetworkFact("enp1s0", "192.168.1.0/24", "ok", None),
+                ProxyNetworkFact(status="unknown", reason="Docker daemon is not reachable"),
+            )
+
+        self.assertIn("PROXY_SUBNET cannot be verified", str(error.exception))
+
     def test_configure_refuses_when_existing_proxy_network_cannot_be_inspected(self) -> None:
         with self.assertRaises(ValueError) as error:
             self.configured(
@@ -436,7 +461,7 @@ class SubnetSelectionTests(unittest.TestCase):
 
     def test_configure_refuses_when_lan_discovery_did_not_resolve(self) -> None:
         with self.assertRaises(ValueError) as error:
-            self.configured(LanNetworkFact("enp1s0", None, "unresolved", "no IPv4 default route was found"))
+            self.configured(LanNetworkFact("enp1s0", None, "unresolved", "no unambiguous IPv4 default route was found"))
         self.assertIn("LAN_SUBNET cannot be determined", str(error.exception))
 
     def test_configure_refuses_public_lan_bypass_even_if_facts_claim_success(self) -> None:

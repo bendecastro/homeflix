@@ -4,7 +4,7 @@
     "docker --version": [0, "Docker version 27.5.1, build fixture\n", ""],
     "docker compose version": [0, "Docker Compose version v2.32.4\n", ""],
     "docker info --format {{json .ServerVersion}}": [0, "\"27.5.1\"\n", ""],
-    "docker network inspect homeflix_traefik-network --format {{json .IPAM.Config}}": [1, "", "Error: No such network"],
+    "docker network ls --filter name=^homeflix_traefik-network$ --format {{.Name}}": [0, "", ""],
     "systemctl is-enabled docker": [0, "enabled\n", ""],
     "dpkg-query --show --showformat=${binary:Package}\\t${db:Status-Abbrev}\\n": [0, "bash\tii \nca-certificates\tii \n", ""],
     "id -u": [0, "1000\n", ""],

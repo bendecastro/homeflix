@@ -141,7 +141,7 @@ def _selected_proxy_subnet(
         if any(
             routed.version == existing.version
             and routed.overlaps(existing)
-            and not routed.subnet_of(existing)
+            and routed != existing
             for routed in routed_networks
         ):
             raise ValueError(
@@ -217,11 +217,13 @@ def configure(
         "CACHE_ROOT": _validated_path("CACHE_ROOT", cache_root, facts),
     }
     lan_subnet = _validated_lan_subnet(facts)
-    if facts.proxy_network.status == "error":
+    if facts.proxy_network.status not in {"absent", "ok"}:
         raise ValueError(
-            "PROXY_SUBNET cannot be verified because the existing Homeflix proxy network "
-            f"could not be inspected ({facts.proxy_network.reason or 'unknown error'})"
+            "PROXY_SUBNET cannot be verified because Homeflix proxy network ownership "
+            f"could not be established ({facts.proxy_network.reason or facts.proxy_network.status})"
         )
+    if facts.proxy_network.status == "ok" and not facts.proxy_network.cidr:
+        raise ValueError("PROXY_SUBNET cannot be verified from empty Homeflix network IPAM")
     existing_proxy_cidr = (
         facts.proxy_network.cidr if facts.proxy_network.status == "ok" else None
     )

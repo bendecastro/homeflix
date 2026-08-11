@@ -4,7 +4,7 @@
     "docker --version": [127, "", "docker: command not found\n"],
     "docker compose version": [127, "", "docker: command not found\n"],
     "docker info --format {{json .ServerVersion}}": [127, "", "docker: command not found\n"],
-    "docker network inspect homeflix_traefik-network --format {{json .IPAM.Config}}": [1, "", "Error: No such network"],
+    "docker network ls --filter name=^homeflix_traefik-network$ --format {{.Name}}": [0, "", ""],
     "systemctl is-enabled docker": [4, "not-found\n", "Unit docker.service could not be found.\n"],
     "dpkg-query --show --showformat=${binary:Package}\\t${db:Status-Abbrev}\\n": [0, "base-files\tii \n", ""],
     "id -u": [0, "1002\n", ""],

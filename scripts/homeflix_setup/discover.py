@@ -397,14 +397,35 @@ def _parse_mounts(contents: str) -> tuple[MountFact, ...] | None:
     return tuple(mounts)
 
 
-def _parse_proxy_network_cidr(contents: str) -> str | None:
+def _parse_network_names(contents: str) -> tuple[str, ...] | None:
+    names = tuple(line.strip() for line in contents.splitlines() if line.strip())
+    if any(any(character.isspace() for character in name) for name in names):
+        return None
+    return names
+
+
+def _parse_owned_proxy_network_cidr(contents: str) -> str | None:
     try:
         payload = json.loads(contents)
     except (json.JSONDecodeError, TypeError):
         return None
-    if not isinstance(payload, list) or len(payload) != 1:
+    if not isinstance(payload, dict):
         return None
-    subnet = payload[0].get("Subnet") if isinstance(payload[0], dict) else None
+    labels = payload.get("Labels")
+    if not isinstance(labels, dict) or (
+        labels.get("com.docker.compose.project") != "homeflix"
+        or labels.get("com.docker.compose.network") != "traefik-network"
+    ):
+        return None
+    ipam = payload.get("IPAM")
+    configurations = ipam.get("Config") if isinstance(ipam, dict) else None
+    if not isinstance(configurations, list) or len(configurations) != 1:
+        return None
+    subnet = (
+        configurations[0].get("Subnet")
+        if isinstance(configurations[0], dict)
+        else None
+    )
     if not isinstance(subnet, str):
         return None
     try:
@@ -444,7 +465,11 @@ def _parse_default_route(contents: str) -> tuple[str, str | None, str | None] | 
         )
     if not candidates:
         return None
-    _, _, device, preferred_source, gateway = min(candidates)
+    lowest_metric = min(candidate[0] for candidate in candidates)
+    selected = [candidate for candidate in candidates if candidate[0] == lowest_metric]
+    if len(selected) != 1:
+        return None
+    _, _, device, preferred_source, gateway = selected[0]
     return device, preferred_source, gateway
 
 
@@ -462,6 +487,8 @@ def _parse_routed_cidrs(contents: str) -> tuple[str, ...] | None:
         if not isinstance(route, dict):
             continue
         destination = route.get("dst")
+        if route.get("type") in {"local", "broadcast"}:
+            continue
         if not isinstance(destination, str) or destination == "default":
             continue
         try:
@@ -652,30 +679,56 @@ def discover_host(runner: Runner, *, domain: str = "local") -> HostFacts:
     compose_present = _presence_for_status(compose_status)
     daemon_reachable = _presence_for_status(daemon_status)
     if daemon_status == "ok":
-        proxy_result = _run(
+        proxy_list_result = _run(
             runner,
             "docker",
             "network",
-            "inspect",
-            "homeflix_traefik-network",
+            "ls",
+            "--filter",
+            "name=^homeflix_traefik-network$",
             "--format",
-            "{{json .IPAM.Config}}",
+            "{{.Name}}",
         )
-        if proxy_result.returncode == 0:
-            proxy_cidr = _parse_proxy_network_cidr(proxy_result.stdout)
+        proxy_names = (
+            _parse_network_names(proxy_list_result.stdout)
+            if proxy_list_result.returncode == 0
+            else None
+        )
+        if proxy_names == ():
+            proxy_network = ProxyNetworkFact(status="absent")
+        elif proxy_names != ("homeflix_traefik-network",):
+            proxy_network = ProxyNetworkFact(
+                status="error",
+                reason=(
+                    _probe_failure_reason(proxy_list_result, "Homeflix proxy network list")
+                    or "Homeflix proxy network list returned invalid data"
+                ),
+            )
+        else:
+            proxy_result = _run(
+                runner,
+                "docker",
+                "network",
+                "inspect",
+                "homeflix_traefik-network",
+                "--format",
+                "{{json .}}",
+            )
+            proxy_cidr = (
+                _parse_owned_proxy_network_cidr(proxy_result.stdout)
+                if proxy_result.returncode == 0
+                else None
+            )
             proxy_network = (
                 ProxyNetworkFact(proxy_cidr, "ok")
                 if proxy_cidr is not None
                 else ProxyNetworkFact(
-                    status="error", reason="Homeflix proxy network returned invalid IPAM data"
+                    status="error",
+                    reason=(
+                        _probe_failure_reason(proxy_result, "Homeflix proxy network")
+                        or "Homeflix proxy network ownership labels or IPAM data are invalid"
+                    ),
                 )
-            )
-        elif proxy_result.returncode == 1:
-            proxy_network = ProxyNetworkFact(status="absent")
-        else:
-            proxy_network = ProxyNetworkFact(
-                status="error",
-                reason=_probe_failure_reason(proxy_result, "Homeflix proxy network"),
             )
     else:
         proxy_network = ProxyNetworkFact(
@@ -785,7 +838,7 @@ def discover_host(runner: Runner, *, domain: str = "local") -> HostFacts:
         lan_network = LanNetworkFact(status="error", reason=route_reason)
     elif default_route is None:
         lan_network = LanNetworkFact(
-            status="unresolved", reason="no IPv4 default route was found"
+            status="unresolved", reason="no unambiguous IPv4 default route was found"
         )
     else:
         default_interface, preferred_source, gateway = default_route

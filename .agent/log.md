@@ -300,6 +300,7 @@ Corrected stale Gluetun healthcheck guidance and expanded manual subnet instruct
 independent re-reviews drove the remediation; 205 fixture/temp tests, Python compilation,
 Compose rendering and shell syntax passed. No live network, container or host configuration
 was changed.
+
 ## [2026-08-10] build | Added a household first-use guide
 
 Added `docs/first-use.md` to bridge the gap between service configuration and actually
@@ -314,3 +315,17 @@ last scan predates the import, even with real-time monitoring enabled. Added the
 fix to the first-use guide and quickstart: create a dedicated Jellyfin API key, configure
 and test **Emby / Jellyfin** connections in Radarr and Sonarr, use batch-level Sonarr
 Import Complete events, and keep the key out of Git.
+
+## [2026-08-10] fix | Closed final subnet review gaps
+
+Made proxy-network detection explicitly fail closed: setup first proves exact network-name
+presence, then requires Compose ownership labels and valid IPAM before preserving the
+subnet. Unknown daemon/inspection state now blocks configuration rather than masquerading
+as absence. Route inventory excludes kernel local/broadcast entries, while an existing
+Homeflix subnet exempts only its identical connected route and still rejects foreign
+more-specific overlaps. Equal-metric default routes are ambiguous and now refuse discovery.
+
+Added focused coverage for ownership collisions, status-1 list failures, unknown ownership,
+foreign subroutes and equal-metric defaults. All 210 fixture/temp tests, Python compilation,
+Compose rendering and shell syntax passed. No live network, container or host configuration
+was changed.

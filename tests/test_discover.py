@@ -302,13 +302,59 @@ class HostDiscoveryTests(unittest.TestCase):
     def test_existing_homeflix_proxy_network_is_discovered_for_idempotent_setup(self) -> None:
         runner = FixtureRunner("discovery-debian.json")
         runner.commands[
-            "docker network inspect homeflix_traefik-network --format {{json .IPAM.Config}}"
-        ] = [0, '[{"Subnet":"172.30.0.0/24","Gateway":"172.30.0.1"}]\n', ""]
+            "docker network ls --filter name=^homeflix_traefik-network$ --format {{.Name}}"
+        ] = [0, "homeflix_traefik-network\n", ""]
+        runner.commands[
+            "docker network inspect homeflix_traefik-network --format {{json .}}"
+        ] = [
+            0,
+            json.dumps({
+                "IPAM": {"Config": [{"Subnet": "172.30.0.0/24"}]},
+                "Labels": {
+                    "com.docker.compose.project": "homeflix",
+                    "com.docker.compose.network": "traefik-network",
+                },
+            }),
+            "",
+        ]
 
         proxy_network = discover_host(runner).proxy_network
 
         self.assertEqual(proxy_network.status, "ok")
         self.assertEqual(proxy_network.cidr, "172.30.0.0/24")
+
+    def test_foreign_network_with_homeflix_name_is_not_adopted(self) -> None:
+        runner = FixtureRunner("discovery-debian.json")
+        runner.commands[
+            "docker network ls --filter name=^homeflix_traefik-network$ --format {{.Name}}"
+        ] = [0, "homeflix_traefik-network\n", ""]
+        runner.commands[
+            "docker network inspect homeflix_traefik-network --format {{json .}}"
+        ] = [
+            0,
+            json.dumps({
+                "IPAM": {"Config": [{"Subnet": "172.30.0.0/24"}]},
+                "Labels": {"owner": "someone-else"},
+            }),
+            "",
+        ]
+
+        proxy_network = discover_host(runner).proxy_network
+
+        self.assertEqual(proxy_network.status, "error")
+        self.assertIn("ownership labels", proxy_network.reason)
+
+    def test_proxy_network_list_failure_is_not_treated_as_absence(self) -> None:
+        runner = FixtureRunner("discovery-debian.json")
+        runner.commands[
+            "docker network ls --filter name=^homeflix_traefik-network$ --format {{.Name}}"
+        ] = [1, "", "private Docker error"]
+
+        proxy_network = discover_host(runner).proxy_network
+
+        self.assertEqual(proxy_network.status, "error")
+        self.assertIn("exited with status 1", proxy_network.reason)
+        self.assertNotIn("private", proxy_network.reason)
 
     def test_lan_network_is_derived_from_the_default_route_interface(self) -> None:
         runner = FixtureRunner("discovery-debian.json")
@@ -327,6 +373,8 @@ class HostDiscoveryTests(unittest.TestCase):
                 {"dst": "default", "gateway": "192.168.1.1", "dev": "enp1s0"},
                 {"dst": "192.168.1.0/24", "dev": "enp1s0"},
                 {"dst": "172.30.0.0/24", "dev": "br-existing"},
+                {"type": "local", "dst": "172.30.0.1", "dev": "br-existing", "table": "local"},
+                {"type": "broadcast", "dst": "172.30.0.255", "dev": "br-existing", "table": "local"},
                 {"dst": "unreachable", "dev": "ignored"},
             ]),
             "",
@@ -365,6 +413,22 @@ class HostDiscoveryTests(unittest.TestCase):
         self.assertEqual(
             lan_network, {"interface": "enp2s0", "cidr": "192.168.50.0/24", "status": "ok"}
         )
+
+    def test_lan_network_refuses_equal_metric_default_routes(self) -> None:
+        runner = FixtureRunner("discovery-debian.json")
+        runner.commands["ip -j -4 route show default"] = [
+            0,
+            json.dumps([
+                {"dst": "default", "gateway": "192.168.1.1", "dev": "enp1s0", "metric": 10},
+                {"dst": "default", "gateway": "192.168.50.1", "dev": "enp2s0", "metric": 10},
+            ]),
+            "",
+        ]
+
+        lan_network = discover_host(runner).to_dict()["lan_network"]
+
+        self.assertEqual(lan_network["status"], "unresolved")
+        self.assertIn("unambiguous IPv4 default route", lan_network["reason"])
 
     def test_lan_network_uses_gateway_when_default_route_has_no_preferred_source(self) -> None:
         runner = FixtureRunner("discovery-debian.json")
@@ -436,7 +500,7 @@ class HostDiscoveryTests(unittest.TestCase):
             ({"ip -j -4 route show default": [1, "", "private route detail"]},
              "error", "default-route probe exited with status 1"),
             ({"ip -j -4 route show default": [0, "[]", ""]},
-             "unresolved", "no IPv4 default route was found"),
+             "unresolved", "no unambiguous IPv4 default route was found"),
             ({"ip -j -4 addr show dev enp1s0": [0, addresses, ""]},
              "unresolved", "no allowed local IPv4 subnet is configured on enp1s0"),
             ({"ip -j -4 route show table all": [1, "", "private route inventory"]},
