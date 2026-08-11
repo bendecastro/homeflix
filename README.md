@@ -72,6 +72,14 @@ hardlink between `torrents/` and `media/` and confirms they share an inode. That
 check catches the failure mode that quietly ruins most setups of this kind. Full
 walkthrough: [`docs/quickstart.md`](docs/quickstart.md).
 
+After Radarr is initialized, wire subtitles in one shot:
+
+```bash
+./scripts/configure-bazarr.sh
+```
+
+Details: [`docs/bazarr.md`](docs/bazarr.md).
+
 ## What you get
 
 | Service | Purpose | Default host |

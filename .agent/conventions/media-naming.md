@@ -1,6 +1,6 @@
 # Conventions — Media Naming & File Layout
 
-Updated: 2026-08-04
+Updated: 2026-08-11
 Source: prior private design package (see `references/source-research.md`). Decision basis: TRaSH guides.
 
 How media is named so Jellyfin matches metadata and the *arr apps import cleanly.
@@ -28,7 +28,8 @@ format strings should follow TRaSH recommendations.
 - [ ] Exact Radarr movie format string (quality/codec tags? yes/no).
 - [ ] Exact Sonarr series/season/episode format string.
 - [ ] Anime / specials / multi-edition handling (if relevant).
-- [ ] Bazarr subtitle naming + language tags.
+- [x] Bazarr subtitle naming + language tags: alongside media, multi-language filenames
+  (`Title.en.srt`, `Title.en.forced.srt`). See [`docs/bazarr.md`](../../docs/bazarr.md).
 
 ## Why it matters
 
