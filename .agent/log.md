@@ -373,3 +373,32 @@ independent defects. No deployment state, host paths or credentials were carried
 
 All 212 fixture tests pass (two new Jellyfin cases) plus Compose rendering. Nothing was run
 against a live host from this repository.
+
+## [2026-08-11] build | Portable library adds and the *arr API behaviours behind them
+
+**What:** Added `scripts/homeflix_setup/api/library.py` (`LibraryClient`) for adding titles
+to a configured Radarr/Sonarr by external id, plus `docs/media-library.md` and 13 regression
+tests in `tests/test_api_library.py`.
+
+**Why it is a separate module:** adding titles is acquisition, which core setup must never
+perform. `arr.py` stays limited to setup-owned configuration reconciliation; callers opt into
+`library.py` explicitly.
+
+**Design:** every title is pinned to a TMDB/TVDB id and the lookup response is checked to
+carry the id that was requested, so a title can never resolve to the wrong item. Adds are
+idempotent — an existing title reports `present` and issues no write. Season monitoring is
+settled before any search is queued.
+
+**Behaviours encoded, each with a regression test:**
+- Sonarr applies `addOptions.monitor` from a deferred refresh task and reverts monitoring
+  written straight after the add. The client re-asserts and requires the state to hold across
+  two reads separated by a delay, then searches; otherwise it fails `monitoring_unstable`.
+  A test drives the exact regression shape — a good first read that later reverts.
+- `series/lookup` can rank an unrelated exact-title match first; a test asserts the id-pinned
+  match wins over a same-titled decoy.
+- Requesting a season the series does not have fails before anything is added.
+- Searches are never issued for a series whose monitoring did not settle.
+
+**Verification:** full suite 225 passed / 306 subtests; `docker compose --env-file
+.env.example config --quiet` clean; new files scanned for deployment specifics (host paths,
+addresses, timezone, VPN details) — none present.

@@ -108,3 +108,26 @@ bite.
   artwork silently falls back to the config directory and the rest just fails. Core setup
   now sets `SaveLocalMetadata=false`, `MetadataSavers=[]` and `SaveTrickplayWithMedia=false`
   on each managed library.
+- **[2026-08-11] Sonarr applies `addOptions.monitor` asynchronously, so season monitoring
+  written immediately after an add is silently reverted.** The refresh task that applies the
+  add options finishes *after* the `POST` returns, so a corrective `PUT` of
+  `seasons[].monitored` is overwritten a moment later, leaving the series unmonitored. The
+  read taken straight after the `PUT` returns exactly what was written, so the write looks
+  successful; nothing logs an error, and the regression is only visible later. A single read
+  after a write is not evidence here. `LibraryClient` re-asserts monitoring and requires the
+  desired state to hold across **two reads separated by a delay** before issuing any search,
+  failing with `monitoring_unstable` rather than leaving a half-configured series.
+- **[2026-08-11] `series/lookup` can rank an unrelated exact-title match above the intended
+  show.** A same-named series can outrank the one being sought, including when the intended
+  series carries a disambiguating suffix in its own title. Resolving a name to an id by
+  string equality picks the wrong series. Titles must be pinned to a TVDB/TMDB id and the
+  lookup response checked to carry the id that was requested.
+- **[2026-08-11] A Sonarr season-pack download produces one queue record per episode.**
+  Identical release names repeated across queue rows are episode records sharing a single
+  `downloadId`, not duplicate grabs. Group by `downloadId` before diagnosing duplication.
+- **[2026-08-11] Radarr and Sonarr are not published on the host.** Only the proxy, Jellyfin
+  and Jellyseerr are bound, so host-loopback `curl` against an *arr port returns nothing —
+  which reads like a hung service rather than a closed port. Reach them with
+  `docker exec <service> curl http://localhost:<port>/...`. The LinuxServer images ship
+  BusyBox `grep`, which has no `-P`, so shell extraction of `<ApiKey>` needs `sed`. Send the
+  key as an `X-Api-Key` header; `?apikey=` writes a credential into logs and shell history.
