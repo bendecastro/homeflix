@@ -109,3 +109,49 @@ find "${DATA_ROOT}/media" -type f -links 1
 Any primary media file with a link count of 1 was copied rather than hardlinked, which means
 the single `${DATA_ROOT}:/data` mount has been split somewhere. See
 [configuration.md](configuration.md).
+
+## Do not trust Jellyfin counts while a scan is running
+
+After any bulk change, the Jellyfin API reports partial state until the scan finishes, and
+partial state looks exactly like failure. A bulk rename of 78 files transiently reported 11 of
+13 movies with zero media streams, one series at 10 episodes instead of 15, and another at
+**0** — then reconciled exactly with disk and Sonarr once the scan completed.
+
+Poll until nothing is running before drawing any conclusion:
+
+```bash
+# every task must report State "Idle"
+curl -s -H "X-Emby-Token: $KEY" http://localhost:8096/ScheduledTasks
+```
+
+The single-item version of this is an item that exists with no playable media source, because
+Jellyfin creates the item before it has probed the file. Same cause, same fix: wait.
+
+## Filename renaming
+
+Renaming is worth having on. Without it the library keeps raw release filenames, and Jellyfin
+derives its *display name* from the filename — so a trailing release group that survives token
+stripping becomes part of the title (`Frankenstein (2025) - EniaHD`) even when the provider
+match is correct. Folder naming alone does not prevent this.
+
+Two things to know before enabling it:
+
+- **The flag lives in `config/naming`, not `config/mediamanagement`.** `renameMovies` and
+  `renameEpisodes` belong to `/api/v3/config/naming`. Sending them to
+  `/api/v3/config/mediamanagement` is accepted with a success response and silently dropped,
+  so renaming stays off while the rest of that payload applies normally. `copyUsingHardlinks`
+  really does belong to `config/mediamanagement`, which makes the mistake easy and quiet.
+- **An empty rename preview is not evidence that filenames are correct.**
+  `GET /api/v3/rename?movieId=` and `?seriesId=` return an empty list for every title while
+  renaming is disabled. Enable the flag first; only then does the preview mean anything.
+
+Renaming an existing seeded library is safe. A rename within the same filesystem rewrites a
+directory entry and preserves the inode, so the `torrents/` link is untouched and the client
+keeps seeding from its own path. Verified across 78 files: afterwards no media file had a link
+count of 1, every media inode still resolved to a match under `torrents/`, and `df` was
+unchanged.
+
+```bash
+# preview first (requires renaming already enabled), then apply
+docker exec radarr curl -s -H "X-Api-Key: $KEY" "http://localhost:7878/api/v3/rename?movieId=1"
+```

@@ -29,7 +29,9 @@ def routes(service, root):
         ("GET", "/api/v3/qualityprofile"): [json.loads((FIXTURES / "arr-profiles.json").read_text(encoding="utf-8"))],
         ("GET", "/api/v3/rootfolder"): [[]],
         ("POST", "/api/v3/rootfolder"): [{"id": 12, "path": root}],
-        ("GET", "/api/v3/config/mediamanagement"): [{"id": 1, rename: False, "copyUsingHardlinks": False, "unowned": "keep"}],
+        ("GET", "/api/v3/config/naming"): [{"id": 1, rename: False, "unowned_naming": "keep"}],
+        ("PUT", "/api/v3/config/naming"): [{}],
+        ("GET", "/api/v3/config/mediamanagement"): [{"id": 1, "copyUsingHardlinks": False, "unowned": "keep"}],
         ("PUT", "/api/v3/config/mediamanagement"): [{}],
         ("GET", "/api/v3/config/downloadclient"): [{"id": 2, "enableCompletedDownloadHandling": False, "unowned": 7}],
         ("PUT", "/api/v3/config/downloadclient"): [{}],
@@ -85,14 +87,22 @@ class ArrApiTests(unittest.TestCase):
                 transport = RouteTransport(routes(service, root))
                 client = ArrClient(service, "http://127.0.0.1", FIXTURE_KEY, transport=transport)
                 result = client.configure("Fixture HD", root)
+                rename = "renameMovies" if service == "radarr" else "renameEpisodes"
                 self.assertEqual(result["profile"], "Fixture HD")
                 self.assertEqual(result["root"], root)
-                puts = [json.loads(request.data) for request in transport.requests if request.method == "PUT"]
-                self.assertEqual(puts[0]["unowned"], "keep")
-                self.assertTrue(puts[0]["copyUsingHardlinks"])
-                self.assertTrue(puts[0]["renameMovies" if service == "radarr" else "renameEpisodes"])
-                self.assertEqual(puts[1]["unowned"], 7)
-                self.assertTrue(puts[1]["enableCompletedDownloadHandling"])
+                by_path = {
+                    request.full_url.split("127.0.0.1", 1)[1]: json.loads(request.data)
+                    for request in transport.requests if request.method == "PUT"
+                }
+                # The rename flag lives in config/naming; config/mediamanagement
+                # accepts it silently and drops it, leaving renaming off.
+                self.assertTrue(by_path["/api/v3/config/naming"][rename])
+                self.assertEqual(by_path["/api/v3/config/naming"]["unowned_naming"], "keep")
+                self.assertNotIn(rename, by_path["/api/v3/config/mediamanagement"])
+                self.assertTrue(by_path["/api/v3/config/mediamanagement"]["copyUsingHardlinks"])
+                self.assertEqual(by_path["/api/v3/config/mediamanagement"]["unowned"], "keep")
+                self.assertEqual(by_path["/api/v3/config/downloadclient"]["unowned"], 7)
+                self.assertTrue(by_path["/api/v3/config/downloadclient"]["enableCompletedDownloadHandling"])
                 self.assertTrue(all("apikey=" not in request.full_url.casefold() for request in transport.requests))
                 self.assertTrue(all(request.headers.get("X-api-key") == FIXTURE_KEY for request in transport.requests))
 
@@ -101,11 +111,13 @@ class ArrApiTests(unittest.TestCase):
         transport = RouteTransport({
             ("GET", "/api/v3/qualityprofile"): [[{"id": 19, "name": "Fixture HD"}]],
             ("GET", "/api/v3/rootfolder"): [[{"id": 4, "path": root}]],
-            ("GET", "/api/v3/config/mediamanagement"): [{"id": 1, "renameMovies": True, "copyUsingHardlinks": True}],
+            ("GET", "/api/v3/config/naming"): [{"id": 1, "renameMovies": True}],
+            ("GET", "/api/v3/config/mediamanagement"): [{"id": 1, "copyUsingHardlinks": True}],
             ("GET", "/api/v3/config/downloadclient"): [{"id": 2, "enableCompletedDownloadHandling": True}],
         })
         result = ArrClient("radarr", "http://127.0.0.1", FIXTURE_KEY, transport=transport).configure("Fixture HD", root)
         self.assertFalse(result["media_management_changed"])
+        self.assertFalse(result["naming_changed"])
         self.assertFalse(result["completed_handling_changed"])
         self.assertTrue(all(request.method == "GET" for request in transport.requests))
 
@@ -114,12 +126,26 @@ class ArrApiTests(unittest.TestCase):
         transport = RouteTransport({
             ("GET", "/api/v3/qualityprofile"): [[{"id": 19, "name": "Fixture HD"}]],
             ("GET", "/api/v3/rootfolder"): [[{"id": 4, "path": root}]],
-            ("GET", "/api/v3/config/mediamanagement"): [{"id": 1, "renameMovies": True, "copyUsingHardlinks": True}],
+            ("GET", "/api/v3/config/naming"): [{"id": 1, "renameMovies": True}],
+            ("GET", "/api/v3/config/mediamanagement"): [{"id": 1, "copyUsingHardlinks": True}],
             ("GET", "/api/v3/config/downloadclient"): [{"id": 2, "enableCompletedDownloadHandling": True}],
         })
         result = ArrClient("radarr", "http://127.0.0.1", FIXTURE_KEY, transport=transport).inspect("Fixture HD", root)
         self.assertTrue(all(result[name] for name in ("profile_exact", "root_exact", "media_settings", "completed_handling")))
         self.assertTrue(all(request.method == "GET" for request in transport.requests))
+
+    def test_rename_left_off_in_naming_is_reported_unconfigured(self):
+        """Hardlinks on but renaming off must not pass inspection."""
+        root = "/data/media/movies"
+        transport = RouteTransport({
+            ("GET", "/api/v3/qualityprofile"): [[{"id": 19, "name": "Fixture HD"}]],
+            ("GET", "/api/v3/rootfolder"): [[{"id": 4, "path": root}]],
+            ("GET", "/api/v3/config/naming"): [{"id": 1, "renameMovies": False}],
+            ("GET", "/api/v3/config/mediamanagement"): [{"id": 1, "copyUsingHardlinks": True}],
+            ("GET", "/api/v3/config/downloadclient"): [{"id": 2, "enableCompletedDownloadHandling": True}],
+        })
+        result = ArrClient("radarr", "http://127.0.0.1", FIXTURE_KEY, transport=transport).inspect("Fixture HD", root)
+        self.assertFalse(result["media_settings"])
 
     def test_missing_profile_fails_safely_without_hardcoded_id(self):
         transport = RouteTransport({("GET", "/api/v3/qualityprofile"): [[{"id": 6, "name": "Unrelated"}]]})

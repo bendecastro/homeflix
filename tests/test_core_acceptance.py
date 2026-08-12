@@ -203,6 +203,7 @@ class CoreFixtureAcceptanceTests(unittest.TestCase):
                 expected_rerun_calls.extend((
                     (service, "GET", "/api/v3/qualityprofile"),
                     (service, "GET", "/api/v3/rootfolder"),
+                    (service, "GET", "/api/v3/config/naming"),
                     (service, "GET", "/api/v3/config/mediamanagement"),
                     (service, "GET", "/api/v3/config/downloadclient"),
                 ))
@@ -223,6 +224,7 @@ class CoreFixtureAcceptanceTests(unittest.TestCase):
                 expected_rerun_calls.extend((
                     (service, "GET", "/api/v3/qualityprofile"),
                     (service, "GET", "/api/v3/rootfolder"),
+                    (service, "GET", "/api/v3/config/naming"),
                     (service, "GET", "/api/v3/config/mediamanagement"),
                     (service, "GET", "/api/v3/config/downloadclient"),
                 ))

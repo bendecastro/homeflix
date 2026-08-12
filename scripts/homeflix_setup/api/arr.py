@@ -93,6 +93,7 @@ class ArrClient:
             item for item in roots
             if isinstance(item, dict) and item.get("path") == root_path and type(item.get("id")) is int
         ] if isinstance(roots, list) else []
+        naming = self.http.request("GET", "/api/v3/config/naming", operation="inspect naming")
         media = self.http.request("GET", "/api/v3/config/mediamanagement", operation="inspect media management")
         completed = self.http.request("GET", "/api/v3/config/downloadclient", operation="inspect completed handling")
         rename = "renameMovies" if self.service == "radarr" else "renameEpisodes"
@@ -100,7 +101,10 @@ class ArrClient:
             "profile": profile["name"],
             "profile_exact": True,
             "root_exact": len(root_matches) == 1,
-            "media_settings": isinstance(media, dict) and media.get(rename) is True and media.get("copyUsingHardlinks") is True,
+            "media_settings": (
+                isinstance(naming, dict) and naming.get(rename) is True
+                and isinstance(media, dict) and media.get("copyUsingHardlinks") is True
+            ),
             "completed_handling": isinstance(completed, dict) and completed.get("enableCompletedDownloadHandling") is True,
             "runtime_profile": profile,
             "runtime_root": ({"id": root_matches[0]["id"], "path": root_path} if len(root_matches) == 1 else None),
@@ -111,11 +115,17 @@ class ArrClient:
         root = self.ensure_root(root_path)
         self.selected_profile = profile
         self.selected_root = root
+        # renameMovies/renameEpisodes belong to config/naming. Sending them to
+        # config/mediamanagement is accepted but silently dropped, leaving
+        # renaming off while the rest of the payload applies.
         rename_field = "renameMovies" if self.service == "radarr" else "renameEpisodes"
+        naming_changed = self._update_config("/api/v3/config/naming", "naming", {
+            rename_field: True,
+        })
         media_changed = self._update_config("/api/v3/config/mediamanagement", "media management", {
-            rename_field: True, "copyUsingHardlinks": True,
+            "copyUsingHardlinks": True,
         })
         completed_changed = self._update_config("/api/v3/config/downloadclient", "completed download handling", {
             "enableCompletedDownloadHandling": True,
         })
-        return {"service": self.service, "profile": profile["name"], "root": root["path"], "media_management_changed": media_changed, "completed_handling_changed": completed_changed}
+        return {"service": self.service, "profile": profile["name"], "root": root["path"], "naming_changed": naming_changed, "media_management_changed": naming_changed or media_changed, "completed_handling_changed": completed_changed}

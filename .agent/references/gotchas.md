@@ -131,3 +131,25 @@ bite.
   `docker exec <service> curl http://localhost:<port>/...`. The LinuxServer images ship
   BusyBox `grep`, which has no `-P`, so shell extraction of `<ApiKey>` needs `sed`. Send the
   key as an `X-Api-Key` header; `?apikey=` writes a credential into logs and shell history.
+- **[2026-08-11] `renameMovies`/`renameEpisodes` live in `config/naming`, not
+  `config/mediamanagement`.** Sending the rename flag to `/api/v3/config/mediamanagement` is
+  accepted with a success response and then silently dropped, so renaming stays off while the
+  rest of the payload applies normally. `copyUsingHardlinks` genuinely does belong to
+  `config/mediamanagement`, which is what makes the mistake quiet: hardlinking comes out
+  correct and only renaming is missing. Core setup had this wrong and therefore never enabled
+  renaming; `ArrClient.configure()` now writes the flag to `config/naming`, `inspect()` reads
+  it from there, and a regression test asserts the flag is never sent to
+  `config/mediamanagement`.
+- **[2026-08-11] An empty *arr rename preview does not mean filenames are correct.**
+  `GET /api/v3/rename?movieId=` and `?seriesId=` return an empty list for every title while
+  renaming is disabled, which reads as "nothing to do" when the real answer was 78 files. The
+  flag must be enabled before the preview carries any information.
+- **[2026-08-11] Renaming an existing seeded library does not break hardlinks.** A rename
+  within one filesystem rewrites a directory entry and preserves the inode, so the `torrents/`
+  link and the torrent client are unaffected. Verified across 78 files: no media file left with
+  a link count of 1, every media inode still resolvable under `torrents/`, `df` unchanged.
+- **[2026-08-11] Jellyfin counts are meaningless while a library scan runs.** Immediately after
+  a bulk rename the API reported 11 of 13 movies with zero streams, one series at 10 episodes
+  instead of 15 and another at 0; everything reconciled with disk once the scan ended. Poll
+  `GET /ScheduledTasks` until every task is `Idle` before concluding an import failed. This is
+  the bulk form of the single-item "created before probed" race.

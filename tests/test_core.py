@@ -564,6 +564,7 @@ class StatefulCoreFixture:
             self.library_options = {}
             self.roots = {"radarr": [], "sonarr": []}
             self.media_ok = {"radarr": False, "sonarr": False}
+            self.naming_ok = {"radarr": False, "sonarr": False}
             self.completed_ok = {"radarr": False, "sonarr": False}
             self.servers = {"radarr": [], "sonarr": []}
             self.initialized = False
@@ -583,6 +584,7 @@ class StatefulCoreFixture:
             self.roots = {"radarr": ["/data/media/movies"], "sonarr": ["/data/media/tv"]}
             if missing == "arr_root": self.roots["radarr"] = []
             self.media_ok = {"radarr": missing != "arr_settings", "sonarr": True}
+            self.naming_ok = {"radarr": missing != "arr_settings", "sonarr": True}
             self.completed_ok = {"radarr": True, "sonarr": True}
             self.servers = {"radarr": [self._server("radarr")], "sonarr": [self._server("sonarr")]}
             if missing == "jellyseerr_server": self.servers["sonarr"] = []
@@ -596,6 +598,7 @@ class StatefulCoreFixture:
         self.creations = {"account": 0, "library": 0, "library_options": 0, "root": 0, "settings": 0, "server": 0}
         self.updates = {
             "media": {"radarr": 0, "sonarr": 0},
+            "naming": {"radarr": 0, "sonarr": 0},
             "completed": {"radarr": 0, "sonarr": 0},
             "server": {"radarr": 0, "sonarr": 0},
         }
@@ -726,9 +729,23 @@ class StatefulCoreFixture:
                 self.roots[service].append(root); self.creations["root"] += 1
                 self.configuration_mutations.append(call)
                 return self._response(200, {"id": 8, "path": root})
+            # The rename flag lives in config/naming; config/mediamanagement does
+            # not carry it and silently drops it when sent there.
+            if outgoing.method == "GET" and path == "/api/v3/config/naming":
+                return self._response(200, {"id": 1, rename: self.naming_ok[service]})
+            if outgoing.method == "PUT" and path == "/api/v3/config/naming":
+                body = json.loads(outgoing.data)
+                if body.get(rename) is not True:
+                    raise AssertionError("naming update must enable renaming")
+                self.naming_ok[service] = True
+                self.updates["naming"][service] += 1
+                self.configuration_mutations.append(call)
+                return self._response(200, {})
             if outgoing.method == "GET" and path == "/api/v3/config/mediamanagement":
-                return self._response(200, {"id": 1, rename: self.media_ok[service], "copyUsingHardlinks": self.media_ok[service]})
+                return self._response(200, {"id": 1, "copyUsingHardlinks": self.media_ok[service]})
             if outgoing.method == "PUT" and path == "/api/v3/config/mediamanagement":
+                if rename in json.loads(outgoing.data):
+                    raise AssertionError("rename flag must not be sent to mediamanagement")
                 self.media_ok[service] = True; self.creations["settings"] += 1
                 self.updates["media"][service] += 1
                 self.configuration_mutations.append(call)

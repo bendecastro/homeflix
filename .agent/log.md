@@ -402,3 +402,36 @@ settled before any search is queued.
 **Verification:** full suite 225 passed / 306 subtests; `docker compose --env-file
 .env.example config --quiet` clean; new files scanned for deployment specifics (host paths,
 addresses, timezone, VPN details) — none present.
+
+## [2026-08-11] fix | rename flag was written to the wrong *arr endpoint
+
+**Bug:** `ArrClient.configure()` sent `renameMovies`/`renameEpisodes` to
+`/api/v3/config/mediamanagement`, which does not carry those fields. Radarr and Sonarr accept
+the PUT and silently drop the unknown key, so **core setup never enabled renaming** even
+though it reported success. `copyUsingHardlinks` does belong to that endpoint and applied
+correctly, which is exactly why the failure was quiet: hardlinking worked and only renaming
+was missing.
+
+`inspect()` had the mirrored defect — it read the rename flag from `config/mediamanagement`,
+where it is always absent, so `media_settings` could never be `True` and verification could
+not have passed on that criterion.
+
+**Found by** a real deployment showing `copyUsingHardlinks=true` alongside
+`renameMovies=false`, with Jellyfin displaying a title as `Frankenstein (2025) - EniaHD`
+because the display name is derived from the unrenamed filename.
+
+**Fix:** the flag is written to and read from `/api/v3/config/naming`; `copyUsingHardlinks`
+stays on `config/mediamanagement`. `configure()` gained a `naming_changed` key and
+`media_management_changed` now reports either write. Tests assert the flag reaches
+`config/naming`, is **never** sent to `config/mediamanagement`, and that hardlinks-on with
+renaming-off fails inspection. The core fixture models the two endpoints separately and raises
+if the flag is sent to the wrong one.
+
+**Also documented** in `docs/media-library.md`: an empty rename preview is not evidence that
+filenames are correct (the preview is empty whenever renaming is disabled), renaming a seeded
+library preserves hardlinks, and Jellyfin counts cannot be trusted until
+`GET /ScheduledTasks` reports every task `Idle`.
+
+**Verification:** full suite 226 passed / 307 subtests; `docker compose --env-file
+.env.example config --quiet` clean.
+
