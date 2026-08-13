@@ -107,7 +107,7 @@ docker compose logs -f gluetun
 
 ## 7. LAN DNS
 
-Services answer on `*.local` names, but something has to resolve them. Pick one:
+Services answer on `*.homeflix` names, but something has to resolve them. Pick one:
 
 - **Router** — add local DNS entries pointing each name at the host's IP
 - **Pi-hole / AdGuard** — add local DNS records
@@ -117,9 +117,9 @@ Or skip it: Jellyfin is also published directly on `http://<host-ip>:8096`.
 
 ## 8. Wire it up
 
-1. **Prowlarr** (`prowlarr.local`) — add your indexers, then add Radarr/Sonarr/Lidarr
+1. **Prowlarr** (`prowlarr.homeflix`) — add your indexers, then add Radarr/Sonarr/Lidarr
    under *Settings → Apps* so indexers sync automatically.
-2. **qBittorrent** (`qbittorrent.local`) — default login `admin`; print only the current
+2. **qBittorrent** (`qbittorrent.homeflix`) — default login `admin`; print only the current
    temporary password with
    `docker compose logs qbittorrent 2>&1 | sed -n 's/.*session: //p' | tail -1`.
    Change it, then set the save path to `/data/torrents`.
@@ -129,9 +129,9 @@ Or skip it: Jellyfin is also published directly on `http://<host-ip>:8096`.
      Copy** is on (it's the default)
    - *Download Clients* → add qBittorrent at host **`gluetun`**, port `6969`. Not
      `localhost` — the VPN'd services share Gluetun's network namespace.
-4. **Jellyfin** (`jellyfin.local`) — create the admin account, add libraries pointing at
+4. **Jellyfin** (`jellyfin.homeflix`) — create the admin account, add libraries pointing at
    `/data/media/movies`, `/data/media/tv`, `/data/media/music`.
-5. **Bazarr** (`bazarr.local`) — compose starts the container, but it still needs one-time
+5. **Bazarr** (`bazarr.homeflix`) — compose starts the container, but it still needs one-time
    wiring to Radarr/Sonarr, a language profile, and subtitle providers. After Radarr (and
    ideally Jellyfin) are up:
 
@@ -146,7 +146,7 @@ Or skip it: Jellyfin is also published directly on `http://<host-ip>:8096`.
    an **Emby / Jellyfin** connection in each *arr app so imports trigger library refreshes.
    Use internal host `jellyfin`, port `8096`; see the
    [first-use settings](first-use.md#4-make-imports-appear-promptly).
-7. **Jellyseerr** (`jellyseerr.local`) — connect it to Jellyfin, then to Radarr/Sonarr.
+7. **Jellyseerr** (`jellyseerr.homeflix`) — connect it to Jellyfin, then to Radarr/Sonarr.
    This is the only URL most of your household needs.
 
 Next, follow the [first-use guide](first-use.md) to create household accounts, connect a
@@ -196,7 +196,7 @@ separate mounts. It needs the single root `${DATA_ROOT}:/data`.
 **Downloads never start** — check `docker compose logs gluetun`. If the tunnel is down,
 the kill switch is doing its job and those services have no network by design.
 
-**`*.local` doesn't resolve** — step 7. Traefik routes; it doesn't do DNS.
+**`*.homeflix` doesn't resolve** — step 7. Traefik routes; it doesn't do DNS. `.homeflix` is not reserved — serve it locally (router / Pi-hole / `/etc/hosts`) so queries do not leak.
 
 **No subtitles appear** — Bazarr is running but unconfigured until step 8.5 (or
 [docs/bazarr.md](bazarr.md)). Confirm Radarr is reachable as host `radarr`, not

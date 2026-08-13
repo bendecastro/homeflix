@@ -5,7 +5,7 @@ media library you own, running on a single low-power mini-PC.
 
 Jellyfin serves the library. Jellyseerr lets the household request titles. The *arr apps
 manage acquisition, with the download clients and indexer manager isolated behind a VPN
-with a kill switch. Traefik routes everything to friendly `*.local` names.
+with a kill switch. Traefik routes everything to friendly `*.homeflix` names.
 
 ```bash
 git clone https://github.com/bendecastro/homeflix.git
@@ -83,17 +83,18 @@ Details: [`docs/bazarr.md`](docs/bazarr.md).
 
 | Service | Purpose | Default host |
 |---|---|---|
-| Jellyfin | Media server / playback | `jellyfin.local` |
-| Jellyseerr | Household request portal | `jellyseerr.local` |
-| Radarr · Sonarr · Lidarr | Movie / TV / music management | `radarr.local`, … |
-| Bazarr | Subtitles | `bazarr.local` |
-| Prowlarr | Indexer manager *(VPN)* | `prowlarr.local` |
-| qBittorrent · NZBGet | Download clients *(VPN)* | `qbittorrent.local`, `nzbget.local` |
-| Traefik | Reverse proxy | `traefik.local` |
-| Glances · deunhealth · Watchtower | Monitoring & lifecycle | `glances.local` |
+| Jellyfin | Media server / playback | `jellyfin.homeflix` |
+| Jellyseerr | Household request portal | `jellyseerr.homeflix` |
+| Radarr · Sonarr · Lidarr | Movie / TV / music management | `radarr.homeflix`, … |
+| Bazarr | Subtitles | `bazarr.homeflix` |
+| Prowlarr | Indexer manager *(VPN)* | `prowlarr.homeflix` |
+| qBittorrent · NZBGet | Download clients *(VPN)* | `qbittorrent.homeflix`, `nzbget.homeflix` |
+| Traefik | Reverse proxy | `traefik.homeflix` |
+| Glances · deunhealth · Watchtower | Monitoring & lifecycle | `glances.homeflix` |
 
-`*.local` names need LAN DNS — your router, a Pi-hole, or `/etc/hosts` on each device.
-Traefik routes them; it doesn't resolve them.
+`*.homeflix` names need LAN DNS — your router, a Pi-hole, or `/etc/hosts` on each device.
+Traefik routes them; it doesn't resolve them. `.homeflix` is not a reserved TLD — serve
+it locally so queries do not leak. `home.arpa` is the RFC 8375 alternative.
 
 ## Why it's built this way
 

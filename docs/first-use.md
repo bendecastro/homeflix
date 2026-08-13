@@ -10,9 +10,9 @@ Use Homeflix only with content you have the right to access.
 
 Homeflix uses local names by default:
 
-- Jellyfin (watch): `http://jellyfin.local`
-- Jellyseerr (request): `http://jellyseerr.local`
-- qBittorrent (administrator only): `http://qbittorrent.local`
+- Jellyfin (watch): `http://jellyfin.homeflix`
+- Jellyseerr (request): `http://jellyseerr.homeflix`
+- qBittorrent (administrator only): `http://qbittorrent.homeflix`
 
 Replace `local` if you changed `DOMAIN` in `.env`. These names work only after you
 configure LAN DNS as described in the [quickstart](quickstart.md#7-lan-dns).
@@ -43,7 +43,7 @@ Install a Jellyfin client on the TV, streaming box, phone, tablet, or computer. 
 of these server addresses:
 
 ```text
-http://jellyfin.local
+http://jellyfin.homeflix
 http://<homeflix-host-ip>:8096
 ```
 
@@ -131,7 +131,7 @@ Check the pipeline in this order:
    Sonarr.
 2. **Radarr/Sonarr:** open **Activity → Queue** and the title's history. Confirm whether a
    release was found, rejected, downloading, or imported.
-3. **qBittorrent:** check progress at `http://qbittorrent.local`, or use the host port if
+3. **qBittorrent:** check progress at `http://qbittorrent.homeflix`, or use the host port if
    LAN DNS is unavailable:
 
    ```text

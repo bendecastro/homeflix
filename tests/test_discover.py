@@ -113,12 +113,12 @@ class HostDiscoveryTests(unittest.TestCase):
         self.assertEqual(
             result["lan_dns"],
             {
-                "domain": "local",
+                "domain": "homeflix",
                 "status": "resolved",
                 "services": [
-                    {"hostname": "jellyseerr.local", "status": "resolved"},
-                    {"hostname": "radarr.local", "status": "resolved"},
-                    {"hostname": "sonarr.local", "status": "resolved"},
+                    {"hostname": "jellyseerr.homeflix", "status": "resolved"},
+                    {"hostname": "radarr.homeflix", "status": "resolved"},
+                    {"hostname": "sonarr.homeflix", "status": "resolved"},
                 ],
             },
         )
@@ -237,9 +237,9 @@ class HostDiscoveryTests(unittest.TestCase):
 
     def test_service_dns_unresolved_despite_healthy_resolver_is_structured(self) -> None:
         runner = FixtureRunner("discovery-debian.json")
-        runner.commands["getent ahosts jellyseerr.local"] = [2, "", ""]
-        runner.commands["getent ahosts radarr.local"] = [0, "192.0.2.22 STREAM radarr.local\n", ""]
-        runner.commands["getent ahosts sonarr.local"] = [2, "", ""]
+        runner.commands["getent ahosts jellyseerr.homeflix"] = [2, "", ""]
+        runner.commands["getent ahosts radarr.homeflix"] = [0, "192.0.2.22 STREAM radarr.homeflix\n", ""]
+        runner.commands["getent ahosts sonarr.homeflix"] = [2, "", ""]
         result = discover_host(runner).to_dict()
         self.assertEqual(result["host_dns"]["status"], "ok")
         self.assertEqual(result["lan_dns"]["status"], "unresolved")

@@ -53,8 +53,8 @@ media/{movies,tv,music}
 
 | Variable | Default | Notes |
 |---|---|---|
-| `DOMAIN` | `local` | Services answer at `<service>.${DOMAIN}`. Needs LAN DNS. |
-| `JELLYFIN_PUBLISHED_URL` | `http://jellyfin.local` | What Jellyfin advertises to clients. |
+| `DOMAIN` | `homeflix` | Services answer at `<service>.${DOMAIN}`. Needs LAN DNS. Not a reserved TLD — serve it locally. `home.arpa` is the RFC 8375 alternative. |
+| `JELLYFIN_PUBLISHED_URL` | `http://jellyfin.homeflix` | What Jellyfin advertises to clients. |
 | `LAN_SUBNET` | — (required) | Your RFC1918 or CGNAT LAN CIDR, allowed to bypass the VPN tunnel. `homeflix setup` discovers it from the lowest-metric default route and preferred source (or gateway). Public prefixes are refused because allowing one would create a public VPN bypass. Must **not** cover your provider's VPN gateway (ProtonVPN uses `10.2.0.1`). |
 | `PROXY_SUBNET` | — (required) | Private CIDR selected away from existing host routes and the VPN provider gateway, then pinned to the Compose network so Traefik can reach services behind Gluetun. For ProtonVPN it must not contain `10.2.0.1`. Pinning prevents Docker from reallocating it on recreate; an existing Homeflix-owned network is preserved on setup reruns. |
 

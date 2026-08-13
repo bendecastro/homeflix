@@ -50,7 +50,7 @@ profile (id `1`) and the provider list it manages.
 
 ## Manual path (UI)
 
-Open `http://bazarr.${DOMAIN}` (default `bazarr.local`).
+Open `http://bazarr.${DOMAIN}` (default `bazarr.homeflix`).
 
 ### 1. Languages
 

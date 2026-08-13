@@ -41,18 +41,18 @@ hardlinks silently — see `gotchas.md`.
 
 | Service | Host rule | Port | VPN | Notes |
 |---|---|---|---|---|
-| Traefik dashboard | traefik.local | 8080 | – | `api.insecure=true` (harden!) |
-| Jellyfin | jellyfin.local | 8096 | – | also published on host:8096 |
-| Jellyseerr | jellyseerr.local | 5055 | – | family requests |
-| Overseerr | overseerr.local | 5000 | – | alt — drop one |
-| Radarr | radarr.local | 7878 | – | |
-| Sonarr | sonarr.local | 8989 | – | |
-| Lidarr | lidarr.local | 8686 | – | |
-| Bazarr | bazarr.local | 6767 | – | |
-| Prowlarr | prowlarr.local | 9696 | **VPN** | via gluetun |
-| qBittorrent | qbittorrent.local | 6969 (WebUI), 6881 t/u | **VPN** | via gluetun |
-| NZBGet | nzbget.local | 6789 | **VPN** | via gluetun |
-| Glances | glances.local | 61208 | – | |
+| Traefik dashboard | traefik.homeflix | 8080 | – | `api.insecure=true` (harden!) |
+| Jellyfin | jellyfin.homeflix | 8096 | – | also published on host:8096 |
+| Jellyseerr | jellyseerr.homeflix | 5055 | – | family requests |
+| Overseerr | overseerr.homeflix | 5000 | – | alt — drop one |
+| Radarr | radarr.homeflix | 7878 | – | |
+| Sonarr | sonarr.homeflix | 8989 | – | |
+| Lidarr | lidarr.homeflix | 8686 | – | |
+| Bazarr | bazarr.homeflix | 6767 | – | |
+| Prowlarr | prowlarr.homeflix | 9696 | **VPN** | via gluetun |
+| qBittorrent | qbittorrent.homeflix | 6969 (WebUI), 6881 t/u | **VPN** | via gluetun |
+| NZBGet | nzbget.homeflix | 6789 | **VPN** | via gluetun |
+| Glances | glances.homeflix | 61208 | – | |
 | Gluetun control | (internal) | 8888 | – | healthcheck |
 
 *arr → download/indexer host is **`gluetun`** (e.g. `gluetun:6969`), not localhost.
@@ -61,6 +61,6 @@ hardlinks silently — see `gotchas.md`.
 
 | Thing | Value |
 |---|---|
-| LAN DNS for `*.local` | **TBD** — router / Pi-hole / `/etc/hosts` (document!) |
+| LAN DNS for `*.homeflix` | router / Pi-hole / `/etc/hosts` (serve locally; not a reserved TLD) |
 | Remote access | **OPEN** — none yet (ADR-0006 → future ADR-0007) |
 | VPN egress | ProtonVPN, Netherlands (Gluetun) |

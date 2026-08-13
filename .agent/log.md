@@ -435,3 +435,10 @@ library preserves hardlinks, and Jellyfin counts cannot be trusted until
 **Verification:** full suite 226 passed / 307 subtests; `docker compose --env-file
 .env.example config --quiet` clean.
 
+
+## [2026-08-13] decision | ADR-0010 — default DOMAIN=homeflix
+
+Ship `DOMAIN=homeflix` in `.env.example`, the discover/CLI fallback, and user docs.
+`.local` remains documented as mDNS-only. `home.arpa` is the RFC 8375 alternative.
+`.homeflix` is not reserved; operators must serve it locally.
+

@@ -68,7 +68,7 @@ class CoreFixtureAcceptanceTests(unittest.TestCase):
             discovery = FixtureRunner("discovery-debian.json")
             discovery.commands["find /dev/dri -maxdepth 1 -name renderD* -type c -print"] = [0, "", ""]
             for service in ("jellyseerr", "radarr", "sonarr"):
-                discovery.commands[f"getent ahosts {service}.local"] = [2, "", "not found"]
+                discovery.commands[f"getent ahosts {service}.homeflix"] = [2, "", "not found"]
             facts = discover_host(discovery)
             facts = replace(
                 facts,

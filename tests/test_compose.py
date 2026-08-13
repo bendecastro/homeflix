@@ -43,7 +43,7 @@ def facts(
         docker_daemon_reachable=True, docker_daemon_status="ok", docker_daemon_reason=None,
         host_nameservers=("192.0.2.1",), host_search_domains=(), host_dns_status="ok",
         host_dns_reason=None, ssh_context=False,
-        lan_dns_domain="local", lan_dns_status="resolved", lan_network=lan_network,
+        lan_dns_domain="homeflix", lan_dns_status="resolved", lan_network=lan_network,
         proxy_network=proxy_network,
     )
 

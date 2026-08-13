@@ -116,7 +116,7 @@ def _configured_domain(repository_root: Path) -> str:
             continue
         if domain:
             return domain
-    return "local"
+    return "homeflix"
 
 
 def _input_error(*, json_output: bool, code: str, label: str, error: Exception) -> int:

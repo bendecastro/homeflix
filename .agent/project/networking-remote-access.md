@@ -8,7 +8,8 @@ remote-access gap). Source: prior private design package (see `references/source
 ## Reverse proxy — Traefik v3 (decided)
 
 - Image `traefik:v3.0`, network `traefik-network`, Docker provider with
-  `exposedbydefault=false`. Per-service routers via `Host(`<svc>.local`)` labels.
+  `exposedbydefault=false`. Per-service routers via `Host(`<svc>.${DOMAIN}`)` labels
+  (default `homeflix`).
 - Entrypoints `:80` / `:443`; dashboard on `:8080`.
 - ⚠️ Runs `--api.insecure=true` → dashboard has **no auth**. OK on a trusted LAN;
   **must be hardened before any remote exposure**.
@@ -33,8 +34,11 @@ remote-access gap). Source: prior private design package (see `references/source
 
 ## Local DNS
 
-`*.local` names must resolve on the LAN. **Mechanism not yet documented** — router DNS
-entries / Pi-hole / AdGuard / `/etc/hosts`. Decide and record in `references/paths.md`.
+Default names are `*.homeflix` ([ADR-0010](../decisions/adr-0010-lan-dns-naming.md)).
+They must resolve on the LAN via router DNS / Pi-hole / AdGuard / `/etc/hosts`.
+`.homeflix` is not reserved — serve it locally so queries do not leak. `home.arpa` is
+the RFC 8375 alternative. `.local` is mDNS-only. See
+[docs/quickstart.md §7](../../docs/quickstart.md).
 
 ## Remote access for off-LAN family — drafted in ADR-0007 (gated on devices)
 

@@ -182,7 +182,7 @@ class HostFacts:
     host_dns_status: str
     host_dns_reason: str | None
     ssh_context: bool
-    lan_dns_domain: str = "local"
+    lan_dns_domain: str = "homeflix"
     lan_dns_status: str = "unknown"
     lan_dns_services: tuple[LanDnsServiceFact, ...] = ()
     lan_network: LanNetworkFact = LanNetworkFact()
@@ -651,7 +651,7 @@ def _environment(runner: Runner) -> Mapping[str, str]:
     return environment if isinstance(environment, Mapping) else os.environ
 
 
-def discover_host(runner: Runner, *, domain: str = "local") -> HostFacts:
+def discover_host(runner: Runner, *, domain: str = "homeflix") -> HostFacts:
     """Collect host facts without creating files, containers, or setup state."""
 
     normalized_domain = domain.strip().strip(".").casefold()

@@ -63,6 +63,7 @@ to run it, you want [`docs/`](../docs/) instead —
 - [ADR-0006: Traefik proxy; remote access OPEN](decisions/adr-0006-traefik-local-remote-access-open.md) — Proposed
 - [ADR-0007: remote access — Tailscale primary, Cloudflare fallback](decisions/adr-0007-remote-access.md) — Proposed (gated on device inventory)
 - [ADR-0008: single-filesystem `/data` root, hardlink imports](decisions/adr-0008-single-filesystem-data-root-hardlinks.md) — Accepted (supersedes 0003)
+- [ADR-0010: LAN DNS naming — ship `homeflix`, not `.local`](decisions/adr-0010-lan-dns-naming.md) — Accepted
 
 ### Tasks
 - [active.md](tasks/active.md) · [parking-lot.md](tasks/parking-lot.md) · [completed.md](tasks/completed.md)
