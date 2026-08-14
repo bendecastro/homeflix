@@ -14,6 +14,17 @@ docker compose --env-file .env.example config --format json
 Renders Compose once, then checks VPN namespace, *arr `/data` binds, self-heal pair,
 proxy route ownership, pinned proxy subnet, and disjoint phase allowlists.
 
+## Core runtime verification (read-only)
+
+```bash
+scripts/homeflix --json verify core
+```
+
+Inspects live Docker, the static stack contract, core service readiness, DATA_ROOT
+`/data` identity, a cleaned-up hardlink probe, and application exactness. Unselected
+QuickSync is not-applicable. Any mandatory unknown or skip fails the command. Does
+not start, stop, or restart Compose services.
+
 ## Stack lifecycle (from the deploy dir on the host)
 
 ```bash

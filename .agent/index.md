@@ -7,10 +7,10 @@ running homeflix.
 > **Status:** the portable stack is Compose-valid, and the existing-storage
 > [agent-first core setup](project/agent-first-core-setup-plan.md) is fixture-accepted with
 > resumable verification. The [deep operations PRD](../docs/changes/deep-homeflix-operations/prd.md)
-> is queued as parent **#3**. Slice **#4** (rendered stack contract) is implemented in
-> this tree: `verify contract`, self-heal pair, phase allowlists, and CI. Remaining
-> slices **#5–#13** cover reconciliation, verification modes, backup recovery, and
-> acquisition. Disposable-host and private-production live acceptance remain separate.
+> is queued as parent **#3**. Slices **#4** (stack contract) and **#5** (truthful
+> `verify core`) are implemented in this tree. Remaining slices **#6–#13** cover
+> reconciliation, backup recovery, and acquisition. Disposable-host and
+> private-production live acceptance remain separate.
 
 **Two doors.** This wiki explains *why* homeflix is built the way it is. If you just want
 to run it, you want [`docs/`](../docs/) instead —

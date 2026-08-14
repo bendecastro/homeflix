@@ -321,3 +321,26 @@ class VerifyContractCliTests(unittest.TestCase):
         for name in secrets:
             self.assertNotIn(name, combined)
 
+
+class VerifyCoreCliTests(unittest.TestCase):
+    def test_json_verify_core_exits_1_on_unknown_and_does_not_steal_findings(self) -> None:
+        payload = {
+            "status": "failed",
+            "passed": False,
+            "checks": [
+                {"domain": "docker", "status": "unknown", "reason": "docker daemon could not be inspected"},
+            ],
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            with patch("scripts.homeflix_setup.cli.verify_core", return_value=payload):
+                code, stdout, stderr = run_main("--json", "verify", "core", repository_root=root)
+        self.assertEqual(code, 1)
+        self.assertEqual(stderr, "")
+        result = parse_single_json(stdout)
+        self.assertFalse(result["passed"])
+        self.assertEqual(result["status"], "failed")
+        self.assertNotIn("findings", result)
+        self.assertEqual(result["checks"][0]["status"], "unknown")
+        self.assertNotIn("127.0.0.1", stdout)
+

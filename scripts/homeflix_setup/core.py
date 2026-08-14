@@ -13,6 +13,7 @@ import subprocess
 import time
 from typing import Callable, Mapping, Sequence
 from urllib import error, request
+import uuid
 
 from .api import ApiError, ArrClient, JellyfinClient, JellyseerrClient, read_api_key, read_settings_api_key
 from .api.client import Transport, urllib_transport
@@ -462,8 +463,28 @@ def configure_core(
     }
 
 
-def _check(domain: str, passed: bool | None, reason: str) -> dict[str, object]:
-    return {"domain": domain, "status": "pass" if passed is True else "fail" if passed is False else "unknown", "reason": reason}
+_CHECK_STATUSES = ("pass", "warning", "failure", "not-applicable", "unknown")
+
+
+def _check(domain: str, passed: bool | None, reason: str, *, status: str | None = None) -> dict[str, object]:
+    if status is None:
+        status = "pass" if passed is True else "failure" if passed is False else "unknown"
+    if status not in _CHECK_STATUSES:
+        raise ValueError("verification check status is invalid")
+    return {"domain": domain, "status": status, "reason": reason}
+
+
+def _application_check(
+    domain: str,
+    observed: Mapping[str, object],
+    required: Sequence[str],
+    success: str,
+    mismatch: str,
+) -> dict[str, object]:
+    if not required or any(name not in observed or not isinstance(observed[name], bool) for name in required):
+        return _check(domain, None, f"{domain} state could not be inspected")
+    exact = all(observed[name] is True for name in required)
+    return _check(domain, exact, success if exact else mismatch)
 
 
 def _inspect_quicksync(root: Path, runner: CommandRunner, project_name: str, *, deadline: float | None = None, clock: Callable[[], float] = time.monotonic) -> bool | None:
@@ -524,6 +545,168 @@ def _inspect_quicksync(root: Path, runner: CommandRunner, project_name: str, *, 
     return rendered_ok and live_ok
 
 
+def _evaluate_runtime_contract(
+    root: Path,
+    runner: CommandRunner,
+    project_name: str | None,
+    *,
+    timeout: float,
+) -> Mapping[str, object]:
+    from .contract import evaluate_stack_contract
+
+    if timeout <= 0:
+        raise TimeoutError("core operation deadline exhausted")
+    rendered = runner.run(
+        (*compose_command(root, project_name=project_name), "config", "--format", "json"),
+        check=False,
+        timeout=min(30.0, timeout),
+    )
+    if rendered.returncode:
+        raise RuntimeError("rendered Compose configuration is unavailable")
+    try:
+        mapping = json.loads(rendered.stdout)
+    except json.JSONDecodeError as error:
+        raise ValueError("rendered Compose configuration was malformed") from error
+    if not isinstance(mapping, Mapping):
+        raise ValueError("rendered Compose configuration was malformed")
+    return evaluate_stack_contract(mapping)
+
+
+def _contract_check(report: Mapping[str, object] | None) -> dict[str, object]:
+    if report is None:
+        return _check("stack_contract", None, "stack contract could not be inspected")
+    findings = report.get("findings")
+    if not isinstance(findings, list):
+        return _check("stack_contract", None, "stack contract could not be inspected")
+    if not findings:
+        return _check("stack_contract", True, "stack contract holds")
+    codes = []
+    for item in findings:
+        if isinstance(item, Mapping) and isinstance(item.get("code"), str) and item["code"].isascii():
+            codes.append(item["code"])
+    reason = "stack contract findings present"
+    if codes:
+        reason = "stack contract findings: " + ", ".join(dict.fromkeys(codes))
+    return _check("stack_contract", False, reason)
+
+
+def _probe_hardlink_outcome(config: EnvDocument) -> bool | None:
+    configured = config.get("DATA_ROOT")
+    if not configured:
+        return None
+    data_root = Path(configured).expanduser()
+    torrents = data_root / "torrents"
+    media = data_root / "media"
+    if not torrents.is_dir() or not media.is_dir():
+        return None
+    token = uuid.uuid4().hex
+    source = torrents / f".homeflix-verify-{token}"
+    link = media / f".homeflix-verify-{token}"
+    created_source = False
+    created_link = False
+    try:
+        descriptor = os.open(source, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+        created_source = True
+        try:
+            os.write(descriptor, b"homeflix-verify\n")
+            source_stat = os.fstat(descriptor)
+        finally:
+            os.close(descriptor)
+        os.link(source, link)
+        created_link = True
+        link_stat = os.lstat(link)
+        return (source_stat.st_dev, source_stat.st_ino) == (link_stat.st_dev, link_stat.st_ino)
+    except OSError:
+        return False
+    finally:
+        for path, created in ((link, created_link), (source, created_source)):
+            if not created:
+                continue
+            try:
+                path.unlink()
+            except FileNotFoundError:
+                continue
+            except OSError:
+                pass
+
+
+def _inspect_data_mount(
+    root: Path,
+    config: EnvDocument,
+    runner: CommandRunner,
+    project_name: str | None,
+    *,
+    deadline: float,
+    clock: Callable[[], float],
+) -> bool | None:
+    configured = config.get("DATA_ROOT")
+    if not configured:
+        return None
+    try:
+        data_root = Path(configured).expanduser()
+        if not data_root.is_absolute():
+            return None
+        expected = data_root.resolve(strict=True).stat()
+        expected_id = (expected.st_dev, expected.st_ino)
+    except OSError:
+        return None
+
+    prefix = compose_command(root, project_name=project_name)
+    observed = 0
+    for service in ("radarr", "sonarr"):
+        remaining = deadline - clock()
+        if remaining <= 0:
+            raise TimeoutError("core operation deadline exhausted")
+        container = runner.run((*prefix, "ps", "--quiet", service), check=False, timeout=min(30.0, remaining))
+        identifier = container.stdout.strip()
+        if container.returncode or re.fullmatch(r"[a-f0-9]{12,64}", identifier) is None:
+            return None
+        remaining = deadline - clock()
+        if remaining <= 0:
+            raise TimeoutError("core operation deadline exhausted")
+        inspected = runner.run(
+            ("docker", "inspect", "--format", "{{json .Mounts}}", identifier),
+            check=False, timeout=min(30.0, remaining),
+        )
+        if inspected.returncode:
+            return None
+        try:
+            mounts = json.loads(inspected.stdout)
+        except json.JSONDecodeError:
+            return None
+        if not isinstance(mounts, list):
+            return None
+        matches = [
+            item for item in mounts
+            if isinstance(item, Mapping)
+            and item.get("Type", item.get("type")) in {None, "bind"}
+            and item.get("Destination", item.get("destination", item.get("Target", item.get("target")))) == "/data"
+        ]
+        if len(matches) != 1:
+            return False
+        source = matches[0].get("Source", matches[0].get("source"))
+        if not isinstance(source, str) or not source:
+            return False
+        try:
+            live = Path(source).resolve(strict=True).stat()
+        except OSError:
+            return False
+        if (live.st_dev, live.st_ino) != expected_id:
+            return False
+        observed += 1
+    return True if observed == 2 else None
+
+
+def _inspect_docker(runner: CommandRunner, *, timeout: float) -> bool | None:
+    if timeout <= 0:
+        raise TimeoutError("core operation deadline exhausted")
+    try:
+        inspected = runner.run(("docker", "info"), check=False, timeout=min(10.0, timeout))
+    except (FileNotFoundError, OSError, subprocess.SubprocessError):
+        return None
+    return inspected.returncode == 0
+
+
 def verify_core(
     repository_root: str | Path,
     *,
@@ -536,16 +719,67 @@ def verify_core(
     clock: Callable[[], float] = time.monotonic,
     deadline: float | None = None,
     quicksync_inspector: Callable[..., bool | None] = _inspect_quicksync,
+    docker_inspector: Callable[..., bool | None] = _inspect_docker,
+    contract_evaluator: Callable[..., Mapping[str, object]] | None = None,
+    mount_inspector: Callable[..., bool | None] = _inspect_data_mount,
+    hardlink_prober: Callable[..., bool | None] = _probe_hardlink_outcome,
 ) -> dict[str, object]:
     """Inspect live core state. Checkpoints are never consulted or changed."""
     root = Path(repository_root).resolve()
     command_runner = runner or CommandRunner()
     operation_deadline = deadline if deadline is not None else clock() + max(0.0, readiness_timeout)
     checks: list[dict[str, object]] = []
+
+    def record_docker(observed: bool | None) -> None:
+        if observed is True:
+            checks.append(_check("docker", True, "docker daemon is reachable"))
+        elif observed is False:
+            checks.append(_check("docker", False, "docker daemon is unavailable"))
+        else:
+            checks.append(_check("docker", None, "docker daemon could not be inspected"))
+
+    try:
+        if docker_inspector is _inspect_docker:
+            remaining = operation_deadline - clock()
+            if remaining <= 0:
+                raise TimeoutError("core operation deadline exhausted")
+            docker = docker_inspector(command_runner, timeout=remaining)
+        else:
+            if clock() >= operation_deadline:
+                raise TimeoutError("core operation deadline exhausted")
+            docker = docker_inspector(root, command_runner, "homeflix")
+        record_docker(docker)
+    except (OSError, RuntimeError, ValueError, subprocess.SubprocessError, TimeoutError):
+        record_docker(None)
+
     try:
         config = _load_private_environment(root / ".env")
         project_name = config.get("COMPOSE_PROJECT_NAME")
         project_ok = project_name == "homeflix"
+    except (OSError, RuntimeError, ValueError):
+        config = None
+        project_name = None
+        project_ok = False
+
+    try:
+        remaining = operation_deadline - clock()
+        if remaining <= 0:
+            raise TimeoutError("core operation deadline exhausted")
+        if contract_evaluator is None:
+            if config is None:
+                raise ValueError("environment configuration is unavailable")
+            report = _evaluate_runtime_contract(
+                root, command_runner, project_name, timeout=remaining,
+            )
+        else:
+            report = contract_evaluator(root)
+        checks.append(_contract_check(report))
+    except (OSError, RuntimeError, ValueError, TypeError, KeyError, subprocess.SubprocessError, TimeoutError):
+        checks.append(_contract_check(None))
+
+    try:
+        if config is None:
+            raise ValueError("environment configuration is unavailable")
         remaining = operation_deadline - clock()
         if remaining <= 0:
             raise TimeoutError("core operation deadline exhausted")
@@ -555,12 +789,24 @@ def verify_core(
             raise ValueError("Compose service inventory contained an unknown project service")
         projects_ok = bool(inventory) and all(item["project"] == "homeflix" for item in inventory)
         checks.append(_check("compose_project", project_ok and projects_ok, "expected project scope observed" if project_ok and projects_ok else "expected project scope was not observed"))
-    except (OSError, RuntimeError, ValueError, subprocess.SubprocessError):
-        checks = [_check("compose_project", None, "project scope could not be inspected")]
-        checks.extend(_check(f"service:{service}", None, "service readiness could not be inspected") for service in CORE_SERVICES)
-        checks.append(_check("acquisition_absent", None, "project service inventory could not be inspected"))
-        checks.extend(_check(domain, None, f"{domain} state could not be inspected") for domain in ("jellyfin", "radarr", "sonarr", "jellyseerr"))
-        checks.append(_check("quicksync", None, "device selection could not be inspected"))
+    except (OSError, RuntimeError, ValueError, subprocess.SubprocessError, TimeoutError):
+        exhausted = clock() >= operation_deadline
+        if not any(item["domain"] == "docker" for item in checks):
+            record_docker(None)
+        if not any(item["domain"] == "stack_contract" for item in checks):
+            checks.append(_contract_check(None))
+        scope_reason = "time budget exhausted" if exhausted else "project scope could not be inspected"
+        service_reason = "time budget exhausted" if exhausted else "service readiness could not be inspected"
+        inventory_reason = "time budget exhausted" if exhausted else "project service inventory could not be inspected"
+        app_reason = "time budget exhausted" if exhausted else "state could not be inspected"
+        quicksync_reason = "time budget exhausted" if exhausted else "device selection could not be inspected"
+        checks.append(_check("compose_project", None, scope_reason))
+        checks.extend(_check(f"service:{service}", None, service_reason) for service in CORE_SERVICES)
+        checks.append(_check("acquisition_absent", None, inventory_reason))
+        checks.append(_check("mount", None, "time budget exhausted" if exhausted else "data mount identity could not be inspected"))
+        checks.append(_check("hardlink_outcome", None, "time budget exhausted" if exhausted else "hardlink outcome could not be inspected"))
+        checks.extend(_check(domain, None, f"{domain} {app_reason}") for domain in ("jellyfin", "radarr", "sonarr", "jellyseerr"))
+        checks.append(_check("quicksync", None, quicksync_reason))
         return {"status": "failed", "passed": False, "checks": checks}
 
     by_service = {item["service"]: item for item in inventory}
@@ -581,6 +827,45 @@ def verify_core(
     absent = not present_non_core
     checks.append(_check("acquisition_absent", absent, "acquisition services are absent" if absent else "Non-core project services present: " + ", ".join(present_non_core)))
 
+    try:
+        if mount_inspector is _inspect_data_mount:
+            mount = mount_inspector(
+                root, config, command_runner, project_name,
+                deadline=operation_deadline, clock=clock,
+            )
+        else:
+            if clock() >= operation_deadline:
+                raise TimeoutError("core operation deadline exhausted")
+            mount = mount_inspector(root, command_runner, "homeflix")
+        if mount is True:
+            checks.append(_check("mount", True, "DATA_ROOT and live /data binds share one identity"))
+        elif mount is False:
+            checks.append(_check("mount", False, "DATA_ROOT and live /data binds disagree or are missing"))
+        else:
+            checks.append(_check("mount", None, "data mount identity could not be inspected"))
+    except (OSError, RuntimeError, ValueError, subprocess.SubprocessError, TimeoutError):
+        reason = "time budget exhausted" if clock() >= operation_deadline else "data mount identity could not be inspected"
+        checks.append(_check("mount", None, reason))
+
+    try:
+        if hardlink_prober is _probe_hardlink_outcome:
+            if clock() >= operation_deadline:
+                raise TimeoutError("core operation deadline exhausted")
+            hardlink = hardlink_prober(config)
+        else:
+            if clock() >= operation_deadline:
+                raise TimeoutError("core operation deadline exhausted")
+            hardlink = hardlink_prober(root, command_runner, "homeflix")
+        if hardlink is True:
+            checks.append(_check("hardlink_outcome", True, "probe shared one device and inode"))
+        elif hardlink is False:
+            checks.append(_check("hardlink_outcome", False, "probe did not share one device and inode"))
+        else:
+            checks.append(_check("hardlink_outcome", None, "hardlink outcome could not be inspected"))
+    except (OSError, RuntimeError, ValueError, subprocess.SubprocessError, TimeoutError):
+        reason = "time budget exhausted" if clock() >= operation_deadline else "hardlink outcome could not be inspected"
+        checks.append(_check("hardlink_outcome", None, reason))
+
     values = {key: config.get(key) for key in ("JELLYFIN_ADMIN_USER", "JELLYFIN_ADMIN_PASSWORD", "CONFIG_ROOT", "PUID", "QUALITY_PROFILE")}
     chosen = dict(transports or {})
     runtime: dict[str, tuple[dict[str, object], dict[str, object]]] = {}
@@ -591,21 +876,18 @@ def verify_core(
         if clock() >= operation_deadline:
             raise TimeoutError("core operation deadline exhausted")
         jf = JellyfinClient(transport=chosen.get("jellyfin", urllib_transport), deadline=operation_deadline, clock=clock).inspect(values["JELLYFIN_ADMIN_USER"] or "", values["JELLYFIN_ADMIN_PASSWORD"] or "")
-        jf_ok = jf["initialized"] is True and jf["libraries_exact"] is True
-        checks.append(_check("jellyfin", jf_ok, "initialized with exact libraries" if jf_ok else "initialization or exact libraries differ"))
+        checks.append(_application_check("jellyfin", jf, ("initialized", "libraries_exact"), "initialized with exact libraries", "initialization or exact libraries differ"))
         for service, media_path in (("radarr", "/data/media/movies"), ("sonarr", "/data/media/tv")):
             key = api_key_reader(values["CONFIG_ROOT"] or "", service, uid)
             domain = config.get("DOMAIN") or ""
             inspected = ArrClient(service, "http://127.0.0.1", key, headers={"Host": f"{service}.{domain}"}, transport=chosen.get(service, urllib_transport), deadline=operation_deadline, clock=clock).inspect(values["QUALITY_PROFILE"] or "", media_path)
-            ok = all(inspected[name] is True for name in ("profile_exact", "root_exact", "media_settings", "completed_handling"))
-            checks.append(_check(service, ok, "selected profile, root, and media settings match" if ok else "selected profile, root, or media settings differ"))
-            if inspected["runtime_root"] is not None:
+            checks.append(_application_check(service, inspected, ("profile_exact", "root_exact", "media_settings", "completed_handling"), "selected profile, root, and media settings match", "selected profile, root, or media settings differ"))
+            if inspected.get("runtime_root") is not None:
                 runtime[service] = (inspected["runtime_profile"], inspected["runtime_root"])  # type: ignore[assignment]
         seerr = JellyseerrClient(headers={"Host": f"jellyseerr.{config.get('DOMAIN') or ''}"}, transport=chosen.get("jellyseerr", urllib_transport), deadline=operation_deadline, clock=clock)
         seerr.authorize(settings_key_reader(values["CONFIG_ROOT"] or "", uid))
         inspected_seerr = seerr.inspect(runtime)
-        seerr_ok = all(value is True for value in inspected_seerr.values())
-        checks.append(_check("jellyseerr", seerr_ok, "initialized with exact internal default services" if seerr_ok else "initialization or internal default services differ"))
+        checks.append(_application_check("jellyseerr", inspected_seerr, tuple(inspected_seerr), "initialized with exact internal default services", "initialization or internal default services differ"))
     except ApiError as caught:
         existing = {item["domain"] for item in checks}
         reason = "time budget exhausted" if caught.code == "deadline_exhausted" else "state could not be inspected"
@@ -626,19 +908,54 @@ def verify_core(
             if clock() >= operation_deadline:
                 raise TimeoutError("core operation deadline exhausted")
             quicksync = quicksync_inspector(root, command_runner, "homeflix")
-        checks.append(
-            _check(
-                "quicksync",
-                True if quicksync is None else quicksync,
-                "not selected" if quicksync is None else
-                "rendered and live device mappings match" if quicksync else
-                "rendered or live device mapping is invalid",
+        if quicksync is None:
+            checks.append(_check("quicksync", None, "not selected", status="not-applicable"))
+        else:
+            checks.append(
+                _check(
+                    "quicksync",
+                    quicksync,
+                    "rendered and live device mappings match" if quicksync else
+                    "rendered or live device mapping is invalid",
+                )
             )
-        )
     except (OSError, RuntimeError, ValueError, subprocess.SubprocessError):
         checks.append(_check("quicksync", None, "device mapping could not be inspected"))
-    passed = all(item["status"] == "pass" for item in checks)
+    passed = _runtime_passed(checks)
     return {"status": "verified" if passed else "failed", "passed": passed, "checks": checks}
+
+
+_MANDATORY_DOMAINS = frozenset({
+    "docker",
+    "stack_contract",
+    "compose_project",
+    *(f"service:{service}" for service in CORE_SERVICES),
+    "acquisition_absent",
+    "mount",
+    "hardlink_outcome",
+    "jellyfin",
+    "radarr",
+    "sonarr",
+    "jellyseerr",
+})
+
+
+def _runtime_passed(checks: Sequence[Mapping[str, object]]) -> bool:
+    """Optional not-applicable must not wash mandatory unknown, skip, or failure."""
+
+    observed = {item.get("domain") for item in checks}
+    if not _MANDATORY_DOMAINS.issubset(observed):
+        return False
+    for item in checks:
+        status = item.get("status")
+        domain = item.get("domain")
+        if status == "not-applicable":
+            if domain in _MANDATORY_DOMAINS:
+                return False
+            continue
+        if status not in {"pass", "warning"}:
+            return False
+    return True
 
 
 def reconcile_core(repository_root: str | Path, **kwargs: object) -> dict[str, object]:
@@ -677,7 +994,7 @@ def reconcile_core(repository_root: str | Path, **kwargs: object) -> dict[str, o
         raise
     if operation_clock() >= operation_deadline:
         return {"status": "timeout", "deploy": deploy, "configure": configured, "reason": "Core reconciliation deadline was exhausted"}
-    verified = verify_core(root, deadline=operation_deadline, **{key: value for key, value in kwargs.items() if key in {"runner", "transports", "api_key_reader", "settings_key_reader", "http_waiter", "clock", "quicksync_inspector"}})
+    verified = verify_core(root, deadline=operation_deadline, **{key: value for key, value in kwargs.items() if key in {"runner", "transports", "api_key_reader", "settings_key_reader", "http_waiter", "clock", "quicksync_inspector", "docker_inspector", "contract_evaluator", "mount_inspector", "hardlink_prober"}})
     if not verified["passed"]:
         return {"status": "verification_failed", "deploy": deploy, "configure": configured, "verify": verified}
     state_path = root / ".homeflix" / "setup.json"

@@ -481,3 +481,12 @@ Rework of #4: present *arr `/data` binds must share one host source (no represen
 service is treated as DATA_ROOT). Gluetun proxy ownership requires the load-bearing
 `traefik.http.routers.<svc>.rule` Host rule; leftover `.service` keys are not enough.
 
+## [2026-08-14] build | Truthful core runtime verification
+
+Issue #5: `verify_core` / `homeflix --json verify core` stays read-only, reuses
+`evaluate_stack_contract`, and fails closed when Docker, mount identity, hardlink
+outcome, or any other mandatory domain is unknown, skipped, or absent. Check status
+vocabulary is pass | warning | failure | not-applicable | unknown. Unselected
+QuickSync is not-applicable and cannot wash mandatory unknowns. Envelope is still
+`status`/`passed`/`checks`; `findings` remain `verify contract` only.
+

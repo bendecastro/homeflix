@@ -53,6 +53,13 @@ wiki — read the rows that match what you're doing.
 - `project/deployment.md` (self-heal pair and phase allowlists)
 - `references/commands.md`
 
+## Runtime verification work
+
+- `docs/specs/verification.md`
+- `scripts/homeflix_setup/core.py` (`verify_core`)
+- `scripts/homeflix_setup/contract.py` (reused, not duplicated)
+- `references/commands.md`
+
 ## Workflow or agent-behavior work
 
 - `AGENTS.md`
