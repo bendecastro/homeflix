@@ -30,13 +30,15 @@ Phase 0 is largely complete — the focus is reconcile → deploy → verify →
 - **Exit:** reboot is clean; HDD auto-mounts; runtime up.
 
 ## Phase 2 — Media server up
-- [ ] Deploy Traefik + Gluetun + Jellyfin; create admin + one family account.
+- [ ] Deploy the core allowlist (Traefik, Jellyfin, Jellyseerr, Radarr, Sonarr); create
+      admin + one family account. Do not start Gluetun or acquisition services.
 - [ ] Add libraries (`/data/media/{movies,tv,music}`); play a test file on a real family
       device on LAN. Confirm direct play / transcode.
 - **Exit:** a family member plays something on the LAN.
 
 ## Phase 3 — Acquisition loop
-- [ ] Bring up qBittorrent/NZBGet/Prowlarr (VPN) + Radarr/Sonarr/Lidarr/Bazarr +
+- [ ] Verify and bring up Gluetun, then qBittorrent/NZBGet/Prowlarr (VPN) +
+      Radarr/Sonarr/Lidarr/Bazarr +
       Jellyseerr. Verify VPN IP + kill switch.
 - [ ] Enable hardlink imports, set root folders under `/data/media`, categories, download
       client `gluetun:<port>`.
@@ -51,7 +53,8 @@ Phase 0 is largely complete — the focus is reconcile → deploy → verify →
 - [ ] Implement [ADR-0007](../decisions/adr-0007-remote-access.md): Tailscale on the
       the host, `tailscale serve` for Jellyfin, share node to family (+ Cloudflare Tunnel
       only if a locked-down TV needs it).
-- [ ] Document LAN DNS for `*.local`.
+- [ ] Document LAN DNS for the configured `*.homeflix` default (`home.arpa` alternative;
+      `.local` only for actual mDNS).
 - [ ] Harden Traefik dashboard (remove `api.insecure` / add auth); real TLS where exposed.
 - **Exit:** an off-LAN family member signs in and plays.
 

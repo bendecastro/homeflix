@@ -6,9 +6,10 @@ running homeflix.
 
 > **Status:** the portable stack is Compose-valid, and the existing-storage
 > [agent-first core setup](project/agent-first-core-setup-plan.md) is fixture-accepted with
-> resumable verification. It has not been accepted on a disposable real host; encrypted
-> storage and acquisition remain follow-up slices. See [agent setup](../docs/agent-setup.md)
-> and [overview](project/overview.md).
+> resumable verification. The [deep operations PRD](../docs/changes/deep-homeflix-operations/prd.md)
+> is now queued as parent **#3**, with ready-for-agent slices **#4–#13** covering the stack
+> contract, reconciliation, verification, backup recovery, and acquisition. Disposable-host
+> and private-production live acceptance remain separate.
 
 **Two doors.** This wiki explains *why* homeflix is built the way it is. If you just want
 to run it, you want [`docs/`](../docs/) instead —
@@ -40,7 +41,7 @@ to run it, you want [`docs/`](../docs/) instead —
 - [agent-first-setup.md](project/agent-first-setup.md) — approved agent-led onboarding design
 - [agent-first-core-setup-plan.md](project/agent-first-core-setup-plan.md) — completed fixture-accepted core slice
 - [agent-first-storage-plan.md](project/agent-first-storage-plan.md) — guarded encrypted-storage slice
-- [agent-first-acquisition-plan.md](project/agent-first-acquisition-plan.md) — VPN/acquisition slice
+- [agent-first-acquisition-plan.md](project/agent-first-acquisition-plan.md) — superseded by the deep operations PRD/queue
 
 ### References
 - [source-research.md](references/source-research.md) — provenance: the prior private package this builds on

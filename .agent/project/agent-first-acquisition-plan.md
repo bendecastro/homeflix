@@ -1,7 +1,7 @@
 # Agent-first Acquisition Setup Implementation Plan
 
-Status: Proposed
-Updated: 2026-08-04
+Status: Superseded by [Deep Homeflix operations](../../docs/changes/deep-homeflix-operations/prd.md) / parent #3
+Updated: 2026-08-14
 
 **Goal:** Resume a verified core deployment into a VPN-gated acquisition stack, with secure provider-secret entry, demonstrated tunnel/fail-closed behavior, and automated connections among download clients, Prowlarr, Radarr, and Sonarr.
 
@@ -9,7 +9,7 @@ Updated: 2026-08-04
 
 **Tech stack:** Python 3 standard library, `unittest`, Docker Compose v2, Gluetun, qBittorrent Web API, NZBGet JSON-RPC, Prowlarr/Radarr/Sonarr API v3.
 
-**Execution note:** Work task-by-task. Use TDD where behavior changes. Verify and commit each task independently.
+**Execution note:** Do not execute this page as a separate plan. Its accepted safety decisions and remaining work were absorbed into public issues #9–#13 so there is one dependency-ordered queue.
 
 ---
 

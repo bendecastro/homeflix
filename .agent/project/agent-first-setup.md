@@ -106,8 +106,9 @@ Direct host ports provide a working fallback while LAN DNS remains unconfigured.
    fully initialized and verified core stack.
 2. [Encrypted storage provisioning](agent-first-storage-plan.md): optional guarded LUKS2 and
    ext4 preparation plus recovery artifacts.
-3. [Acquisition setup](agent-first-acquisition-plan.md): secure VPN handoff, kill-switch gate,
-   and download/indexer integration.
+3. [Deep Homeflix operations](../../docs/changes/deep-homeflix-operations/prd.md), issues
+   #9–#13: secure VPN handoff, kill-switch gate, and download/indexer integration. This
+   supersedes the earlier acquisition implementation plan.
 
 Each slice is independently testable and useful. Core setup ships first.
 

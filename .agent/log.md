@@ -456,3 +456,13 @@ household facts):
 This compose still does not pair VPN'd services with deunhealth healthchecks;
 that hole is documented rather than silently claimed fixed.
 
+## [2026-08-14] decision | Deep operations PRD and issue queue
+
+Recorded the generalized architecture program under
+`docs/changes/deep-homeflix-operations/`: executable rendered-Compose stack contract,
+reliable core/acquisition reconciliation, explicit verification modes, and fail-closed
+backup recovery. Parent #3 coordinates ready-for-agent issues #4–#13. The prior proposed
+acquisition plan is superseded and absorbed; its VPN gates and secret-handling decisions
+remain. Added living specs and the canonical glossary. Fixture acceptance remains distinct
+from private-production live acceptance.
+
