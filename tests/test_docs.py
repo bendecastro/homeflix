@@ -19,6 +19,7 @@ CHECKED_DOCS = (
     ROOT / "docs" / "agent-setup.md",
     ROOT / "docs" / "configuration.md",
 )
+STACK_CONTRACT_WORKFLOW = ROOT / ".github" / "workflows" / "stack-contract.yml"
 LINK_PATTERN = re.compile(r"(?<!!)\[[^\]]*\]\(([^)]+)\)")
 
 
@@ -81,6 +82,12 @@ class DocumentationContractTests(unittest.TestCase):
         self.assertIn("BACKUP_KEEP=7", template)
         for private_value in ("/mnt/sidecar", "Europe/Lisbon", "/home/ben", "beelink"):
             self.assertNotIn(private_value, template)
+
+    def test_stack_contract_ci_renders_example_env_and_runs_cli_json(self) -> None:
+        workflow = STACK_CONTRACT_WORKFLOW.read_text(encoding="utf-8")
+        self.assertIn("docker compose --env-file .env.example config --format json", workflow)
+        self.assertIn("scripts/homeflix --json verify contract", workflow)
+        self.assertNotIn("config --quiet", workflow)
 
     def test_glances_does_not_mount_docker_socket(self) -> None:
         compose = (ROOT / "docker-compose.yml").read_text(encoding="utf-8")

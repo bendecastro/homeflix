@@ -46,6 +46,13 @@ wiki — read the rows that match what you're doing.
 - `references/commands.md`
 - `project/hardware.md`
 
+## Stack-contract / static verification work
+
+- `docs/specs/stack-contract.md`
+- `scripts/homeflix_setup/contract.py`
+- `project/deployment.md` (self-heal pair and phase allowlists)
+- `references/commands.md`
+
 ## Workflow or agent-behavior work
 
 - `AGENTS.md`

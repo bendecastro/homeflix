@@ -12,6 +12,12 @@ Host OS, runtime, how the stack is defined/started, monitoring, and backups.
 - Debian on the mini-PC host; Docker + Docker Compose. See `project/hardware.md`.
 - One `docker-compose.yml` defines all services on the `traefik-network` bridge, plus
   the Gluetun netns for the three VPN services.
+- Static stack-contract checks live in `scripts/homeflix_setup/contract.py`. The module
+  is pure (no Docker). `scripts/homeflix --json verify contract` renders Compose once
+  (`docker compose --env-file .env|.env.example config --format json`) then evaluates
+  that mapping. Phase allowlists are `x-homeflix.phases` plus per-service
+  `x-homeflix.phase` (core vs acquisition) and must agree with `CORE_SERVICES` /
+  `NON_CORE_SERVICES`.
 
 ## The source stack
 
@@ -63,8 +69,9 @@ Also whether the wiki moves into the repo. See `tasks/active.md`.
 - **Glances** (`glances.${DOMAIN}`) — host CPU/mem/process via `pid: host`. No
   Docker socket (per-container stats dropped).
 - **deunhealth** — restarts unhealthy containers **only** where a `healthcheck` and
-  `deunhealth.restart.on.unhealthy=true` are both present. This compose does not yet
-  attach that pair to the VPN'd services.
+  `deunhealth.restart.on.unhealthy=true` are both present. qBittorrent, NZBGet, and
+  Prowlarr now carry that pair and probe Gluetun's namespace health server on
+  `127.0.0.1:9999` (not the app WebUI or `:8888`).
 - **Watchtower** — auto-update + cleanup, daily at 02:00.
 - All services `restart: unless-stopped`.
 - `depends_on: condition: service_healthy` applies to `docker compose up`, **not** to

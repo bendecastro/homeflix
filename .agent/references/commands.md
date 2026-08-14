@@ -4,6 +4,16 @@ Updated: 2026-08-14
 Source: prior private design package (see `references/source-research.md`). Verify on the host;
 summarize output, never paste secrets.
 
+## Stack contract (static; no running containers)
+
+```bash
+scripts/homeflix --json verify contract
+docker compose --env-file .env.example config --format json
+```
+
+Renders Compose once, then checks VPN namespace, *arr `/data` binds, self-heal pair,
+proxy route ownership, pinned proxy subnet, and disjoint phase allowlists.
+
 ## Stack lifecycle (from the deploy dir on the host)
 
 ```bash

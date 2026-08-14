@@ -275,6 +275,38 @@ def _validated_project_name(value: str | None) -> str:
     return normalized
 
 
+def render_compose_config(repository_root: str | os.PathLike[str]) -> dict[str, object]:
+    """Render Compose once to a mapping. The stack-contract module never calls this."""
+
+    root = Path(repository_root).resolve()
+    env_file = root / ".env" if (root / ".env").exists() else root / ".env.example"
+    result = subprocess.run(
+        (
+            "docker",
+            "compose",
+            "--project-directory",
+            str(root),
+            "--env-file",
+            str(env_file),
+            "config",
+            "--format",
+            "json",
+        ),
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        raise RuntimeError("rendered Compose configuration could not be produced")
+    try:
+        rendered = json.loads(result.stdout)
+    except json.JSONDecodeError as error:
+        raise RuntimeError("rendered Compose configuration was not valid JSON") from error
+    if not isinstance(rendered, dict):
+        raise RuntimeError("rendered Compose configuration was not an object")
+    return rendered
+
+
 def compose_command(
     repository_root: str | os.PathLike[str], *, project_name: str | None = None
 ) -> tuple[str, ...]:

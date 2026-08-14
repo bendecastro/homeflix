@@ -11,6 +11,8 @@ Updated: 2026-08-14
   executable stack contract, reliable first-use reconciliation, truthful verification
   modes, fail-closed backup recovery, and the absorbed acquisition phase. Issue map:
   [tasks.md](../../docs/changes/deep-homeflix-operations/tasks.md).
+- **In this worktree:** issue **#4** stack contract — pure module, `verify contract`
+  CLI, VPN self-heal pair, `x-homeflix` phase allowlists, and CI render+CLI job.
 - **Completed slice:** [Agent-first core setup](../project/agent-first-core-setup-plan.md),
   covering local Debian/Ubuntu discovery through API-initialized and verified core on existing
   mounted storage. All nine tasks passed fixture tests and independent spec plus

@@ -466,3 +466,18 @@ acquisition plan is superseded and absorbed; its VPN gates and secret-handling d
 remain. Added living specs and the canonical glossary. Fixture acceptance remains distinct
 from private-production live acceptance.
 
+## [2026-08-14] build | Stack contract module, verify contract, self-heal pair
+
+Issue #4: `scripts/homeflix_setup/contract.py` evaluates one already-rendered Compose
+mapping (no Docker). CLI is `scripts/homeflix --json verify contract`. Public compose
+now attaches the deunhealth + `:9999` healthcheck pair on every `container:gluetun`
+service and declares disjoint `x-homeflix` core/acquisition allowlists. CI renders
+`.env.example` with `config --format json` and runs the same CLI. Spec tags in
+`docs/specs/stack-contract.md` are satisfied for this slice.
+
+## [2026-08-14] build | Stack contract: *arr source agreement and Host-rule ownership
+
+Rework of #4: present *arr `/data` binds must share one host source (no representative
+service is treated as DATA_ROOT). Gluetun proxy ownership requires the load-bearing
+`traefik.http.routers.<svc>.rule` Host rule; leftover `.service` keys are not enough.
+

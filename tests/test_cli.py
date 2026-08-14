@@ -275,3 +275,49 @@ class StatusCliTests(unittest.TestCase):
         self.assertEqual(state_path.exists(), existed_before)
         if existed_before:
             self.assertEqual(state_path.read_bytes(), contents_before)
+
+
+class VerifyContractCliTests(unittest.TestCase):
+    def test_json_verify_contract_is_one_object_and_does_not_steal_verify_core(self) -> None:
+        code, stdout, stderr = run_main("--json", "verify", "contract", repository_root=REPOSITORY_ROOT)
+        self.assertEqual(code, 0, stderr + stdout)
+        payload = parse_single_json(stdout)
+        self.assertTrue(payload["passed"])
+        self.assertEqual(payload["status"], "pass")
+        self.assertEqual(payload["findings"], [])
+        self.assertNotIn("checks", payload)
+
+    def test_verify_contract_does_not_write_compose(self) -> None:
+        compose = REPOSITORY_ROOT / "docker-compose.yml"
+        before = compose.read_bytes()
+        code, stdout, stderr = run_main("--json", "verify", "contract", repository_root=REPOSITORY_ROOT)
+        self.assertEqual(code, 0, stderr + stdout)
+        self.assertEqual(compose.read_bytes(), before)
+
+    def test_verify_contract_output_stays_secret_free_for_example_and_fake_env(self) -> None:
+        code, stdout, stderr = run_main("--json", "verify", "contract", repository_root=REPOSITORY_ROOT)
+        self.assertEqual(code, 0, stderr)
+        combined = stdout + stderr
+        for name in ("VPN_PASSWORD", "OPENVPN_PASSWORD", "JELLYFIN_ADMIN_PASSWORD"):
+            self.assertNotIn(name, combined)
+
+        secrets = {
+            "VPN_PASSWORD": "vpn-secret-value",
+            "OPENVPN_PASSWORD": "openvpn-secret-value",
+            "JELLYFIN_ADMIN_PASSWORD": "jellyfin-secret-value",
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "docker-compose.yml").write_bytes((REPOSITORY_ROOT / "docker-compose.yml").read_bytes())
+            env = (REPOSITORY_ROOT / ".env.example").read_text(encoding="utf-8")
+            for key, value in secrets.items():
+                env = env.replace(f"{key}=", f"{key}={value}", 1)
+            (root / ".env").write_text(env, encoding="utf-8")
+            code, stdout, stderr = run_main("--json", "verify", "contract", repository_root=root)
+        self.assertEqual(code, 0, stderr + stdout)
+        combined = stdout + stderr
+        for value in secrets.values():
+            self.assertNotIn(value, combined)
+        for name in secrets:
+            self.assertNotIn(name, combined)
+

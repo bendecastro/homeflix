@@ -13,7 +13,8 @@ from typing import Sequence
 
 from .api import ApiError
 from .command import CommandRunner
-from .compose import configure
+from .compose import configure, render_compose_config
+from .contract import evaluate_stack_contract
 from .core import READINESS_TIMEOUT, _load_private_environment, configure_core, deploy_core, verify_core
 from .discover import HostFacts, discover_host
 from .envfile import EnvDocument
@@ -90,7 +91,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--dry-run", action="store_true", help="print exact planned commands without probing or changing the host"
     )
     verify_parser = subparsers.add_parser("verify", help="inspect a deployment phase without changing it")
-    verify_parser.add_argument("phase", choices=("core",))
+    verify_parser.add_argument("phase", choices=("core", "contract"))
     setup_parser = subparsers.add_parser("setup", help="run a resumable convenience setup composition")
     setup_parser.add_argument("phase", choices=("core",))
     setup_parser.add_argument("--dry-run", action="store_true")
@@ -258,6 +259,16 @@ def main(argv: Sequence[str] | None = None, *, repository_root: Path | None = No
                 code="initialization_refused",
                 label="API initialization refused",
                 error=RuntimeError("core APIs could not be configured safely"),
+            )
+    elif arguments.command == "verify" and arguments.phase == "contract":
+        try:
+            result = evaluate_stack_contract(render_compose_config(root))
+        except (OSError, RuntimeError, ValueError, subprocess.SubprocessError):
+            return _input_error(
+                json_output=arguments.json_output,
+                code="verification_refused",
+                label="verification refused",
+                error=RuntimeError("stack contract could not be verified safely"),
             )
     elif arguments.command == "verify" and arguments.phase == "core":
         try:
@@ -428,6 +439,12 @@ def main(argv: Sequence[str] | None = None, *, repository_root: Path | None = No
                     f"{item['service']}: state={item['current_state']} "
                     f"ready={str(item['ready']).lower()} reason={item['reason']}"
                 )
+    elif arguments.command == "verify" and arguments.phase == "contract":
+        print(f"Stack contract: {result['status']}")
+        for item in result["findings"]:
+            service = item.get("service")
+            target = f"{item['code']}: {service}" if service else str(item["code"])
+            print(f"FAIL: {target}: {item['message']}")
     elif arguments.command in {"verify", "setup"}:
         print(f"Core {arguments.command}: {result['status']}")
         if arguments.command == "verify":
