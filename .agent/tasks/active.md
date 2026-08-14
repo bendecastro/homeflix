@@ -11,10 +11,12 @@ Updated: 2026-08-14
   executable stack contract, reliable first-use reconciliation, truthful verification
   modes, fail-closed backup recovery, and the absorbed acquisition phase. Issue map:
   [tasks.md](../../docs/changes/deep-homeflix-operations/tasks.md).
-- **In this worktree:** issue **#9** secure acquisition VPN gate — `secrets vpn`
-  for tty-only provider secrets; `vpn verify` (and `--dry-run`) for contract +
-  acquisition preflight + Gluetun-only start + health/DNS/egress evidence.
-  `compose_up` stays CORE_SERVICES-only. Fail-closed disruption remains #10.
+- **In this worktree:** issue **#10** VPN fail-closed prove-and-restore —
+  `verify vpn --disrupt` / `vpn verify --disrupt` requires current #9 evidence,
+  classifies only the active tunnel, proves blocked egress, and restores Gluetun
+  plus previously running namespace-dependent services on every exit. Routine
+  `verify core` / `vpn verify` stay non-destructive. Issue **#9** remains the
+  non-disruptive gate (`secrets vpn`, `vpn verify`).
 - **Completed slice:** [Agent-first core setup](../project/agent-first-core-setup-plan.md),
   covering local Debian/Ubuntu discovery through API-initialized and verified core on existing
   mounted storage. All nine tasks passed fixture tests and independent spec plus

@@ -64,7 +64,7 @@ wiki — read the rows that match what you're doing.
 
 - `docs/specs/verification.md` and `docs/specs/setup-reconciliation.md`
 - `scripts/homeflix_setup/secrets.py` (`secrets vpn`)
-- `scripts/homeflix_setup/vpn.py` (`vpn verify`)
+- `scripts/homeflix_setup/vpn.py` (`vpn verify`, `verify vpn --disrupt`)
 - `scripts/homeflix_setup/compose.py` (`GLUETUN_SERVICES`, not `compose_up`)
 - `references/commands.md`
 

@@ -12,7 +12,10 @@ remain later slices. The VPN gate is a separate, explicit command: enter provide
 credentials with `scripts/homeflix secrets vpn` on an unredirected controlling terminal,
 then collect current non-disruptive evidence with `scripts/homeflix --json vpn verify`
 (or `--dry-run`). Dry-run mutates only Gluetun. Missing or stale evidence leaves
-acquisition stopped. The automated implementation is **fixture-tested only** and has
+acquisition stopped. Proving the kill switch is a separate explicit command —
+`scripts/homeflix --json verify vpn --disrupt` (or `vpn verify --disrupt`) — and
+requires that current gate evidence. Routine `verify core` and `vpn verify` never
+disable the tunnel. The automated implementation is **fixture-tested only** and has
 **not received disposable real Debian/Ubuntu acceptance**. Treat live-host completion as
 unverified until the evidence below is collected on the target.
 

@@ -60,6 +60,23 @@ Evidence is timestamp/image/config identity plus booleans. It expires after 24h 
 relevant image/config change. Output must not include public IPs or secret values.
 Do not start qBittorrent, NZBGet, or Prowlarr from this command.
 
+## VPN fail-closed (explicit disruption)
+
+```bash
+scripts/homeflix --json verify vpn --disrupt
+scripts/homeflix --json vpn verify --disrupt
+```
+
+Requires `--disrupt` and current `vpn verify` evidence. Classifies only the active
+tunnel interface, proves pre-disruption egress, disables the tunnel, proves
+external access is blocked, then restores Gluetun and every previously running
+namespace-dependent service (`qbittorrent` / `nzbget` / `prowlarr`). Compensation
+runs after failure, timeout, or interrupt and keeps an independent restore budget
+so a hung blocked-egress probe cannot skip `compose restart`. Success requires
+complete restore and healthy non-host egress. Output is booleans and service names
+only — no addresses, raw interface names, or forwarded ports. Routine `vpn verify`
+remains non-disruptive.
+
 ## VPN checks (Gluetun)
 
 ```bash

@@ -47,6 +47,14 @@ bite.
   hostnames won't resolve on family devices.
 - **Talk to `gluetun:<port>`, not localhost.** The VPN'd services share Gluetun's netns;
   the *arr apps must reference `gluetun:6969/6789/9696`.
+- **Fail-closed verify restarts namespace dependents.** After Gluetun restarts, any
+  previously running `qbittorrent` / `nzbget` / `prowlarr` must be restarted or they
+  keep a stale netns. `verify vpn --disrupt` snapshots the running set and restores
+  exactly those services. Do not treat routine `vpn verify` as that proof.
+- **Fail-closed restore is not paid from the leftover prove deadline.** After
+  `ip link set … down`, a blocked-egress wget can hang until its own short cap.
+  Compensation uses an independent restore budget so Gluetun and the snapshot
+  still get `compose restart` when that probe exhausts the operation clock.
 - **Bazarr starts empty.** The container is `Up` after `compose up`, but without Radarr/
   Sonarr links, a language profile, and providers it never searches. Run
   `./scripts/configure-bazarr.sh` or follow [`docs/bazarr.md`](../../docs/bazarr.md).

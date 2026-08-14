@@ -22,7 +22,7 @@ from .host import HostPreparationPlan, apply_host_preparation, plan_host_prepara
 from .preflight import PreflightReport, run_preflight
 from .secrets import reveal_jellyfin
 from .state import SetupState
-from .vpn import verify_vpn
+from .vpn import verify_vpn, verify_vpn_fail_closed
 
 
 class _DeadlineRunner(CommandRunner):
@@ -91,8 +91,16 @@ def build_parser() -> argparse.ArgumentParser:
     deploy_parser.add_argument(
         "--dry-run", action="store_true", help="print exact planned commands without probing or changing the host"
     )
-    verify_parser = subparsers.add_parser("verify", help="inspect a deployment phase without changing it")
-    verify_parser.add_argument("phase", choices=("core", "contract"))
+    verify_parser = subparsers.add_parser(
+        "verify",
+        help="inspect a deployment phase; vpn --disrupt is the explicit fail-closed exception",
+    )
+    verify_parser.add_argument("phase", choices=("core", "contract", "vpn"))
+    verify_parser.add_argument(
+        "--disrupt",
+        action="store_true",
+        help="run explicit fail-closed VPN disruption (vpn phase only)",
+    )
     setup_parser = subparsers.add_parser("setup", help="run a resumable convenience setup composition")
     setup_parser.add_argument("phase", choices=("core",))
     setup_parser.add_argument("--dry-run", action="store_true")
@@ -116,6 +124,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--dry-run",
         action="store_true",
         help="print the Gluetun-only plan without starting services",
+    )
+    vpn_verify_parser.add_argument(
+        "--disrupt",
+        action="store_true",
+        help="prove VPN fail-closed behavior and restore the prior running set",
     )
     return parser
 
@@ -284,7 +297,24 @@ def main(argv: Sequence[str] | None = None, *, repository_root: Path | None = No
                 label="API initialization refused",
                 error=RuntimeError("core APIs could not be configured safely"),
             )
+    elif arguments.command == "verify" and arguments.phase == "vpn":
+        try:
+            result = verify_vpn_fail_closed(root, disrupt=arguments.disrupt)
+        except (OSError, RuntimeError, ValueError, subprocess.SubprocessError, TimeoutError):
+            return _input_error(
+                json_output=arguments.json_output,
+                code="verification_refused",
+                label="VPN verification refused",
+                error=RuntimeError("VPN fail-closed verification could not be completed safely"),
+            )
     elif arguments.command == "verify" and arguments.phase == "contract":
+        if arguments.disrupt:
+            return _input_error(
+                json_output=arguments.json_output,
+                code="verification_refused",
+                label="verification refused",
+                error=RuntimeError("disruptive verification applies only to verify vpn"),
+            )
         try:
             result = evaluate_stack_contract(render_compose_config(root))
         except (OSError, RuntimeError, ValueError, subprocess.SubprocessError):
@@ -295,6 +325,13 @@ def main(argv: Sequence[str] | None = None, *, repository_root: Path | None = No
                 error=RuntimeError("stack contract could not be verified safely"),
             )
     elif arguments.command == "verify" and arguments.phase == "core":
+        if arguments.disrupt:
+            return _input_error(
+                json_output=arguments.json_output,
+                code="verification_refused",
+                label="verification refused",
+                error=RuntimeError("disruptive verification applies only to verify vpn"),
+            )
         try:
             result = verify_core(root)
         except (OSError, RuntimeError, ValueError, subprocess.SubprocessError):
@@ -434,15 +471,33 @@ def main(argv: Sequence[str] | None = None, *, repository_root: Path | None = No
                 error=RuntimeError("core deployment could not be completed safely"),
             )
     elif arguments.command == "vpn" and arguments.vpn_command == "verify":
-        try:
-            result = verify_vpn(root, dry_run=arguments.dry_run)
-        except (OSError, RuntimeError, ValueError, subprocess.SubprocessError, TimeoutError):
-            return _input_error(
-                json_output=arguments.json_output,
-                code="verification_refused",
-                label="VPN verification refused",
-                error=RuntimeError("VPN gate could not be verified safely"),
-            )
+        if arguments.disrupt:
+            if arguments.dry_run:
+                return _input_error(
+                    json_output=arguments.json_output,
+                    code="verification_refused",
+                    label="VPN verification refused",
+                    error=RuntimeError("disruptive verification cannot be combined with --dry-run"),
+                )
+            try:
+                result = verify_vpn_fail_closed(root, disrupt=True)
+            except (OSError, RuntimeError, ValueError, subprocess.SubprocessError, TimeoutError):
+                return _input_error(
+                    json_output=arguments.json_output,
+                    code="verification_refused",
+                    label="VPN verification refused",
+                    error=RuntimeError("VPN fail-closed verification could not be completed safely"),
+                )
+        else:
+            try:
+                result = verify_vpn(root, dry_run=arguments.dry_run)
+            except (OSError, RuntimeError, ValueError, subprocess.SubprocessError, TimeoutError):
+                return _input_error(
+                    json_output=arguments.json_output,
+                    code="verification_refused",
+                    label="VPN verification refused",
+                    error=RuntimeError("VPN gate could not be verified safely"),
+                )
     else:  # pragma: no cover - argparse limits command values
         raise AssertionError(f"unhandled command {arguments.command}")
 
@@ -479,7 +534,7 @@ def main(argv: Sequence[str] | None = None, *, repository_root: Path | None = No
             service = item.get("service")
             target = f"{item['code']}: {service}" if service else str(item["code"])
             print(f"FAIL: {target}: {item['message']}")
-    elif arguments.command == "vpn":
+    elif arguments.command == "vpn" or (arguments.command == "verify" and arguments.phase == "vpn"):
         print(f"VPN verify: {result['status']}")
         for item in result.get("checks", []):
             print(f"{str(item['status']).upper()}: {item['domain']}: {item['reason']}")

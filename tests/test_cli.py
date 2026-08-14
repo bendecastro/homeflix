@@ -344,17 +344,36 @@ class VerifyCoreCliTests(unittest.TestCase):
         self.assertEqual(result["checks"][0]["status"], "unknown")
         self.assertNotIn("127.0.0.1", stdout)
 
-    def test_verify_core_choice_does_not_include_vpn(self) -> None:
+    def test_verify_vpn_requires_disrupt_and_routine_vpn_verify_stays_separate(self) -> None:
         from scripts.homeflix_setup.cli import build_parser
 
         parser = build_parser()
-        with self.assertRaises(SystemExit):
-            parser.parse_args(["verify", "vpn"])
+        parsed_verify = parser.parse_args(["verify", "vpn"])
+        self.assertEqual(parsed_verify.command, "verify")
+        self.assertEqual(parsed_verify.phase, "vpn")
+        self.assertFalse(parsed_verify.disrupt)
+        parsed_disrupt = parser.parse_args(["verify", "vpn", "--disrupt"])
+        self.assertTrue(parsed_disrupt.disrupt)
         parsed = parser.parse_args(["vpn", "verify", "--dry-run"])
         self.assertEqual(parsed.command, "vpn")
         self.assertEqual(parsed.vpn_command, "verify")
         self.assertTrue(parsed.dry_run)
+        self.assertFalse(parsed.disrupt)
+        parsed_vpn_disrupt = parser.parse_args(["vpn", "verify", "--disrupt"])
+        self.assertTrue(parsed_vpn_disrupt.disrupt)
         parsed_reveal = parser.parse_args(["secrets", "reveal", "jellyfin"])
         self.assertEqual(parsed_reveal.secrets_command, "reveal")
         self.assertEqual(parsed_reveal.service, "jellyfin")
+
+    def test_verify_core_and_contract_refuse_disrupt(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for phase in ("core", "contract"):
+                with self.subTest(phase=phase):
+                    with patch("scripts.homeflix_setup.cli.verify_core", side_effect=AssertionError("must not verify core")):
+                        with patch("scripts.homeflix_setup.cli.evaluate_stack_contract", side_effect=AssertionError("must not evaluate contract")):
+                            code, stdout, stderr = run_main("--json", "verify", phase, "--disrupt", repository_root=root)
+                    self.assertEqual(code, 1)
+                    combined = stdout + stderr
+                    self.assertIn("disruptive verification applies only to verify vpn", combined)
 

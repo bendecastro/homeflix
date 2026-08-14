@@ -498,3 +498,23 @@ stack contract, runs acquisition preflight, starts only Gluetun, then records
 bounded health/DNS/egress evidence that expires after 24h or an image/config
 change. `compose_up` remains CORE_SERVICES-only. Disruption stays #10.
 
+## [2026-08-14] build | VPN fail-closed prove-and-restore
+
+Issue #10: `verify vpn --disrupt` and `vpn verify --disrupt` require current
+non-disruptive gate evidence, classify only the active tunnel interface, prove
+pre-disruption egress, disable the tunnel, prove external access is blocked, then
+restore Gluetun plus every previously running namespace-dependent service.
+Compensation runs after probe failure, command error, deadline, or interrupt.
+Success is impossible if restore or post-restore non-host egress is incomplete.
+Routine `vpn verify` stays non-disruptive. Output is booleans and service names
+only.
+
+## [2026-08-14] fix | Fail-closed restore survives an exhausted prove deadline
+
+Compensation after `verify vpn --disrupt` now keeps an independent restore budget
+so a hung blocked-egress wget cannot starve `compose restart`. The post-disruption
+probe is capped and uses wget `--tries=1 -T`; restore still issues Gluetun plus
+previously running dependents when the operation clock is already expired.
+Tests advance a real FakeClock through that hung probe instead of injecting
+`TimeoutError` from the runner.
+

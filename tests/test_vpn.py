@@ -18,7 +18,10 @@ from scripts.homeflix_setup.preflight import CheckResult, PreflightReport
 from scripts.homeflix_setup.state import SetupState
 from scripts.homeflix_setup.vpn import (
     GATED_SERVICES,
+    VPN_BLOCKED_EGRESS_TIMEOUT,
+    VPN_RESTORE_BUDGET,
     verify_vpn,
+    verify_vpn_fail_closed,
     vpn_config_digest,
     vpn_evidence_is_current,
 )
@@ -75,6 +78,15 @@ def write_env(root: Path) -> Path:
     return path
 
 
+SAFE_LINKS = (
+    "1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536\n"
+    "2: eth0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500\n"
+    "3: tun0: <POINTOPOINT,MULTICAST,NOARP,UP,LOWER_UP> mtu 1500\n"
+)
+DEFAULT_ROUTE_ETH = "default via 172.30.0.1 dev eth0\n"
+DEFAULT_ROUTE_TUN = "default via 10.2.0.1 dev tun0\n"
+
+
 class FakeVpnRunner:
     def __init__(
         self,
@@ -87,6 +99,13 @@ class FakeVpnRunner:
         tunnel_ip: str | None = TUNNEL_EGRESS,
         image_id: str = "sha256:fixturegluetunimage",
         up_returncode: int = 0,
+        links: str = SAFE_LINKS,
+        default_route: str = DEFAULT_ROUTE_ETH,
+        fail_at: str | None = None,
+        cleanup_fail: bool = False,
+        raise_at: str | None = None,
+        clock: FakeClock | None = None,
+        hang_blocked_egress: bool = False,
     ) -> None:
         self.inventory = inventory if inventory is not None else []
         self.health = health
@@ -96,7 +115,17 @@ class FakeVpnRunner:
         self.tunnel_ip = tunnel_ip
         self.image_id = image_id
         self.up_returncode = up_returncode
+        self.links = links
+        self.default_route = default_route
+        self.fail_at = fail_at
+        self.cleanup_fail = cleanup_fail
+        self.raise_at = raise_at
+        self.clock = clock
+        self.hang_blocked_egress = hang_blocked_egress
+        self.disrupted = False
+        self.egress_probes = 0
         self.commands: list[tuple[str, ...]] = []
+        self.blocked_egress_timeouts: list[float] = []
 
     def run(self, argv, **kwargs):
         command = tuple(argv)
@@ -136,8 +165,23 @@ class FakeVpnRunner:
             stdout = "198.51.100.1 cloudflare.com\n" if self.dns_ok else ""
             return subprocess.CompletedProcess(command, 0 if self.dns_ok else 1, stdout, "")
         if command[:3] == ("docker", "exec", "gluetun") and "wget" in command:
-            if self.tunnel_ip is None:
+            if self.disrupted:
+                timeout = kwargs.get("timeout")
+                if timeout is not None:
+                    self.blocked_egress_timeouts.append(float(timeout))
+                if self.hang_blocked_egress:
+                    granted = float(timeout) if timeout is not None else 0.0
+                    if self.clock is not None:
+                        self.clock.now += granted
+                    raise subprocess.TimeoutExpired(command, granted or 1)
+                if self.fail_at == "blocked_egress":
+                    return subprocess.CompletedProcess(command, 0, (self.tunnel_ip or HOST_EGRESS) + "\n", "")
                 return subprocess.CompletedProcess(command, 1, "", "egress unavailable")
+            self.egress_probes += 1
+            if self.tunnel_ip is None or (self.fail_at == "pre_egress" and self.egress_probes == 1):
+                return subprocess.CompletedProcess(command, 1, "", "egress unavailable")
+            if self.fail_at == "post_egress" and self.egress_probes >= 2:
+                return subprocess.CompletedProcess(command, 0, (self.host_ip or HOST_EGRESS) + "\n", "")
             return subprocess.CompletedProcess(command, 0, self.tunnel_ip + "\n", "")
         if command and command[0] == "curl":
             if self.host_ip is None:
@@ -145,6 +189,37 @@ class FakeVpnRunner:
             return subprocess.CompletedProcess(command, 0, self.host_ip + "\n", "")
         if command[:2] == ("docker", "inspect"):
             return subprocess.CompletedProcess(command, 0, self.image_id + "\n", "")
+        if command[:3] == ("docker", "exec", "gluetun") and command[3:5] == ("ip", "-o"):
+            if "route" in command:
+                if self.raise_at == "classify":
+                    raise RuntimeError("interface listing interrupted")
+                if self.fail_at == "classify":
+                    return subprocess.CompletedProcess(command, 1, "", "route unavailable")
+                return subprocess.CompletedProcess(command, 0, self.default_route, "")
+            if "link" in command and "set" not in command:
+                if self.fail_at == "classify":
+                    return subprocess.CompletedProcess(command, 1, "", "link listing unavailable")
+                return subprocess.CompletedProcess(command, 0, self.links, "")
+        if command[:3] == ("docker", "exec", "gluetun") and command[3:5] == ("ip", "link") and "set" in command:
+            if self.raise_at == "disrupt":
+                self.disrupted = True
+                raise KeyboardInterrupt
+            if self.fail_at == "disrupt":
+                return subprocess.CompletedProcess(command, 1, "", "unable to disable tunnel")
+            self.disrupted = True
+            return subprocess.CompletedProcess(command, 0, "", "")
+        if "restart" in command:
+            if self.raise_at == "restore":
+                raise TimeoutError("restore deadline exhausted")
+            if self.cleanup_fail or self.fail_at in {"restore_gluetun", "restore_dependents"}:
+                if self.cleanup_fail or (
+                    self.fail_at == "restore_gluetun" and "gluetun" in command
+                ) or (
+                    self.fail_at == "restore_dependents" and any(service in command for service in GATED_SERVICES)
+                ):
+                    return subprocess.CompletedProcess(command, 1, "", "restore failed")
+            self.disrupted = False
+            return subprocess.CompletedProcess(command, 0, "", "")
         raise AssertionError(f"unexpected command: {command}")
 
 
@@ -519,3 +594,459 @@ class VpnVerifyGateTests(unittest.TestCase):
         self.assertFalse(any(service in " ".join(command) for command in runner.commands for service in GATED_SERVICES))
         rendered = json.dumps(result)
         self.assertNotIn(VPN_SECRET, rendered)
+
+
+def write_current_evidence(root: Path, image_id: str = "sha256:fixturegluetunimage") -> None:
+    digest = vpn_config_digest(EnvDocument.load(root / ".env"))
+    state = SetupState()
+    state.evidence = {
+        "recorded_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "image_id": image_id,
+        "config_digest": digest,
+        "tunnel_healthy": True,
+        "tunnel_device": True,
+        "namespace_dns": True,
+        "egress_distinct": True,
+    }
+    state.save(root / ".homeflix" / "setup.json")
+
+
+def _assert_bounded(payload: object) -> None:
+    rendered = json.dumps(payload)
+    assert VPN_SECRET not in rendered
+    for address in FIXTURE_IPS:
+        assert address not in rendered
+    for leaked in ("tun0", "wg0", "eth0", "docker0", "br-", "198.51.100.", "203.0.113.", "10.2.0.", "172.30."):
+        assert leaked not in rendered, leaked
+
+
+class VpnFailClosedGateTests(unittest.TestCase):
+    def test_refuses_without_explicit_disrupt_flag_and_does_not_mutate(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            write_env(root)
+            write_current_evidence(root)
+            runner = FakeVpnRunner()
+            result = verify_vpn_fail_closed(root, runner=runner)
+
+        self.assertFalse(result["passed"], result)
+        self.assertEqual(result["status"], "failed")
+        checks = {item["domain"]: item for item in result["checks"]}
+        self.assertEqual(checks["intent"]["status"], "failure")
+        self.assertFalse(result.get("disrupted", False))
+        self.assertFalse(any("link" in command or "restart" in command for command in runner.commands))
+        _assert_bounded(result)
+
+    def test_cli_verify_vpn_without_disrupt_refuses_and_vpn_verify_stays_non_disruptive(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            write_env(root)
+            write_current_evidence(root)
+            refused = {
+                "status": "failed",
+                "passed": False,
+                "disrupted": False,
+                "checks": [{"domain": "intent", "status": "failure", "reason": "disruptive verification requires --disrupt"}],
+            }
+            with patch("scripts.homeflix_setup.cli.verify_vpn_fail_closed", return_value=refused) as fail_closed:
+                code, stdout, stderr = run_main("--json", "verify", "vpn", repository_root=root)
+            self.assertEqual(code, 1, stderr)
+            payload = parse_single_json(stdout)
+            self.assertFalse(payload["passed"])
+            self.assertEqual(payload["checks"][0]["domain"], "intent")
+            fail_closed.assert_called_once()
+            self.assertFalse(fail_closed.call_args.kwargs.get("disrupt", False))
+
+            planned = {
+                "status": "planned",
+                "passed": True,
+                "services": ["gluetun"],
+                "mutation_commands": [["docker", "compose", "up", "--detach", "--no-deps", "gluetun"]],
+                "state_written": False,
+                "checks": [],
+            }
+            with patch("scripts.homeflix_setup.cli.verify_vpn", return_value=planned) as gate:
+                with patch("scripts.homeflix_setup.cli.verify_vpn_fail_closed", side_effect=AssertionError("routine vpn verify must not disrupt")):
+                    code, stdout, stderr = run_main("--json", "vpn", "verify", "--dry-run", repository_root=root)
+            self.assertEqual(code, 0, stderr)
+            gate.assert_called_once()
+            self.assertTrue(gate.call_args.kwargs.get("dry_run"))
+            _assert_bounded(payload)
+
+    def test_cli_disrupt_drivers_require_flag_and_share_fail_closed_transaction(self) -> None:
+        verified = {
+            "status": "verified",
+            "passed": True,
+            "disrupted": True,
+            "restored": True,
+            "snapshot_services": ["qbittorrent"],
+            "restored_services": ["gluetun", "qbittorrent"],
+            "checks": [{"domain": "blocked_egress", "status": "pass", "reason": "external access is blocked"}],
+        }
+        for argv in (
+            ("--json", "verify", "vpn", "--disrupt"),
+            ("--json", "vpn", "verify", "--disrupt"),
+        ):
+            with self.subTest(argv=argv), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                write_env(root)
+                with patch("scripts.homeflix_setup.cli.verify_vpn_fail_closed", return_value=verified) as fail_closed:
+                    with patch("scripts.homeflix_setup.cli.verify_vpn", side_effect=AssertionError("routine vpn verify must not run")):
+                        code, stdout, stderr = run_main(*argv, repository_root=root)
+                self.assertEqual(code, 0, stderr)
+                payload = parse_single_json(stdout)
+                self.assertTrue(payload["passed"])
+                self.assertEqual(payload["restored_services"], ["gluetun", "qbittorrent"])
+                fail_closed.assert_called_once()
+                self.assertTrue(fail_closed.call_args.kwargs.get("disrupt"))
+                _assert_bounded(payload)
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            code, stdout, stderr = run_main("--json", "vpn", "verify", "--disrupt", "--dry-run", repository_root=root)
+        self.assertEqual(code, 1, stdout + stderr)
+        combined = stdout + stderr
+        self.assertNotIn(VPN_SECRET, combined)
+
+    def test_refuses_without_current_vpn_gate_evidence_and_does_not_mutate(self) -> None:
+        cases = (
+            "missing",
+            "stale",
+            "image_mismatch",
+        )
+        for case in cases:
+            with self.subTest(case=case), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                write_env(root)
+                if case != "missing":
+                    write_current_evidence(root, image_id="sha256:fixturegluetunimage")
+                    if case == "stale":
+                        state = SetupState.load(root / ".homeflix" / "setup.json")
+                        state.evidence["recorded_at"] = "2020-01-01T00:00:00Z"
+                        state.save(root / ".homeflix" / "setup.json")
+                runner = FakeVpnRunner(
+                    image_id="sha256:otherimage" if case == "image_mismatch" else "sha256:fixturegluetunimage"
+                )
+                result = verify_vpn_fail_closed(root, runner=runner, disrupt=True)
+                self.assertFalse(result["passed"], result)
+                self.assertEqual(result["status"], "failed")
+                checks = {item["domain"]: item for item in result["checks"]}
+                self.assertIn(checks["vpn_evidence"]["status"], {"failure", "unknown"})
+                self.assertFalse(result.get("disrupted", False))
+                self.assertFalse(
+                    any(
+                        "link" in command or "restart" in command or "up" in command
+                        for command in runner.commands
+                    )
+                )
+                _assert_bounded(result)
+
+    def test_refuses_loopback_ethernet_docker_bridge_default_route_and_unknown(self) -> None:
+        cases = (
+            (
+                "loopback",
+                "1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536\n",
+                DEFAULT_ROUTE_ETH,
+            ),
+            (
+                "ethernet",
+                "1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536\n2: eth0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500\n",
+                DEFAULT_ROUTE_ETH,
+            ),
+            (
+                "docker-bridge",
+                "1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536\n2: docker0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500\n",
+                "default via 172.17.0.1 dev docker0\n",
+            ),
+            (
+                "default-route",
+                "1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536\n2: wlan0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500\n",
+                "default via 192.0.2.1 dev wlan0\n",
+            ),
+            (
+                "unknown",
+                "1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536\n2: dummy0: <BROADCAST,NOARP,UP,LOWER_UP> mtu 1500\n",
+                "default via 192.0.2.1 dev missing0\n",
+            ),
+        )
+        for kind, links, route in cases:
+            with self.subTest(kind=kind), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                write_env(root)
+                write_current_evidence(root)
+                runner = FakeVpnRunner(links=links, default_route=route)
+                result = verify_vpn_fail_closed(root, runner=runner, disrupt=True)
+                self.assertFalse(result["passed"], result)
+                checks = {item["domain"]: item for item in result["checks"]}
+                self.assertEqual(checks["tunnel_interface"]["status"], "failure")
+                self.assertIn(kind, checks["tunnel_interface"]["reason"])
+                self.assertFalse(result.get("disrupted", False))
+                self.assertFalse(any("set" in command and "down" in command for command in runner.commands))
+                self.assertFalse(any("restart" in command for command in runner.commands))
+                _assert_bounded(result)
+
+
+def _running(service: str) -> dict[str, str]:
+    return {"Service": service, "State": "running", "Health": "healthy", "Project": "homeflix"}
+
+
+class VpnFailClosedTransactionTests(unittest.TestCase):
+    def test_proves_fail_closed_and_restores_only_previously_running_dependents(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            write_env(root)
+            write_current_evidence(root)
+            runner = FakeVpnRunner(inventory=[_running("qbittorrent"), {"Service": "nzbget", "State": "exited", "Health": "", "Project": "homeflix"}])
+            result = verify_vpn_fail_closed(
+                root,
+                runner=runner,
+                disrupt=True,
+                clock=FakeClock(),
+                sleep=lambda _seconds: None,
+                readiness_timeout=5.0,
+            )
+
+        self.assertTrue(result["passed"], result)
+        self.assertEqual(result["status"], "verified")
+        self.assertTrue(result["disrupted"])
+        self.assertTrue(result["restored"])
+        self.assertEqual(result["snapshot_services"], ["qbittorrent"])
+        self.assertEqual(result["restored_services"], ["gluetun", "qbittorrent"])
+        domains = {item["domain"]: item for item in result["checks"]}
+        for domain in (
+            "intent",
+            "vpn_evidence",
+            "tunnel_interface",
+            "pre_egress",
+            "disruption",
+            "blocked_egress",
+            "restore:gluetun",
+            "restore:qbittorrent",
+            "post_health",
+            "post_egress",
+        ):
+            self.assertEqual(domains[domain]["status"], "pass", domain)
+        self.assertNotIn("restore:nzbget", domains)
+        self.assertNotIn("restore:prowlarr", domains)
+        rendered_commands = [" ".join(command) for command in runner.commands]
+        self.assertTrue(any("ip link set" in text and "down" in text for text in rendered_commands))
+        self.assertTrue(any("restart" in text and "gluetun" in text for text in rendered_commands))
+        self.assertTrue(any("restart" in text and "qbittorrent" in text for text in rendered_commands))
+        self.assertFalse(any("nzbget" in text and "restart" in text for text in rendered_commands))
+        self.assertFalse(any("prowlarr" in text and ("restart" in text or "up" in text) for text in rendered_commands))
+        _assert_bounded(result)
+
+    def test_default_route_through_the_tunnel_is_still_classified_as_tunnel(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            write_env(root)
+            write_current_evidence(root)
+            runner = FakeVpnRunner(inventory=[_running("qbittorrent")], default_route=DEFAULT_ROUTE_TUN)
+            result = verify_vpn_fail_closed(
+                root,
+                runner=runner,
+                disrupt=True,
+                clock=FakeClock(),
+                sleep=lambda _seconds: None,
+                readiness_timeout=5.0,
+            )
+
+        self.assertTrue(result["passed"], result)
+        checks = {item["domain"]: item for item in result["checks"]}
+        self.assertEqual(checks["tunnel_interface"]["status"], "pass")
+        self.assertNotIn("default-route", checks["tunnel_interface"]["reason"])
+        _assert_bounded(result)
+
+    def test_snapshots_every_running_namespace_dependent_service(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            write_env(root)
+            write_current_evidence(root)
+            runner = FakeVpnRunner(inventory=[_running(name) for name in GATED_SERVICES])
+            result = verify_vpn_fail_closed(
+                root,
+                runner=runner,
+                disrupt=True,
+                clock=FakeClock(),
+                sleep=lambda _seconds: None,
+                readiness_timeout=5.0,
+            )
+
+        self.assertTrue(result["passed"], result)
+        self.assertEqual(result["snapshot_services"], list(GATED_SERVICES))
+        self.assertEqual(result["restored_services"], ["gluetun", *GATED_SERVICES])
+        rendered_commands = [" ".join(command) for command in runner.commands]
+        for service in GATED_SERVICES:
+            self.assertTrue(any("restart" in text and service in text for text in rendered_commands), service)
+        _assert_bounded(result)
+
+    def test_mutation_stage_failures_restore_and_cannot_succeed(self) -> None:
+        stages = (
+            ("pre_egress", "pre_egress", False),
+            ("disrupt", "disruption", True),
+            ("blocked_egress", "blocked_egress", True),
+            ("restore_gluetun", "restore:gluetun", True),
+            ("restore_dependents", "restore:qbittorrent", True),
+            ("post_egress", "post_egress", True),
+        )
+        for fail_at, domain, should_restore in stages:
+            with self.subTest(fail_at=fail_at), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                write_env(root)
+                write_current_evidence(root)
+                runner = FakeVpnRunner(inventory=[_running("qbittorrent")], fail_at=fail_at)
+                result = verify_vpn_fail_closed(
+                    root,
+                    runner=runner,
+                    disrupt=True,
+                    clock=FakeClock(),
+                    sleep=lambda _seconds: None,
+                    readiness_timeout=5.0,
+                )
+                self.assertFalse(result["passed"], result)
+                checks = {item["domain"]: item for item in result["checks"]}
+                self.assertIn(checks[domain]["status"], {"failure", "unknown"})
+                restarted = any("restart" in command for command in runner.commands)
+                self.assertEqual(restarted, should_restore)
+                if should_restore:
+                    self.assertTrue(any("gluetun" in command and "restart" in command for command in runner.commands))
+                self.assertFalse(result.get("passed"))
+                _assert_bounded(result)
+
+    def test_deadline_and_interrupt_after_disruption_still_restore(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            write_env(root)
+            write_current_evidence(root)
+            runner = FakeVpnRunner(inventory=[_running("qbittorrent")], raise_at="disrupt")
+            result = verify_vpn_fail_closed(
+                root,
+                runner=runner,
+                disrupt=True,
+                clock=FakeClock(),
+                sleep=lambda _seconds: None,
+                readiness_timeout=5.0,
+            )
+            self.assertFalse(result["passed"], result)
+            checks = {item["domain"]: item for item in result["checks"]}
+            self.assertIn(checks["transaction"]["status"], {"failure", "unknown"})
+            self.assertTrue(result["disrupted"] or any("set" in command and "down" in command for command in runner.commands))
+            self.assertTrue(any("restart" in command and "gluetun" in command for command in runner.commands))
+            _assert_bounded(result)
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            write_env(root)
+            write_current_evidence(root)
+            clock = FakeClock()
+            deadline = 4.0
+            runner = FakeVpnRunner(
+                inventory=[_running("qbittorrent")],
+                clock=clock,
+                hang_blocked_egress=True,
+            )
+            result = verify_vpn_fail_closed(
+                root,
+                runner=runner,
+                disrupt=True,
+                deadline=deadline,
+                clock=clock,
+                sleep=clock.sleep,
+                readiness_timeout=deadline,
+            )
+            self.assertFalse(result["passed"], result)
+            self.assertGreaterEqual(clock(), deadline)
+            self.assertTrue(
+                result["disrupted"]
+                or any("set" in command and "down" in command for command in runner.commands)
+            )
+            restarted = [" ".join(command) for command in runner.commands]
+            self.assertTrue(any("restart" in text and "gluetun" in text for text in restarted), restarted)
+            self.assertTrue(any("restart" in text and "qbittorrent" in text for text in restarted), restarted)
+            _assert_bounded(result)
+
+    def test_blocked_egress_probe_cannot_consume_restore_window(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            write_env(root)
+            write_current_evidence(root)
+            clock = FakeClock()
+            runner = FakeVpnRunner(
+                inventory=[_running("qbittorrent")],
+                clock=clock,
+                hang_blocked_egress=True,
+            )
+            result = verify_vpn_fail_closed(
+                root,
+                runner=runner,
+                disrupt=True,
+                deadline=120.0,
+                clock=clock,
+                sleep=clock.sleep,
+                readiness_timeout=120.0,
+            )
+
+        self.assertFalse(result["passed"], result)
+        self.assertTrue(runner.blocked_egress_timeouts)
+        self.assertLessEqual(max(runner.blocked_egress_timeouts), VPN_BLOCKED_EGRESS_TIMEOUT)
+        self.assertLess(clock(), VPN_RESTORE_BUDGET)
+        restarted = [" ".join(command) for command in runner.commands]
+        self.assertTrue(any("restart" in text and "gluetun" in text for text in restarted), restarted)
+        self.assertTrue(any("restart" in text and "qbittorrent" in text for text in restarted), restarted)
+        _assert_bounded(result)
+
+    def test_primary_failure_is_preserved_when_cleanup_also_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            write_env(root)
+            write_current_evidence(root)
+            runner = FakeVpnRunner(
+                inventory=[_running("qbittorrent")],
+                fail_at="blocked_egress",
+                cleanup_fail=True,
+            )
+            result = verify_vpn_fail_closed(
+                root,
+                runner=runner,
+                disrupt=True,
+                clock=FakeClock(),
+                sleep=lambda _seconds: None,
+                readiness_timeout=5.0,
+            )
+
+        self.assertFalse(result["passed"], result)
+        self.assertFalse(result["restored"])
+        checks = {item["domain"]: item for item in result["checks"]}
+        self.assertEqual(checks["blocked_egress"]["status"], "failure")
+        self.assertEqual(checks["blocked_egress"]["reason"], "external access still succeeded")
+        self.assertIn(checks["restore:gluetun"]["status"], {"failure", "unknown"})
+        self.assertLess(
+            [item["domain"] for item in result["checks"]].index("blocked_egress"),
+            [item["domain"] for item in result["checks"]].index("restore:gluetun"),
+        )
+        _assert_bounded(result)
+
+    def test_incomplete_restore_cannot_succeed_even_when_probes_pass(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            write_env(root)
+            write_current_evidence(root)
+            runner = FakeVpnRunner(inventory=[_running("qbittorrent")], fail_at="restore_dependents")
+            result = verify_vpn_fail_closed(
+                root,
+                runner=runner,
+                disrupt=True,
+                clock=FakeClock(),
+                sleep=lambda _seconds: None,
+                readiness_timeout=5.0,
+            )
+
+        self.assertFalse(result["passed"], result)
+        self.assertFalse(result["restored"])
+        self.assertIn("gluetun", result["restored_services"])
+        self.assertNotIn("qbittorrent", result["restored_services"])
+        checks = {item["domain"]: item for item in result["checks"]}
+        self.assertEqual(checks["blocked_egress"]["status"], "pass")
+        self.assertEqual(checks["restore:gluetun"]["status"], "pass")
+        self.assertIn(checks["restore:qbittorrent"]["status"], {"failure", "unknown"})
+        _assert_bounded(result)
