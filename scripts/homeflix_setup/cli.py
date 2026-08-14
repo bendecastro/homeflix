@@ -22,6 +22,7 @@ from .host import HostPreparationPlan, apply_host_preparation, plan_host_prepara
 from .preflight import PreflightReport, run_preflight
 from .secrets import reveal_jellyfin
 from .state import SetupState
+from .vpn import verify_vpn
 
 
 class _DeadlineRunner(CommandRunner):
@@ -104,6 +105,18 @@ def build_parser() -> argparse.ArgumentParser:
     secrets_subparsers = secrets_parser.add_subparsers(dest="secrets_command", required=True)
     reveal_parser = secrets_subparsers.add_parser("reveal", help="reveal credentials on /dev/tty only")
     reveal_parser.add_argument("service", choices=("jellyfin",))
+    secrets_subparsers.add_parser("vpn", help="enter VPN provider credentials on /dev/tty only")
+    vpn_parser = subparsers.add_parser("vpn", help="acquisition VPN gate")
+    vpn_subparsers = vpn_parser.add_subparsers(dest="vpn_command", required=True)
+    vpn_verify_parser = vpn_subparsers.add_parser(
+        "verify",
+        help="start Gluetun only and collect current acquisition-gate evidence",
+    )
+    vpn_verify_parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="print the Gluetun-only plan without starting services",
+    )
     return parser
 
 
@@ -149,11 +162,22 @@ def main(argv: Sequence[str] | None = None, *, repository_root: Path | None = No
     preflight: PreflightReport | None = None
     if arguments.command == "secrets":
         if arguments.json_output:
-            print("homeflix: secret reveal does not support JSON output", file=sys.stderr)
+            print("homeflix: secret operations do not support JSON output", file=sys.stderr)
             return 2
         if not all(stream.isatty() for stream in (sys.stdin, sys.stdout, sys.stderr)):
-            print("homeflix: secret reveal requires an unredirected controlling terminal", file=sys.stderr)
+            print("homeflix: secret operations require an unredirected controlling terminal", file=sys.stderr)
             return 2
+        if arguments.secrets_command == "vpn":
+            try:
+                from .secrets import set_vpn_secrets
+
+                result = set_vpn_secrets(root / ".env")
+            except (OSError, ValueError, RuntimeError) as error:
+                print(f"homeflix: unable to store VPN credentials: {error}", file=sys.stderr)
+                return 1
+            for item in result.get("keys", []):
+                print(f"{item['name']}: {item['status']}")
+            return 0
         try:
             reveal_jellyfin(root / ".env")
         except (OSError, ValueError, RuntimeError) as error:
@@ -409,6 +433,16 @@ def main(argv: Sequence[str] | None = None, *, repository_root: Path | None = No
                 label="deployment refused",
                 error=RuntimeError("core deployment could not be completed safely"),
             )
+    elif arguments.command == "vpn" and arguments.vpn_command == "verify":
+        try:
+            result = verify_vpn(root, dry_run=arguments.dry_run)
+        except (OSError, RuntimeError, ValueError, subprocess.SubprocessError, TimeoutError):
+            return _input_error(
+                json_output=arguments.json_output,
+                code="verification_refused",
+                label="VPN verification refused",
+                error=RuntimeError("VPN gate could not be verified safely"),
+            )
     else:  # pragma: no cover - argparse limits command values
         raise AssertionError(f"unhandled command {arguments.command}")
 
@@ -445,6 +479,13 @@ def main(argv: Sequence[str] | None = None, *, repository_root: Path | None = No
             service = item.get("service")
             target = f"{item['code']}: {service}" if service else str(item["code"])
             print(f"FAIL: {target}: {item['message']}")
+    elif arguments.command == "vpn":
+        print(f"VPN verify: {result['status']}")
+        for item in result.get("checks", []):
+            print(f"{str(item['status']).upper()}: {item['domain']}: {item['reason']}")
+        if result.get("status") == "planned":
+            for command in result.get("mutation_commands", []):
+                print("Mutation command: " + " ".join(command))
     elif arguments.command in {"verify", "setup"}:
         print(f"Core {arguments.command}: {result['status']}")
         if arguments.command == "verify":
@@ -511,6 +552,8 @@ def main(argv: Sequence[str] | None = None, *, repository_root: Path | None = No
         return 0
     if arguments.command == "verify":
         return 0 if result.get("passed") is True else 1
+    if arguments.command == "vpn":
+        return 0 if result.get("status") in {"planned", "verified"} or result.get("passed") is True else 1
     if arguments.command == "setup":
         return 0 if result.get("status") in {"planned", "verified"} else 1
     return 1 if discovered is not None and not discovered.supported else 0

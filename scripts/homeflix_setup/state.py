@@ -15,6 +15,13 @@ CURRENT_SCHEMA_VERSION = 1
 
 _CHECKPOINT_NAME = re.compile(r"^[a-z][a-z0-9]*(?:[_-][a-z0-9]+)*$")
 _CHECKPOINTS = {"configured", "core_containers_started", "core_api_configured", "core_verified"}
+_EVIDENCE_BOOLS = ("tunnel_healthy", "tunnel_device", "namespace_dns", "egress_distinct")
+_EVIDENCE_STRING_LIMITS = {
+    "recorded_at": 40,
+    "image_id": 128,
+    "config_digest": 64,
+}
+_IPV4 = re.compile(r"(?:^|\D)(?:\d{1,3}\.){3}\d{1,3}(?:\D|$)")
 _HOST_FACT_TYPES: dict[str, type[object]] = {
     "os_id": str,
     "os_version_id": str,
@@ -63,9 +70,27 @@ def _validate_host_facts(host_facts: object) -> None:
                 raise ValueError(f"host fact {name!r} contains an unsafe string")
 
 
-def _validate_state_parts(checkpoints: object, host_facts: object) -> None:
+def _validate_evidence(evidence: object) -> None:
+    if not isinstance(evidence, dict):
+        raise ValueError("setup state evidence must be an object")
+    allowed = set(_EVIDENCE_STRING_LIMITS) | set(_EVIDENCE_BOOLS)
+    for name, value in evidence.items():
+        if name not in allowed:
+            raise ValueError(f"evidence field {name!r} is not permitted")
+        if name in _EVIDENCE_BOOLS:
+            if type(value) is not bool:
+                raise ValueError(f"evidence field {name!r} must be boolean")
+            continue
+        if type(value) is not str:
+            raise ValueError(f"evidence field {name!r} must be a string")
+        if len(value) > _EVIDENCE_STRING_LIMITS[name] or not value.isprintable() or _IPV4.search(value):
+            raise ValueError(f"evidence field {name!r} contains an unsafe string")
+
+
+def _validate_state_parts(checkpoints: object, host_facts: object, evidence: object) -> None:
     _validate_checkpoints(checkpoints)
     _validate_host_facts(host_facts)
+    _validate_evidence(evidence)
 
 
 @dataclass(eq=True)
@@ -75,6 +100,7 @@ class SetupState:
     schema_version: int = CURRENT_SCHEMA_VERSION
     checkpoints: dict[str, Any] = field(default_factory=dict)
     host_facts: dict[str, Any] = field(default_factory=dict)
+    evidence: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
     def load(cls, path: str | os.PathLike[str]) -> "SetupState":
@@ -94,12 +120,14 @@ class SetupState:
             if type(version) is int and version > CURRENT_SCHEMA_VERSION:
                 raise ValueError(f"unsupported future setup state schema version {version}")
             raise ValueError(f"unsupported setup state schema version {version!r}")
-        if set(payload) != {"schema_version", "checkpoints", "host_facts"}:
+        allowed = {"schema_version", "checkpoints", "host_facts", "evidence"}
+        if not set(payload) <= allowed or not {"schema_version", "checkpoints", "host_facts"} <= set(payload):
             raise ValueError("setup state contains unknown fields")
         checkpoints = payload["checkpoints"]
         host_facts = payload["host_facts"]
-        _validate_state_parts(checkpoints, host_facts)
-        return cls(version, checkpoints, host_facts)
+        evidence = payload.get("evidence", {})
+        _validate_state_parts(checkpoints, host_facts, evidence)
+        return cls(version, checkpoints, host_facts, evidence)
 
     def save(self, path: str | os.PathLike[str]) -> None:
         if type(self.schema_version) is not int or self.schema_version != CURRENT_SCHEMA_VERSION:
@@ -109,7 +137,9 @@ class SetupState:
             "checkpoints": self.checkpoints,
             "host_facts": self.host_facts,
         }
-        _validate_state_parts(self.checkpoints, self.host_facts)
+        if self.evidence:
+            payload["evidence"] = self.evidence
+        _validate_state_parts(self.checkpoints, self.host_facts, self.evidence)
         serialized = json.dumps(payload, indent=2, sort_keys=True) + "\n"
 
         state_path = Path(path)

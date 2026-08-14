@@ -7,11 +7,14 @@ SSH transport. An agent may use its own SSH capability to operate a checkout on 
 but SSH-accessible orchestration remains a capability and design target, not a shipped CLI
 feature.
 
-Encrypted-storage provisioning and acquisition (VPN, Gluetun, download clients, and indexers)
-are planned follow-up slices. They are not part of current core setup. The automated
-implementation is **fixture-tested only** and has **not received disposable real Debian/Ubuntu
-acceptance**. Treat live-host completion as unverified until the evidence below is collected on
-the target.
+Encrypted-storage provisioning and the rest of acquisition (download clients and indexers)
+remain later slices. The VPN gate is a separate, explicit command: enter provider
+credentials with `scripts/homeflix secrets vpn` on an unredirected controlling terminal,
+then collect current non-disruptive evidence with `scripts/homeflix --json vpn verify`
+(or `--dry-run`). Dry-run mutates only Gluetun. Missing or stale evidence leaves
+acquisition stopped. The automated implementation is **fixture-tested only** and has
+**not received disposable real Debian/Ubuntu acceptance**. Treat live-host completion as
+unverified until the evidence below is collected on the target.
 
 ## Copy and paste an intent
 
@@ -50,8 +53,9 @@ or JSON output.
 Core preflight may create and remove bounded hardlink probes inside existing `torrents/` and
 `media/` directories. The agent must explain that operation before a live run. Missing VPN
 credentials are warnings during core preflight. Core can be configured and verified without
-them, but setup then stops safely: do not start acquisition services or improvise provider
-credential handling.
+them, but setup then stops safely: do not start qBittorrent, NZBGet, or Prowlarr, and do
+not improvise provider credential handling. Use `secrets vpn` and `vpn verify` when the
+operator is ready for the acquisition gate.
 
 ## Existing-storage core outcome
 

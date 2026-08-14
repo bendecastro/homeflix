@@ -39,22 +39,22 @@ Updated: 2026-08-14
 
 ## Task 1: Add secure VPN/provider credential handoff
 
-- [ ] Add failing tests proving `secrets vpn` refuses stdin/pipes and missing `/dev/tty`, enters user/password twice where confirmation applies, atomically updates mode-0600 `.env`, and emits key names/status only.
-- [ ] Add tests for provider-specific required keys discovered from a small supported schema: ProtonVPN/OpenVPN uses service credentials, while unsupported providers direct the agent to Gluetun's current documentation without accepting guessed keys.
-- [ ] Run `python3 -m unittest tests.test_envfile tests.test_acquisition -v`; expect failures.
-- [ ] Implement `read_from_tty(prompt, confirm=False)`, `set_vpn_secrets(provider, vpn_type)`, and `secrets vpn`. Never accept secret values as CLI arguments or JSON input.
-- [ ] Extend acquisition preflight so missing keys fail acquisition but leave `status` and core operations usable.
-- [ ] Run targeted tests and scan captured output for fixture secret values; expect no matches.
+- [x] Add failing tests proving `secrets vpn` refuses stdin/pipes and missing `/dev/tty`, enters user/password twice where confirmation applies, atomically updates mode-0600 `.env`, and emits key names/status only.
+- [x] Add tests for provider-specific required keys discovered from a small supported schema: ProtonVPN/OpenVPN uses service credentials, while unsupported providers direct the agent to Gluetun's current documentation without accepting guessed keys.
+- [x] Run `python3 -m unittest tests.test_envfile tests.test_acquisition -v`; expect failures.
+- [x] Implement `read_from_tty(prompt, confirm=False)`, `set_vpn_secrets(provider, vpn_type)`, and `secrets vpn`. Never accept secret values as CLI arguments or JSON input.
+- [x] Extend acquisition preflight so missing keys fail acquisition but leave `status` and core operations usable.
+- [x] Run targeted tests and scan captured output for fixture secret values; expect no matches.
 - [ ] Commit with `git add .env.example scripts/homeflix_setup/secrets.py scripts/homeflix_setup/preflight.py scripts/homeflix_setup/cli.py tests/test_acquisition.py tests/test_envfile.py && git commit -m "Add secure VPN credential handoff"`.
 
 ## Task 2: Start and verify Gluetun before any client
 
-- [ ] Add failing tests proving `vpn verify` runs core verification, acquisition preflight, `docker compose up -d gluetun`, built-in health polling, target/container DNS tests, and host-versus-tunnel public-IP comparison without printing either address.
-- [ ] Add refusal tests for equal host/tunnel egress, unresolved container DNS, unhealthy Gluetun, absent `/dev/net/tun`, and any already-running gated service before first verification.
-- [ ] Run `python3 -m unittest tests.test_vpn -v`; expect failures.
-- [ ] Implement `GluetunStatus`, `start_gluetun_only()`, `wait_gluetun_healthy()`, `resolve_in_namespace()`, and `compare_egress()` using bounded timeouts and redacted diagnostics.
-- [ ] Pin the Gluetun-only allowlist in code; assert in tests that it excludes qBittorrent, NZBGet, and Prowlarr.
-- [ ] Run VPN tests plus a dry-run JSON plan; expect only Gluetun mutation.
+- [x] Add failing tests proving `vpn verify` runs core verification, acquisition preflight, `docker compose up -d gluetun`, built-in health polling, target/container DNS tests, and host-versus-tunnel public-IP comparison without printing either address.
+- [x] Add refusal tests for equal host/tunnel egress, unresolved container DNS, unhealthy Gluetun, absent `/dev/net/tun`, and any already-running gated service before first verification.
+- [x] Run `python3 -m unittest tests.test_vpn -v`; expect failures.
+- [x] Implement `GluetunStatus`, `start_gluetun_only()`, `wait_gluetun_healthy()`, `resolve_in_namespace()`, and `compare_egress()` using bounded timeouts and redacted diagnostics.
+- [x] Pin the Gluetun-only allowlist in code; assert in tests that it excludes qBittorrent, NZBGet, and Prowlarr.
+- [x] Run VPN tests plus a dry-run JSON plan; expect only Gluetun mutation.
 - [ ] Commit with `git add scripts/homeflix_setup/vpn.py scripts/homeflix_setup/compose.py scripts/homeflix_setup/cli.py tests/test_vpn.py tests/fixtures/acquisition && git commit -m "Gate acquisition on verified VPN egress"`.
 
 ## Task 3: Prove fail-closed behavior and recover the tunnel

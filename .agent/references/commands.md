@@ -48,12 +48,22 @@ docker compose pull && docker compose up -d   # update
 Requires `BACKUP_DEST` in `.env`. Media and the checkout `.env` are not included.
 Restore refuses to write over live `CONFIG_ROOT`.
 
+## Acquisition VPN gate (non-disruptive)
+
+```bash
+scripts/homeflix secrets vpn                 # controlling tty only; writes key names/status
+scripts/homeflix --json vpn verify --dry-run # Gluetun-only plan; no secrets
+scripts/homeflix --json vpn verify           # contract + acquisition preflight + Gluetun start
+```
+
+Evidence is timestamp/image/config identity plus booleans. It expires after 24h or a
+relevant image/config change. Output must not include public IPs or secret values.
+Do not start qBittorrent, NZBGet, or Prowlarr from this command.
+
 ## VPN checks (Gluetun)
 
 ```bash
-docker exec gluetun curl -s https://api.ipify.org    # should show ProtonVPN IP, not home IP
 docker logs -f gluetun
-curl http://traefik.local:8080/api/http/routers      # Traefik routes
 ```
 
 ## Storage / host

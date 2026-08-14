@@ -490,3 +490,11 @@ vocabulary is pass | warning | failure | not-applicable | unknown. Unselected
 QuickSync is not-applicable and cannot wash mandatory unknowns. Envelope is still
 `status`/`passed`/`checks`; `findings` remain `verify contract` only.
 
+## [2026-08-14] build | Secure acquisition VPN gate
+
+Issue #9: `secrets vpn` collects ProtonVPN/OpenVPN credentials from a controlling
+tty (confirm, atomic mode-0600 `.env`, key names only). `vpn verify` reuses the
+stack contract, runs acquisition preflight, starts only Gluetun, then records
+bounded health/DNS/egress evidence that expires after 24h or an image/config
+change. `compose_up` remains CORE_SERVICES-only. Disruption stays #10.
+

@@ -14,6 +14,7 @@ from typing import Callable, Mapping, Protocol, Sequence
 import uuid
 
 from .envfile import EnvDocument
+from .secrets import GLUETUN_WIKI, required_vpn_secret_keys
 
 
 _STATUSES = {"pass", "warn", "fail"}
@@ -335,8 +336,26 @@ def run_preflight(
                 data_root_is_real = True
             _result(results, key.casefold(), "pass", f"{key} directory exists")
 
-    for key in ("VPN_USER", "VPN_PASSWORD"):
-        is_set = isinstance(_value(config, key), str) and bool(str(_value(config, key)))
+    provider = _value(config, "VPN_SERVICE_PROVIDER") or "protonvpn"
+    vpn_type = _value(config, "VPN_TYPE") or "openvpn"
+    provider_name = provider if isinstance(provider, str) else ""
+    type_name = vpn_type if isinstance(vpn_type, str) else ""
+    try:
+        required_keys = required_vpn_secret_keys(provider_name, type_name)
+    except ValueError:
+        status = "warn" if phase == "core" else "fail"
+        _result(
+            results,
+            "vpn_provider",
+            status,
+            f"unsupported VPN provider/type; see {GLUETUN_WIKI}",
+        )
+        required_keys = ()
+    else:
+        _result(results, "vpn_provider", "pass", "VPN provider/type is supported")
+    for key in required_keys:
+        raw = _value(config, key)
+        is_set = isinstance(raw, str) and bool(raw.strip())
         if is_set:
             _result(results, key.casefold(), "pass", f"{key} is set")
         else:

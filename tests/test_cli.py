@@ -344,3 +344,17 @@ class VerifyCoreCliTests(unittest.TestCase):
         self.assertEqual(result["checks"][0]["status"], "unknown")
         self.assertNotIn("127.0.0.1", stdout)
 
+    def test_verify_core_choice_does_not_include_vpn(self) -> None:
+        from scripts.homeflix_setup.cli import build_parser
+
+        parser = build_parser()
+        with self.assertRaises(SystemExit):
+            parser.parse_args(["verify", "vpn"])
+        parsed = parser.parse_args(["vpn", "verify", "--dry-run"])
+        self.assertEqual(parsed.command, "vpn")
+        self.assertEqual(parsed.vpn_command, "verify")
+        self.assertTrue(parsed.dry_run)
+        parsed_reveal = parser.parse_args(["secrets", "reveal", "jellyfin"])
+        self.assertEqual(parsed_reveal.secrets_command, "reveal")
+        self.assertEqual(parsed_reveal.service, "jellyfin")
+

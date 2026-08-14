@@ -12,8 +12,8 @@ from unittest import mock
 from unittest.mock import patch
 
 from scripts.homeflix_setup.compose import (
-    CORE_SERVICES, PROXY_SUBNET_CANDIDATES, _atomic_write, build_override, compose_inventory,
-    compose_ps, compose_up, configure,
+    CORE_SERVICES, GLUETUN_SERVICES, PROXY_SUBNET_CANDIDATES, _atomic_write, build_override,
+    compose_inventory, compose_ps, compose_up, compose_up_gluetun, configure,
 )
 from scripts.homeflix_setup.discover import (
     GraphicsDeviceFact, GraphicsFact, HostFacts, LanNetworkFact, MountFact,
@@ -271,6 +271,23 @@ class ComposeExecutionTests(unittest.TestCase):
         self.addCleanup(temporary.cleanup)
         with self.assertRaises(ValueError):
             compose_up(root, ("gluetun",), self.Runner())
+
+    def test_gluetun_allowlist_starts_only_gluetun_and_refuses_gated_clients(self) -> None:
+        temporary, root = self.make_root()
+        self.addCleanup(temporary.cleanup)
+        self.assertEqual(GLUETUN_SERVICES, ("gluetun",))
+        runner = self.Runner()
+        compose_up_gluetun(root, GLUETUN_SERVICES, runner)
+        rendered = " ".join(runner.commands[0])
+        self.assertIn("gluetun", rendered)
+        self.assertIn("--no-deps", rendered)
+        self.assertIn("--detach", rendered)
+        for forbidden in ("qbittorrent", "nzbget", "prowlarr"):
+            self.assertNotIn(forbidden, rendered)
+            with self.assertRaises(ValueError):
+                compose_up_gluetun(root, (forbidden,), self.Runner())
+        with self.assertRaises(ValueError):
+            compose_up(root, GLUETUN_SERVICES, self.Runner())
 
 
 class StorageBindTests(unittest.TestCase):

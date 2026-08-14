@@ -70,7 +70,7 @@ connectivity rather than leaking.
 |---|---|---|
 | `VPN_SERVICE_PROVIDER` | `protonvpn` | ~40 supported — see the [Gluetun wiki](https://github.com/qdm12/gluetun-wiki). |
 | `VPN_TYPE` | `openvpn` | `openvpn` or `wireguard`. |
-| `VPN_USER` / `VPN_PASSWORD` | — | Provider's *OpenVPN* credentials, not your account login. |
+| `VPN_USER` / `VPN_PASSWORD` | — | Provider's *OpenVPN* credentials, not your account login. Enter them with `scripts/homeflix secrets vpn` on a controlling terminal; the command writes key names only. Unsupported providers are refused and point at the Gluetun wiki. |
 | `VPN_SERVER_COUNTRIES` | `Netherlands` | Exit country. |
 | `VPN_DNS` | `1.1.1.1` | DNS inside the tunnel. |
 | `VPN_HEALTH_TARGET` | `cloudflare.com:443` | What Gluetun's built-in healthcheck probes. |

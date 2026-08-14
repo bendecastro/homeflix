@@ -29,6 +29,7 @@ ALLOWED_PROXY_NETWORKS = tuple(
     for cidr in ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16")
 )
 CORE_SERVICES = ("traefik", "jellyfin", "jellyseerr", "radarr", "sonarr")
+GLUETUN_SERVICES = ("gluetun",)
 _COMPOSE_STATES = {"created", "dead", "exited", "paused", "removing", "restarting", "running"}
 _COMPOSE_HEALTH = {"", "healthy", "starting", "unhealthy"}
 _COMPOSE_SERVICE_NAME = re.compile(r"[a-z0-9][a-z0-9_.-]*\Z", re.ASCII)
@@ -322,6 +323,29 @@ def compose_command(
     )
 
 
+def _compose_up_allowlist(
+    repository_root: str | os.PathLike[str],
+    services: Sequence[str],
+    runner: Runner,
+    allowlist: Sequence[str],
+    *,
+    label: str,
+    project_name: str | None = None,
+    timeout: float = 300,
+) -> subprocess.CompletedProcess[str]:
+    selected = tuple(services)
+    permitted = tuple(allowlist)
+    if not selected or any(service not in permitted for service in selected):
+        raise ValueError(f"Compose {label} deployment services must come from the {label} allowlist")
+    argv = (
+        *compose_command(repository_root, project_name=project_name),
+        "up", "--detach", "--no-deps", *selected,
+    )
+    if timeout <= 0:
+        raise TimeoutError("Compose startup deadline exhausted")
+    return runner.run(argv, check=False, timeout=min(300, timeout))
+
+
 def compose_up(
     repository_root: str | os.PathLike[str],
     services: Sequence[str],
@@ -330,18 +354,38 @@ def compose_up(
     project_name: str | None = None,
     timeout: float = 300,
 ) -> subprocess.CompletedProcess[str]:
-    """Start exactly the named services; callers must perform preflight first."""
+    """Start exactly the named core services; callers must perform preflight first."""
 
-    selected = tuple(services)
-    if not selected or any(service not in CORE_SERVICES for service in selected):
-        raise ValueError("Compose core deployment services must come from CORE_SERVICES")
-    argv = (
-        *compose_command(repository_root, project_name=project_name),
-        "up", "--detach", "--no-deps", *selected,
+    return _compose_up_allowlist(
+        repository_root,
+        services,
+        runner,
+        CORE_SERVICES,
+        label="core",
+        project_name=project_name,
+        timeout=timeout,
     )
-    if timeout <= 0:
-        raise TimeoutError("Compose startup deadline exhausted")
-    return runner.run(argv, check=False, timeout=min(300, timeout))
+
+
+def compose_up_gluetun(
+    repository_root: str | os.PathLike[str],
+    services: Sequence[str],
+    runner: Runner,
+    *,
+    project_name: str | None = None,
+    timeout: float = 300,
+) -> subprocess.CompletedProcess[str]:
+    """Start exactly Gluetun. Gated download/indexer services stay off this path."""
+
+    return _compose_up_allowlist(
+        repository_root,
+        services,
+        runner,
+        GLUETUN_SERVICES,
+        label="gluetun",
+        project_name=project_name,
+        timeout=timeout,
+    )
 
 
 def _json_records(text: str) -> list[object]:

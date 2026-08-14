@@ -184,6 +184,24 @@ class SetupStateTests(TemporaryDirectoryTestCase, unittest.TestCase):
                 with self.assertRaises(ValueError):
                     SetupState.load(path)
 
+    def test_evidence_rejects_addresses_and_unknown_fields(self) -> None:
+        path = self.temp_path / "setup.json"
+        with self.assertRaisesRegex(ValueError, "not permitted"):
+            SetupState(evidence={"host_ip": "203.0.113.10"}).save(path)
+        with self.assertRaisesRegex(ValueError, "unsafe string"):
+            SetupState(
+                evidence={
+                    "recorded_at": "2026-08-14T12:00:00Z",
+                    "image_id": "203.0.113.10",
+                    "config_digest": "a" * 64,
+                    "tunnel_healthy": True,
+                    "tunnel_device": True,
+                    "namespace_dns": True,
+                    "egress_distinct": True,
+                }
+            ).save(path)
+        self.assertFalse(path.exists())
+
     def test_secret_like_checkpoint_names_are_rejected(self) -> None:
         path = self.temp_path / "setup.json"
         for name in ("api_key", "password_saved", "jellyfin_token", "env_value", "credential"):

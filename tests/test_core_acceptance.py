@@ -108,7 +108,10 @@ class CoreFixtureAcceptanceTests(unittest.TestCase):
             runner = JourneyRunner(fixture, root / "mounted")
             preflight = run_preflight(environment, "core", runner)
             self.assertTrue(preflight.passed, preflight.to_dict())
-            self.assertEqual({item.status for item in preflight.results if item.name.startswith("vpn_")}, {"warn"})
+            vpn = {item.name: item.status for item in preflight.results if item.name.startswith("vpn_")}
+            self.assertEqual(vpn["vpn_user"], "warn")
+            self.assertEqual(vpn["vpn_password"], "warn")
+            self.assertEqual(vpn.get("vpn_provider", "pass"), "pass")
 
             def http_waiter(url, *, headers=None, timeout=0):
                 host = (headers or {}).get("Host", "").split(".", 1)[0]

@@ -2,15 +2,25 @@
 
 from __future__ import annotations
 
+import getpass
 import os
 from pathlib import Path
 import secrets
+from typing import Callable
 
 from .envfile import EnvDocument, update_env
 
 
 JELLYFIN_USER_KEY = "JELLYFIN_ADMIN_USER"
 JELLYFIN_PASSWORD_KEY = "JELLYFIN_ADMIN_PASSWORD"
+GLUETUN_WIKI = "https://github.com/qdm12/gluetun-wiki"
+SUPPORTED_VPN_SECRETS: dict[tuple[str, str], tuple[tuple[str, str], ...]] = {
+    ("protonvpn", "openvpn"): (
+        ("VPN_USER", "VPN username: "),
+        ("VPN_PASSWORD", "VPN password: "),
+    ),
+}
+TtyReader = Callable[..., str]
 
 
 def ensure_service_credentials(path: str | os.PathLike[str]) -> dict[str, object]:
@@ -57,3 +67,70 @@ def reveal_jellyfin(path: str | os.PathLike[str], *, tty_path: str = "/dev/tty")
             terminal.flush()
     finally:
         os.close(descriptor)
+
+
+def _normalize_vpn_choice(value: str | None) -> str:
+    return (value or "").strip().casefold()
+
+
+def required_vpn_secret_keys(provider: str, vpn_type: str) -> tuple[str, ...]:
+    """Return the secret keys required for a supported provider/type pair."""
+
+    schema = SUPPORTED_VPN_SECRETS.get((_normalize_vpn_choice(provider), _normalize_vpn_choice(vpn_type)))
+    if schema is None:
+        raise ValueError(
+            f"unsupported VPN provider/type {provider}/{vpn_type}; "
+            f"see {GLUETUN_WIKI} for current provider requirements"
+        )
+    return tuple(name for name, _prompt in schema)
+
+
+def read_from_tty(prompt: str, *, confirm: bool = False, tty_path: str = "/dev/tty") -> str:
+    """Read one secret from the controlling terminal, optionally confirming it."""
+
+    try:
+        descriptor = os.open(tty_path, os.O_RDWR | getattr(os, "O_NOCTTY", 0))
+    except OSError as error:
+        raise RuntimeError("a controlling terminal is required to enter credentials") from error
+    try:
+        if not os.isatty(descriptor):
+            raise RuntimeError("a controlling terminal is required to enter credentials")
+        with os.fdopen(descriptor, "w+", encoding="utf-8", closefd=False) as terminal:
+            first = getpass.getpass(prompt, stream=terminal)
+            if confirm:
+                second = getpass.getpass("Confirm: ", stream=terminal)
+                if first != second:
+                    raise ValueError("entered values did not match")
+            return first
+    finally:
+        os.close(descriptor)
+
+
+def set_vpn_secrets(
+    path: str | os.PathLike[str],
+    *,
+    provider: str | None = None,
+    vpn_type: str | None = None,
+    reader: TtyReader = read_from_tty,
+) -> dict[str, object]:
+    """Collect provider-specific VPN secrets from a tty and write only key status."""
+
+    env_path = Path(path)
+    document = EnvDocument.load(env_path) if env_path.exists() else EnvDocument([])
+    resolved_provider = provider if provider is not None else document.get("VPN_SERVICE_PROVIDER") or "protonvpn"
+    resolved_type = vpn_type if vpn_type is not None else document.get("VPN_TYPE") or "openvpn"
+    schema = SUPPORTED_VPN_SECRETS.get(
+        (_normalize_vpn_choice(resolved_provider), _normalize_vpn_choice(resolved_type))
+    )
+    if schema is None:
+        raise ValueError(
+            f"unsupported VPN provider/type {resolved_provider}/{resolved_type}; "
+            f"see {GLUETUN_WIKI} for current provider requirements"
+        )
+    updates: dict[str, str] = {}
+    for name, prompt in schema:
+        value = reader(prompt, confirm=True)
+        if not isinstance(value, str) or not value:
+            raise ValueError(f"{name} must not be empty")
+        updates[name] = value
+    return update_env(env_path, updates, updates.keys())
