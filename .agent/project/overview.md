@@ -48,8 +48,8 @@ didn't survive review.
 
 1. **Remote access for off-LAN family** — none designed; LAN-only today (ADR-0006).
    The single biggest decision left (→ future ADR-0007).
-2. **Off-box backups** — current backups sit on the same HDD as the library; not a real
-   backup.
+2. ~~**Off-box backups**~~ — mechanism shipped (`scripts/backup-config.sh`). Operator
+   must set `BACKUP_DEST` and prove a restore; media stays out of scope.
 3. **Traefik dashboard is unauthenticated** (`--api.insecure=true`) — harden before any
    exposure.
 4. **`:latest` + Watchtower auto-update** on a family box — decide pin-vs-auto.

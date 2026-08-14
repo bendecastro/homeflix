@@ -57,7 +57,9 @@ Phase 0 is largely complete — the focus is reconcile → deploy → verify →
 
 ## Phase 5 — Resilience & handoff
 - [ ] Decide `:latest`+Watchtower vs pinned+notify.
-- [ ] **Off-box** config backups + a tested restore.
+- [x] **Off-box** config backup *mechanism* (`scripts/backup-config.sh` +
+      `restore-config.sh`). Operator still chooses `BACKUP_DEST` and must prove a
+      restore on their host.
 - [ ] Confirm auto-start on boot; Glances/deunhealth monitoring; family "how to use" doc.
 - **Exit:** simulate reboot + restore; the household self-serves without the admin.
 

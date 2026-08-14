@@ -1,6 +1,6 @@
 # homeflix — Storage
 
-Updated: 2026-08-04
+Updated: 2026-08-14
 Decision: [ADR-0008](../decisions/adr-0008-single-filesystem-data-root-hardlinks.md)
 (supersedes ADR-0003).
 
@@ -17,7 +17,7 @@ values are shown for reference; they belong in `.env`, not in committed files.
 | `${CONFIG_ROOT}` | SSD | `${CONFIG_ROOT}` | per-service config + SQLite DBs |
 | `${CACHE_ROOT}` | SSD | `${CACHE_ROOT}` | Jellyfin transcode scratch, thumbnails |
 | `${DATA_ROOT}` | HDD | `${DATA_ROOT}` | downloads **and** media — one filesystem |
-| `${BACKUP_ROOT}` | HDD (for now) | `${BACKUP_ROOT}` | config tarballs — see open risks |
+| `${BACKUP_DEST}` | off-box | rsync/scp dest in `.env` | dated `CONFIG_ROOT` archives — not the library disk |
 
 ## SSD — config + cache (~50–100GB is plenty)
 
@@ -96,8 +96,8 @@ sudo chmod -R a=,a+rX,u+w,g+w "${DATA_ROOT}"   # 775 dirs / 664 files
 
 ## Open risks
 
-- **Backups are on the same physical HDD as the library** → not a real backup (one
-  drive failure loses both). Needs an off-box destination. See `project/deployment.md`.
+- **Same-disk config backups are not backups.** Use `BACKUP_DEST` on another
+  filesystem via `scripts/backup-config.sh`. See `project/deployment.md`.
 - **No redundancy** on either tier (single SSD, single HDD).
 - **Shared spindle:** torrent random-writes and playback reads now share the HDD.
   Acceptable for a household; if it bites, add a second disk for `torrents/` — do *not*

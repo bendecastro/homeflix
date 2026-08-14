@@ -1,6 +1,6 @@
 # homeflix — Deployment
 
-Updated: 2026-08-04
+Updated: 2026-08-14
 Decisions: [ADR-0002](../decisions/adr-0002-host-minipc-debian-docker.md) (host),
 [ADR-0008](../decisions/adr-0008-single-filesystem-data-root-hardlinks.md) (storage layout).
 Source: prior private design package (see `references/source-research.md`).
@@ -60,10 +60,15 @@ Also whether the wiki moves into the repo. See `tasks/active.md`.
 
 ## Monitoring & lifecycle
 
-- **Glances** (`glances.local`) — system stats.
-- **deunhealth** — restarts unhealthy containers.
+- **Glances** (`glances.${DOMAIN}`) — host CPU/mem/process via `pid: host`. No
+  Docker socket (per-container stats dropped).
+- **deunhealth** — restarts unhealthy containers **only** where a `healthcheck` and
+  `deunhealth.restart.on.unhealthy=true` are both present. This compose does not yet
+  attach that pair to the VPN'd services.
 - **Watchtower** — auto-update + cleanup, daily at 02:00.
 - All services `restart: unless-stopped`.
+- `depends_on: condition: service_healthy` applies to `docker compose up`, **not** to
+  daemon restarts on boot. Do not add a second supervisor for boot order.
 - ⚠️ **Tension:** every image is pinned to `:latest` AND Watchtower auto-updates on a
   family-critical box → a bad upstream image can silently break things overnight.
   Decide: pin real version tags + notify-only, or accept auto-update. Record as a
@@ -71,12 +76,23 @@ Also whether the wiki moves into the repo. See `tasks/active.md`.
 
 ## Backups
 
-- Prior design: nightly `tar` of `${CONFIG_ROOT}` → `${BACKUP_ROOT}/daily` via cron,
-  30-day retention (`scripts/backup.sh`); disk-usage monitor at 08:00.
-- ⚠️ **These backups live on the same single HDD as the library** → not a real backup.
-  Add an **off-box** destination (second drive / NAS / cloud) and **test a restore**
-  before calling Phase 5 done. Media itself is large — decide separately whether to
-  back it up.
+`scripts/backup-config.sh` snapshots `${CONFIG_ROOT}` (not media, not the checkout
+`.env`) to `BACKUP_DEST` and keeps `BACKUP_KEEP` dated archives. SQLite files are
+replaced with `sqlite3 .backup` copies so a live database is not torn. Destination
+lives only in `.env`.
+
+The prior same-disk `backup.sh` stays retired. A backup that has never been restored
+is not evidence — use `scripts/restore-config.sh --to` a scratch directory.
+
+### Restore runbook (dead host, you did not write this)
+
+1. `./scripts/restore-config.sh --list`
+2. `./scripts/restore-config.sh --to /tmp/homeflix-restore-test`
+3. Spot-check: `sqlite3 /tmp/homeflix-restore-test/radarr/radarr.db 'SELECT COUNT(*) FROM Movies;'`
+4. Stop the stack if anything is running: `docker compose down`
+5. Copy the scratch tree over the new `${CONFIG_ROOT}` (permissions: `PUID`/`PGID`)
+6. Restore the checkout `.env` separately (0600), then `docker compose up -d`
+7. If this was a drill, delete the scratch directory
 
 ## Secrets at deploy time
 

@@ -1,6 +1,6 @@
 # Active Tasks — Live Cursor
 
-Updated: 2026-08-09
+Updated: 2026-08-14
 
 > First thing the next agent reads after `index.md`. Keep it true.
 
@@ -25,8 +25,10 @@ Updated: 2026-08-09
 2. Execute the encrypted-storage slice with loop-device tests before any real-disk test.
 3. Execute acquisition only with authorized VPN/provider credentials and real fail-closed
    evidence.
-4. Resolve the independent Traefik dashboard, update policy, remote-access, and off-box
-   backup decisions already tracked elsewhere.
+4. Resolve the independent Traefik dashboard, update policy, and remote-access
+   decisions already tracked elsewhere. Off-box backup mechanism shipped
+   (`BACKUP_DEST` + `scripts/backup-config.sh`); operators still pick a destination
+   and must test a restore.
 
 ## Decisions recorded so far
 ADR-0001 (wiki) · 0002 (host) · ~~0003 (storage)~~ superseded · 0004 (Jellyfin) ·

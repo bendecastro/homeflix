@@ -1,6 +1,6 @@
 # References — Gotchas
 
-Updated: 2026-08-11
+Updated: 2026-08-14
 
 Traps specific to the homeflix design, plus the generic classics. Add real ones as they
 bite.
@@ -28,9 +28,15 @@ bite.
 - **⚠️ Historical (resolved):** the two prior compose variants disagreed on the
   `/downloads` mount, which would have broken imports. ADR-0008's single `/data` root
   removes the whole class of bug — there is no separate downloads mount to drift.
-- **Backups on the same HDD as the library = not a backup.** Prior `backup.sh` writes to
-  `${BACKUP_ROOT}`, the same drive as `library/`. One drive failure loses both.
-  Needs an off-box target.
+- **Backups on the same HDD as the library = not a backup.** Prior `backup.sh` wrote to
+  `${BACKUP_ROOT}` on the library drive. Use `scripts/backup-config.sh` → `BACKUP_DEST`
+  (must be another filesystem) and prove a restore with `scripts/restore-config.sh`.
+  Media and the checkout `.env` are not included.
+- **`:ro` on `/var/run/docker.sock` does not restrict the Docker API.** It is
+  root-equivalent regardless. Glances no longer mounts it (`pid: host` only).
+  Remaining: Traefik (discovery), deunhealth (restart), Watchtower (optional updates).
+- **`depends_on: service_healthy` does not survive a host reboot.** Those conditions
+  apply to `docker compose up`, not to `restart: unless-stopped` on boot.
 - **`:latest` + Watchtower auto-update at 02:00** on a family-critical box → a bad
   upstream image can break things unattended. Consider pinned tags + notify-only.
 - **Traefik `--api.insecure=true`** → dashboard with no auth. Fine on trusted LAN,

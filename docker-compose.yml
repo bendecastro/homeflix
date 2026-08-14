@@ -45,6 +45,9 @@ services:
       - "443:443"
       - "8080:8080"
     volumes:
+      # Docker provider service discovery. :ro on a unix socket does not restrict
+      # the API — this is still root-equivalent. Traefik cannot discover containers
+      # without it.
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - ${CONFIG_ROOT}/traefik:/traefik
     networks:
@@ -113,6 +116,13 @@ services:
   # ============================================
   # Download clients + indexer manager (behind VPN)
   # ============================================
+  # depends_on: { gluetun: { condition: service_healthy } } is honoured by
+  # `docker compose up` only. The Docker daemon ignores it on
+  # `restart: unless-stopped` after a host reboot, so a VPN'd service can start
+  # against a Gluetun with no tunnel. Do not add a second supervisor for boot
+  # order. deunhealth only restarts containers that have BOTH a Docker
+  # healthcheck AND deunhealth.restart.on.unhealthy=true — this file does not
+  # yet attach that pair.
   qbittorrent:
     image: lscr.io/linuxserver/qbittorrent:${QBITTORRENT_TAG:-latest}
     container_name: qbittorrent
@@ -292,13 +302,16 @@ services:
   # ============================================
   # Monitoring & lifecycle
   # ============================================
+  # Host CPU/mem/process via pid: host. No Docker socket: per-container stats
+  # are not worth root-equivalent access on an HTTP UI. :ro on a socket would
+  # not have restricted the API anyway.
   glances:
     image: nicolargo/glances:${GLANCES_TAG:-latest}
     container_name: glances
+    pid: host
     environment:
       GLANCES_OPT: -w
     volumes:
-      - /var/run/docker.sock:/var/run/docker.sock:ro
       - ${CONFIG_ROOT}/glances:/config
     networks:
       - traefik-network
@@ -318,6 +331,9 @@ services:
       LOG_LEVEL: ${LOG_LEVEL:-info}
       TZ: ${TZ:-UTC}
     volumes:
+      # Needs the API to inspect health and restart labeled containers.
+      # :ro does not restrict writes. A socket proxy was considered and declined
+      # — extra service + Traefik discovery risk for one write client.
       - /var/run/docker.sock:/var/run/docker.sock:ro
     restart: unless-stopped
 
@@ -334,6 +350,8 @@ services:
       WATCHTOWER_SCHEDULE: ${WATCHTOWER_SCHEDULE:-0 0 2 * * *}
       TZ: ${TZ:-UTC}
     volumes:
+      # Pull/recreate updated images. :ro does not restrict the API. Service is
+      # optional; auto-update of :latest on a family box is an open decision.
       - /var/run/docker.sock:/var/run/docker.sock:ro
     networks:
       - traefik-network

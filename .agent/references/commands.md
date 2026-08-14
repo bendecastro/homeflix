@@ -1,6 +1,6 @@
 # References — Commands
 
-Updated: 2026-06-14
+Updated: 2026-08-14
 Source: prior private design package (see `references/source-research.md`). Verify on the host;
 summarize output, never paste secrets.
 
@@ -14,6 +14,18 @@ docker compose restart <svc>    # restart one
 docker logs -f <svc>            # follow logs
 docker compose pull && docker compose up -d   # update
 ```
+
+## CONFIG_ROOT backup (off-box)
+
+```bash
+./scripts/backup-config.sh                 # snapshot + copy to BACKUP_DEST
+./scripts/backup-config.sh --install-cron  # daily 03:15
+./scripts/restore-config.sh --list
+./scripts/restore-config.sh --to /tmp/homeflix-restore-test
+```
+
+Requires `BACKUP_DEST` in `.env`. Media and the checkout `.env` are not included.
+Restore refuses to write over live `CONFIG_ROOT`.
 
 ## VPN checks (Gluetun)
 

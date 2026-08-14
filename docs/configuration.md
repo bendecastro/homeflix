@@ -31,6 +31,8 @@ There is no VPN-secret setup command in the current core slice.
 | `DATA_ROOT` | — | Downloads **and** media. **Must be one filesystem.** Not under `/home`. |
 | `CONFIG_ROOT` | — | Service configs and databases. The thing to back up. |
 | `CACHE_ROOT` | — | Jellyfin transcode scratch. Ephemeral. |
+| `BACKUP_DEST` | — | Off-box rsync destination for `scripts/backup-config.sh` (`user@host:/path` or a directory on another filesystem). Required for backups; empty means the script refuses to run. Does not include the checkout `.env`. |
+| `BACKUP_KEEP` | `7` | Dated archives retained at `BACKUP_DEST`. Oldest are deleted first. |
 
 Expected structure under `DATA_ROOT`:
 
@@ -140,6 +142,32 @@ sharing another's namespace has no IP of its own, so Traefik can't discover it d
 If it needs both downloads and media, give it the single root `${DATA_ROOT}:/data`.
 Never two separate mounts.
 
+## Config backups
+
+`CONFIG_ROOT` is small and irreplaceable (every *arr database, Jellyfin users and
+watch state, Jellyseerr history). Media is large and re-acquirable and is **not**
+backed up by this mechanism. The checkout `.env` is a separate secret file — back
+it up with equivalent 0600 protection; these archives do not include it.
+
+```bash
+# .env
+BACKUP_DEST=user@other-host:/path/to/homeflix-config
+BACKUP_KEEP=7
+
+./scripts/backup-config.sh                 # one run
+./scripts/backup-config.sh --install-cron  # daily 03:15
+
+# Prove the archive before you rely on it (scratch dir only — will not clobber CONFIG_ROOT)
+./scripts/restore-config.sh --list
+./scripts/restore-config.sh --to /tmp/homeflix-restore-test
+```
+
+The backup copies `CONFIG_ROOT`, then replaces each SQLite file with
+`sqlite3 .backup` so a live *arr/Jellyfin database is not snapshotted mid-write.
+A backup that has never been restored is not evidence.
+
+Do **not** point `BACKUP_DEST` at the same filesystem as `DATA_ROOT`.
+
 ## Security notes
 
 Two known-open items, marked in `docker-compose.yml`:
@@ -149,6 +177,9 @@ Two known-open items, marked in `docker-compose.yml`:
 - **No remote access is configured.** The stack is LAN-only by design. See
   [ADR-0007](../.agent/decisions/adr-0007-remote-access.md) for the intended
   approach (Tailscale, with a Cloudflare Tunnel fallback for TVs that can't run it).
+- **`:ro` on `/var/run/docker.sock` does not restrict the Docker API.** Glances does
+  not mount the socket (host metrics via `pid: host` only). Traefik, deunhealth, and
+  Watchtower still do, with a one-line justification on each volume in compose.
 
 Never commit `.env`. If a credential leaks, rotate it — rewriting git history doesn't
 un-publish anything already pushed.

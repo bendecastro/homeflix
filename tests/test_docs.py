@@ -77,8 +77,17 @@ class DocumentationContractTests(unittest.TestCase):
         template = (ROOT / ".env.example").read_text(encoding="utf-8")
         self.assertIn("DATA_ROOT=/srv/homeflix/data", template)
         self.assertIn("TZ=UTC", template)
+        self.assertIn("BACKUP_DEST=", template)
+        self.assertIn("BACKUP_KEEP=7", template)
         for private_value in ("/mnt/sidecar", "Europe/Lisbon", "/home/ben", "beelink"):
             self.assertNotIn(private_value, template)
+
+    def test_glances_does_not_mount_docker_socket(self) -> None:
+        compose = (ROOT / "docker-compose.yml").read_text(encoding="utf-8")
+        glances = compose.split("\n  glances:", 1)[1].split("\n  deunhealth:", 1)[0]
+        self.assertNotIn("docker.sock", glances)
+        self.assertIn("pid: host", glances)
+        self.assertIn("/var/run/docker.sock", compose)
 
     def test_repo_local_markdown_links_exist_and_anchors_are_valid(self) -> None:
         for document in CHECKED_DOCS:

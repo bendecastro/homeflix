@@ -131,5 +131,9 @@ Common for the library disk, and workable, but:
 ## Backups
 
 Config is small and irreplaceable; media is large and re-acquirable. Back up
-`CONFIG_ROOT` **off the box** — a backup on the same physical disk as the library is not
-a backup, since one failure loses both. Test a restore before you rely on it.
+`CONFIG_ROOT` **off the box** with `scripts/backup-config.sh` — a backup on the same
+physical disk as the library is not a backup, since one failure loses both. Set
+`BACKUP_DEST` in `.env`, install the daily cron, and prove a restore into a scratch
+directory with `scripts/restore-config.sh` before you rely on it. See
+[configuration](configuration.md#config-backups). The checkout `.env` is a separate
+secret and is not inside these archives.

@@ -442,3 +442,17 @@ Ship `DOMAIN=homeflix` in `.env.example`, the discover/CLI fallback, and user do
 `.local` remains documented as mDNS-only. `home.arpa` is the RFC 8375 alternative.
 `.homeflix` is not reserved; operators must serve it locally.
 
+## [2026-08-14] build | Portable reboot caveat, Glances socket drop, config backup
+
+Generalized three production-proved mechanisms (no host paths, destinations, or
+household facts):
+
+- Compose comments: `depends_on: service_healthy` is `compose up` only.
+- Glances no longer mounts `/var/run/docker.sock` (`pid: host` for host metrics).
+  Traefik / deunhealth / Watchtower remain, justified. Socket proxy declined.
+- `scripts/backup-config.sh` + `restore-config.sh` with `BACKUP_DEST` /
+  `BACKUP_KEEP`. Media and the checkout `.env` are out of scope.
+
+This compose still does not pair VPN'd services with deunhealth healthchecks;
+that hole is documented rather than silently claimed fixed.
+
