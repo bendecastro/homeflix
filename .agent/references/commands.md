@@ -40,14 +40,21 @@ docker compose pull && docker compose up -d   # update
 ## CONFIG_ROOT backup (off-box)
 
 ```bash
-./scripts/backup-config.sh                 # snapshot + copy to BACKUP_DEST
-./scripts/backup-config.sh --install-cron  # daily 03:15
+scripts/homeflix --json backup create
+scripts/homeflix --json backup list
+scripts/homeflix --json backup retrieve --archive NAME --to FILE
+scripts/homeflix --json backup prune
+scripts/homeflix --json backup restore --to SCRATCH [--archive NAME]
+./scripts/backup-config.sh                 # compatibility: local create
+./scripts/backup-config.sh --install-cron  # daily 03:15 (stays in the shell)
 ./scripts/restore-config.sh --list
 ./scripts/restore-config.sh --to /tmp/homeflix-restore-test
 ```
 
 Requires `BACKUP_DEST` in `.env`. Media and the checkout `.env` are not included.
-Restore refuses to write over live `CONFIG_ROOT`.
+JSON shows `dest=set`, never the destination path. Restore refuses to write over
+live `CONFIG_ROOT`. SSH destinations are not implemented (#8). Fixture-accepted
+only; not live-host proof.
 
 ## Acquisition VPN gate (non-disruptive)
 

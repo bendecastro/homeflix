@@ -11,7 +11,13 @@ Updated: 2026-08-16
   executable stack contract, reliable first-use reconciliation, truthful verification
   modes, fail-closed backup recovery, and the absorbed acquisition phase. Issue map:
   [tasks.md](../../docs/changes/deep-homeflix-operations/tasks.md).
-- **In this worktree:** issue **#6** reliable Jellyfin discovery — core
+- **In this worktree:** issue **#7** fail-closed local backup and scratch restore —
+  `scripts/homeflix --json backup {create,list,retrieve,prune,restore}` snapshots
+  `CONFIG_ROOT` with the SQLite Online Backup API, refuses same-filesystem and
+  remote destinations, and restores only into empty scratch space after archive
+  member validation. Fixture-accepted only; not live-host proof. SSH transport
+  remains **#8**.
+- **Also in this worktree:** issue **#6** reliable Jellyfin discovery — core
   initialize/reconcile creates one path-targeted Emby/Jellyfin connection
   (`/Library/Media/Updated`) and one unconditional `Library/Refresh` webhook in
   both Radarr and Sonarr. The targeted Test is `/Notifications/Admin` only; the
@@ -33,8 +39,8 @@ Updated: 2026-08-16
 
 ## Next up (priority order)
 
-1. Drain deep-operations issues #4–#13 in dependency order; #4, #6, #9, and #10 are
-   in this tree; #7 can start independently.
+1. Drain deep-operations issues #4–#13 in dependency order; #4, #6, #7, #9, and #10 are
+   in this tree; #8 can start after #7.
 2. Verify core on a disposable Debian/Ubuntu target before claiming general host support.
 3. Execute the encrypted-storage slice with loop-device tests before any real-disk test.
 4. Resolve the independent Traefik dashboard, update policy, and remote-access decisions.

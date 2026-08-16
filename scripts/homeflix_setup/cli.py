@@ -12,6 +12,7 @@ import time
 from typing import Sequence
 
 from .api import ApiError
+from .backup import BackupError, create_backup, list_backups, prune_backups, restore_backup, retrieve_backup
 from .command import CommandRunner
 from .compose import configure, render_compose_config
 from .contract import evaluate_stack_contract
@@ -130,6 +131,19 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="prove VPN fail-closed behavior and restore the prior running set",
     )
+    backup_parser = subparsers.add_parser("backup", help="create and restore CONFIG_ROOT backup artifacts")
+    backup_subparsers = backup_parser.add_subparsers(dest="backup_command", required=True)
+    backup_subparsers.add_parser("create", help="snapshot CONFIG_ROOT into the local artifact repository")
+    backup_subparsers.add_parser("list", help="list local backup artifacts newest first")
+    retrieve_parser = backup_subparsers.add_parser("retrieve", help="copy one artifact out of the repository")
+    retrieve_parser.add_argument("--archive", required=True, help="archive filename")
+    retrieve_parser.add_argument("--to", required=True, dest="retrieve_to", help="destination file or directory")
+    backup_subparsers.add_parser("prune", help="retain BACKUP_KEEP matching artifacts")
+    restore_parser = backup_subparsers.add_parser(
+        "restore", help="extract one artifact into an empty scratch directory"
+    )
+    restore_parser.add_argument("--to", required=True, dest="restore_to", help="empty scratch directory")
+    restore_parser.add_argument("--archive", help="archive filename (default: newest)")
     return parser
 
 
@@ -498,6 +512,34 @@ def main(argv: Sequence[str] | None = None, *, repository_root: Path | None = No
                     label="VPN verification refused",
                     error=RuntimeError("VPN gate could not be verified safely"),
                 )
+    elif arguments.command == "backup":
+        try:
+            if arguments.backup_command == "create":
+                result = create_backup(root)
+            elif arguments.backup_command == "list":
+                result = list_backups(root)
+            elif arguments.backup_command == "retrieve":
+                result = retrieve_backup(root, archive=arguments.archive, destination=arguments.retrieve_to)
+            elif arguments.backup_command == "prune":
+                result = prune_backups(root)
+            elif arguments.backup_command == "restore":
+                result = restore_backup(root, destination=arguments.restore_to, archive=arguments.archive)
+            else:  # pragma: no cover - argparse limits command values
+                raise AssertionError(f"unhandled backup command {arguments.backup_command}")
+        except BackupError as error:
+            return _input_error(
+                json_output=arguments.json_output,
+                code=error.code,
+                label="backup refused",
+                error=error,
+            )
+        except (OSError, RuntimeError, ValueError):
+            return _input_error(
+                json_output=arguments.json_output,
+                code="backup_refused",
+                label="backup refused",
+                error=RuntimeError("backup could not be completed safely"),
+            )
     else:  # pragma: no cover - argparse limits command values
         raise AssertionError(f"unhandled command {arguments.command}")
 
@@ -546,6 +588,25 @@ def main(argv: Sequence[str] | None = None, *, repository_root: Path | None = No
         if arguments.command == "verify":
             for item in result["checks"]:
                 print(f"{str(item['status']).upper()}: {item['domain']}: {item['reason']}")
+    elif arguments.command == "backup" and arguments.backup_command == "create":
+        print(
+            f"OK archive={result['archive']} sqlite={result['sqlite']} "
+            f"keep={result['keep']} dest=set"
+        )
+    elif arguments.command == "backup" and arguments.backup_command == "list":
+        for name in result["archives"]:
+            print(name)
+    elif arguments.command == "backup" and arguments.backup_command == "retrieve":
+        print(f"OK archive={result['archive']} dest=set")
+    elif arguments.command == "backup" and arguments.backup_command == "prune":
+        print(f"OK keep={result['keep']} dest=set")
+    elif arguments.command == "backup" and arguments.backup_command == "restore":
+        for relative in result.get("databases", []):
+            print(f"OK sqlite {relative}")
+        print(
+            f"OK archive={result['archive']} sqlite_ok={result['sqlite_ok']} "
+            f"sqlite_fail={result['sqlite_fail']} dest={arguments.restore_to}"
+        )
     elif arguments.command == "configure":
         for item in result["environment"]["keys"]:
             print(f"{item['name']}: {item['status']}")
@@ -611,4 +672,6 @@ def main(argv: Sequence[str] | None = None, *, repository_root: Path | None = No
         return 0 if result.get("status") in {"planned", "verified"} or result.get("passed") is True else 1
     if arguments.command == "setup":
         return 0 if result.get("status") in {"planned", "verified"} else 1
+    if arguments.command == "backup":
+        return 0 if result.get("status") in {"created", "listed", "retrieved", "pruned", "restored"} else 1
     return 1 if discovered is not None and not discovered.supported else 0

@@ -45,6 +45,8 @@ wiki — read the rows that match what you're doing.
 - `project/deployment.md`
 - `references/commands.md`
 - `project/hardware.md`
+- `docs/specs/backup-recovery.md`
+- `scripts/homeflix_setup/backup.py` (`backup create|list|retrieve|prune|restore`)
 
 ## Stack-contract / static verification work
 

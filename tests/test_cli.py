@@ -370,6 +370,10 @@ class VerifyCoreCliTests(unittest.TestCase):
         parsed_reveal = parser.parse_args(["secrets", "reveal", "jellyfin"])
         self.assertEqual(parsed_reveal.secrets_command, "reveal")
         self.assertEqual(parsed_reveal.service, "jellyfin")
+        parsed_backup = parser.parse_args(["backup", "restore", "--to", "/tmp/scratch", "--archive", "homeflix-config-20200101T000000Z.tar.gz"])
+        self.assertEqual(parsed_backup.command, "backup")
+        self.assertEqual(parsed_backup.backup_command, "restore")
+        self.assertEqual(parsed_backup.restore_to, "/tmp/scratch")
 
     def test_verify_core_and_contract_refuse_disrupt(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

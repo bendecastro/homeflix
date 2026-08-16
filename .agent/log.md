@@ -540,3 +540,17 @@ gap-closer (`ValidateMediaLibrary`). The built-in Test remains `/Notifications/A
 only. Corrected first-use, agent-setup, gotchas, and the fixture test. Still
 fixture-accepted only; not live-host proof.
 
+## [2026-08-16] build | Fail-closed local backup and scratch restore
+
+Issue #7: `scripts/homeflix --json backup {create,list,retrieve,prune,restore}`
+is the canonical local adapter. Create uses the SQLite Online Backup API (WAL
+coverage in fixtures), aborts publication and retention pruning on any snapshot
+failure, and omits logs/WAL/SHM/`.env`. Local dests that share `DATA_ROOT`'s
+`st_dev` are refused, including a dest that does not exist yet whose parent is
+on that device. Remote `user@host:/path` is not treated as a local directory
+(SSH remains #8). Restore validates archive names and members before extract,
+refuses live `CONFIG_ROOT` and non-empty scratch, and requires every restored
+SQLite to pass `PRAGMA integrity_check` with at least one database.
+`backup-config.sh` / `restore-config.sh` delegate local paths; `--install-cron`
+stays in the shell. Fixture-accepted only; not live-host proof.
+

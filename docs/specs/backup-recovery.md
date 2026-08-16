@@ -2,16 +2,16 @@
 
 ## Requirements
 
-- A backup artifact SHALL contain consistently snapshotted application configuration from `CONFIG_ROOT` and SHALL exclude media, `.env`, and LUKS recovery material. `(pending #3)`
-- Discovery of any SQLite database that cannot be snapshotted consistently SHALL prevent artifact publication. `(pending #3)`
-- Snapshot creation SHALL omit transient logs and database WAL/SHM files from the published artifact. `(pending #3)`
-- One artifact-repository interface SHALL provide list, get, put, and prune behavior for local off-filesystem and SSH destinations. `(pending #3)`
-- A local repository SHALL be refused when it shares the configured data filesystem. `(pending #3)`
-- Archive names and members SHALL be validated before extraction; absolute paths, traversal, unsafe links, special files, and writes outside the scratch destination SHALL be refused. `(pending #3)`
-- Restore SHALL refuse the live `CONFIG_ROOT`, require an empty scratch destination, and verify every restored SQLite database. `(pending #3)`
-- Successful restore evidence SHALL require at least one valid SQLite database. `(pending #3)`
-- Retention SHALL prune only matching Homeflix backup artifacts after a new artifact has been stored successfully. `(pending #3)`
-- Existing backup and restore shell commands SHALL remain compatibility adapters to the canonical Homeflix interface. `(pending #3)`
+- A backup artifact SHALL contain consistently snapshotted application configuration from `CONFIG_ROOT` and SHALL exclude media, `.env`, and LUKS recovery material. `(satisfied #7)`
+- Discovery of any SQLite database that cannot be snapshotted consistently SHALL prevent artifact publication. `(satisfied #7)`
+- Snapshot creation SHALL omit transient logs and database WAL/SHM files from the published artifact. `(satisfied #7)`
+- One artifact-repository interface SHALL provide list, get, put, and prune behavior for local off-filesystem and SSH destinations. `(satisfied #7 for local; pending #8 for SSH)`
+- A local repository SHALL be refused when it shares the configured data filesystem. `(satisfied #7)`
+- Archive names and members SHALL be validated before extraction; absolute paths, traversal, unsafe links, special files, and writes outside the scratch destination SHALL be refused. `(satisfied #7)`
+- Restore SHALL refuse the live `CONFIG_ROOT`, require an empty scratch destination, and verify every restored SQLite database. `(satisfied #7)`
+- Successful restore evidence SHALL require at least one valid SQLite database. `(satisfied #7)`
+- Retention SHALL prune only matching Homeflix backup artifacts after a new artifact has been stored successfully. `(satisfied #7 for local; pending #8 for SSH)`
+- Existing backup and restore shell commands SHALL remain compatibility adapters to the canonical Homeflix interface. `(satisfied #7 for local; pending #8 for SSH)`
 
 ## Key scenarios
 

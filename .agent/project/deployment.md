@@ -83,10 +83,13 @@ Also whether the wiki moves into the repo. See `tasks/active.md`.
 
 ## Backups
 
-`scripts/backup-config.sh` snapshots `${CONFIG_ROOT}` (not media, not the checkout
-`.env`) to `BACKUP_DEST` and keeps `BACKUP_KEEP` dated archives. SQLite files are
-replaced with `sqlite3 .backup` copies so a live database is not torn. Destination
-lives only in `.env`.
+Canonical `scripts/homeflix --json backup` snapshots `${CONFIG_ROOT}` (not media,
+not the checkout `.env`) to a local off-filesystem `BACKUP_DEST` and keeps
+`BACKUP_KEEP` dated archives. SQLite files are replaced with Online Backup API
+copies so a live database is not torn; any snapshot failure aborts publication
+and pruning. Destination lives only in `.env` and is reported as `dest=set`.
+`scripts/backup-config.sh` / `restore-config.sh` are compatibility adapters for
+local paths. Fixture-accepted only; not live-host proof. SSH remains #8.
 
 The prior same-disk `backup.sh` stays retired. A backup that has never been restored
 is not evidence — use `scripts/restore-config.sh --to` a scratch directory.

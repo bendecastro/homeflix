@@ -29,9 +29,11 @@ bite.
   `/downloads` mount, which would have broken imports. ADR-0008's single `/data` root
   removes the whole class of bug — there is no separate downloads mount to drift.
 - **Backups on the same HDD as the library = not a backup.** Prior `backup.sh` wrote to
-  `${BACKUP_ROOT}` on the library drive. Use `scripts/backup-config.sh` → `BACKUP_DEST`
-  (must be another filesystem) and prove a restore with `scripts/restore-config.sh`.
-  Media and the checkout `.env` are not included.
+  `${BACKUP_ROOT}` on the library drive. Use `scripts/homeflix backup create` /
+  `scripts/backup-config.sh` → `BACKUP_DEST` (must be another filesystem, including
+  when the dest path does not exist yet) and prove a restore with
+  `scripts/restore-config.sh`. A failed SQLite snapshot does not publish. Media and
+  the checkout `.env` are not included. Fixture-accepted only.
 - **`:ro` on `/var/run/docker.sock` does not restrict the Docker API.** It is
   root-equivalent regardless. Glances no longer mounts it (`pid: host` only).
   Remaining: Traefik (discovery), deunhealth (restart), Watchtower (optional updates).
