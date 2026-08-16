@@ -11,12 +11,17 @@ Updated: 2026-08-16
   executable stack contract, reliable first-use reconciliation, truthful verification
   modes, fail-closed backup recovery, and the absorbed acquisition phase. Issue map:
   [tasks.md](../../docs/changes/deep-homeflix-operations/tasks.md).
-- **In this worktree:** issue **#7** fail-closed local backup and scratch restore —
+- **In this worktree:** issue **#8** SSH artifact-repository parity — `BACKUP_DEST`
+  `user@host:/abs/path` uses the same list/get/put/prune contract as the local
+  adapter via `ssh`/`scp` (`-oBatchMode=yes`, argv lists, finite timeout, redacted
+  dest). Invalid dest forms are refused before any command. Compatibility shells
+  stay thin exec adapters; cron `15 3 * * * /bin/bash $REPO/scripts/backup-config.sh`
+  is unchanged. Fixture-accepted only; not live-host proof. No live SSH.
+- **Also in this worktree:** issue **#7** fail-closed local backup and scratch restore —
   `scripts/homeflix --json backup {create,list,retrieve,prune,restore}` snapshots
-  `CONFIG_ROOT` with the SQLite Online Backup API, refuses same-filesystem and
-  remote destinations, and restores only into empty scratch space after archive
-  member validation. Fixture-accepted only; not live-host proof. SSH transport
-  remains **#8**.
+  `CONFIG_ROOT` with the SQLite Online Backup API, refuses same-filesystem
+  destinations, and restores only into empty scratch space after archive
+  member validation. Fixture-accepted only; not live-host proof.
 - **Also in this worktree:** issue **#6** reliable Jellyfin discovery — core
   initialize/reconcile creates one path-targeted Emby/Jellyfin connection
   (`/Library/Media/Updated`) and one unconditional `Library/Refresh` webhook in
@@ -32,15 +37,16 @@ Updated: 2026-08-16
   acceptance remains required before claiming general production verification.
 - **Follow-ups:** guarded [encrypted storage](../project/agent-first-storage-plan.md) remains
   separate. The former acquisition plan is superseded and absorbed by issues #9–#13.
-  SSH remains agent-provided orchestration rather than a CLI transport.
+  Backup SSH transport is the artifact-repository adapter only; host setup SSH
+  remains agent-provided orchestration rather than a CLI transport.
 - **Approved defaults:** Debian/Ubuntu local or SSH target; secure terminal secret handoff;
   resumable core-first deployment; API-driven application setup; agent-led composable tools.
 - **Blockers:** none for fixture-accepted core; real-host acceptance needs a disposable target.
 
 ## Next up (priority order)
 
-1. Drain deep-operations issues #4–#13 in dependency order; #4, #6, #7, #9, and #10 are
-   in this tree; #8 can start after #7.
+1. Drain deep-operations issues #4–#13 in dependency order; #4, #6, #7, #8, #9, and #10
+   are in this tree.
 2. Verify core on a disposable Debian/Ubuntu target before claiming general host support.
 3. Execute the encrypted-storage slice with loop-device tests before any real-disk test.
 4. Resolve the independent Traefik dashboard, update policy, and remote-access decisions.

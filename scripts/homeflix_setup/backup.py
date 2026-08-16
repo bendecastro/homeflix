@@ -8,16 +8,19 @@ import os
 import re
 import shutil
 import sqlite3
+import subprocess
 import tarfile
 import tempfile
 from typing import Callable, Protocol
 
+from .command import CommandRunner
 from .envfile import EnvDocument
 
 
 SCHEMA_VERSION = 1
 ARCHIVE_RE = re.compile(r"^homeflix-config-[A-Za-z0-9._-]+\.tar\.gz$")
 SQLITE_SUFFIXES = {".db", ".sqlite", ".sqlite3"}
+SSH_COMMAND_TIMEOUT = 60.0
 
 
 class BackupError(Exception):
@@ -38,6 +41,48 @@ class ArtifactRepository(Protocol):
 
 def dest_is_remote(value: str) -> bool:
     return ":" in value and not value.startswith("/") and not value.startswith(".")
+
+
+_SSH_USER = r"[A-Za-z0-9_][A-Za-z0-9._-]*"
+_SSH_HOST = r"[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?"
+_SSH_COMPONENT = r"[A-Za-z0-9._-]+"
+_SSH_DEST_RE = re.compile(rf"^({_SSH_USER})@({_SSH_HOST}):(/{_SSH_COMPONENT}(?:/{_SSH_COMPONENT})*)$")
+
+
+class SshDestination:
+    def __init__(self, user: str, host: str, path: str) -> None:
+        self.user = user
+        self.host = host
+        self.path = path
+
+    @property
+    def target(self) -> str:
+        return f"{self.user}@{self.host}"
+
+    @property
+    def spec(self) -> str:
+        return f"{self.user}@{self.host}:{self.path}"
+
+    def remote_archive(self, name: str) -> str:
+        return f"{self.user}@{self.host}:{self.path}/{name}"
+
+    def remote_path(self, name: str) -> str:
+        return f"{self.path}/{name}"
+
+
+def parse_ssh_destination(value: str) -> SshDestination:
+    if not value or value.startswith("-") or value.count(":") != 1:
+        raise BackupError("BACKUP_DEST is not a valid SSH destination")
+    if any(ord(character) < 32 or ord(character) == 127 for character in value):
+        raise BackupError("BACKUP_DEST is not a valid SSH destination")
+    match = _SSH_DEST_RE.fullmatch(value)
+    if match is None:
+        raise BackupError("BACKUP_DEST is not a valid SSH destination")
+    user, host, path = match.group(1), match.group(2), match.group(3)
+    parts = path.split("/")[1:]
+    if any(part in {".", ".."} or ".." in part for part in parts):
+        raise BackupError("BACKUP_DEST is not a valid SSH destination")
+    return SshDestination(user, host, path)
 
 
 class LocalArtifactRepository:
@@ -84,6 +129,60 @@ class LocalArtifactRepository:
             raise BackupError("BACKUP_KEEP must be a positive integer")
         for name in self.list_archives()[keep:]:
             (self.root / name).unlink(missing_ok=True)
+
+
+class SshArtifactRepository:
+    """Store Homeflix backup artifacts at a validated user@host:/abs/path destination."""
+
+    def __init__(self, destination: SshDestination, runner: CommandRunner) -> None:
+        self.destination = destination
+        self.runner = runner
+
+    def _secrets(self) -> tuple[str, ...]:
+        dest = self.destination
+        return (dest.spec, dest.target, dest.user, dest.host, dest.path)
+
+    def _run(self, argv: list[str], *, require_success: bool = True) -> subprocess.CompletedProcess[str]:
+        try:
+            result = self.runner.run(argv, redact=self._secrets(), timeout=SSH_COMMAND_TIMEOUT)
+        except subprocess.TimeoutExpired as error:
+            raise BackupError("SSH transfer timed out") from error
+        if require_success and result.returncode != 0:
+            raise BackupError("SSH transfer failed")
+        return result
+
+    def _ssh(self, remote: list[str], *, require_success: bool = True) -> subprocess.CompletedProcess[str]:
+        return self._run(
+            ["ssh", "-oBatchMode=yes", "--", self.destination.target, *remote],
+            require_success=require_success,
+        )
+
+    def list_archives(self) -> list[str]:
+        result = self._ssh(["ls", "-1t", "--", self.destination.path], require_success=False)
+        if result.returncode == 255:
+            raise BackupError("SSH transfer failed")
+        if result.returncode != 0:
+            return []
+        names = []
+        for line in result.stdout.splitlines():
+            name = line.strip()
+            if ARCHIVE_RE.fullmatch(name):
+                names.append(name)
+        return names
+
+    def get(self, name: str, destination: Path) -> None:
+        safe = _safe_archive_name(name)
+        self._run(["scp", "-oBatchMode=yes", "--", self.destination.remote_archive(safe), str(destination)])
+
+    def put(self, source: Path) -> None:
+        name = _safe_archive_name(source.name)
+        self._run(["scp", "-oBatchMode=yes", "--", str(source), self.destination.remote_archive(name)])
+
+    def prune(self, keep: int) -> None:
+        if keep < 1:
+            raise BackupError("BACKUP_KEEP must be a positive integer")
+        for name in self.list_archives()[keep:]:
+            self._ssh(["rm", "-f", "--", self.destination.remote_path(name)])
 
 
 def _safe_archive_name(name: str) -> str:
@@ -152,6 +251,17 @@ def local_repository(dest: str, *, data_root: Path | None) -> LocalArtifactRepos
     return LocalArtifactRepository(path)
 
 
+def open_repository(
+    dest: str,
+    *,
+    data_root: Path | None,
+    runner: CommandRunner | None = None,
+) -> ArtifactRepository:
+    if dest.startswith("-") or dest_is_remote(dest):
+        return SshArtifactRepository(parse_ssh_destination(dest), runner or CommandRunner())
+    return local_repository(dest, data_root=data_root)
+
+
 def snapshot_sqlite(source: Path, destination: Path) -> None:
     destination.parent.mkdir(parents=True, exist_ok=True)
     source_connection = sqlite3.connect(f"file:{source.as_posix()}?mode=ro", uri=True)
@@ -208,10 +318,11 @@ def create_backup(
     repository_root: Path,
     *,
     clock: Callable[[], datetime] | None = None,
+    runner: CommandRunner | None = None,
 ) -> dict[str, object]:
     config_root, backup_dest, keep, data_root = _load_backup_settings(repository_root, require_config=True)
     assert config_root is not None
-    repository = local_repository(backup_dest, data_root=data_root)
+    repository = open_repository(backup_dest, data_root=data_root, runner=runner)
     stamp = (clock or (lambda: datetime.now(timezone.utc)))().strftime("%Y%m%dT%H%M%SZ")
     archive_name = f"homeflix-config-{stamp}.tar.gz"
     staging_dir = tempfile.mkdtemp(prefix="homeflix-backup.")
@@ -235,13 +346,15 @@ def create_backup(
     }
 
 
-def _repository_from_env(repository_root: Path) -> tuple[LocalArtifactRepository, int]:
+def _repository_from_env(
+    repository_root: Path, *, runner: CommandRunner | None = None
+) -> tuple[ArtifactRepository, int]:
     _config_root, backup_dest, keep, data_root = _load_backup_settings(repository_root)
-    return local_repository(backup_dest, data_root=data_root), keep
+    return open_repository(backup_dest, data_root=data_root, runner=runner), keep
 
 
-def list_backups(repository_root: Path) -> dict[str, object]:
-    repository, _keep = _repository_from_env(repository_root)
+def list_backups(repository_root: Path, *, runner: CommandRunner | None = None) -> dict[str, object]:
+    repository, _keep = _repository_from_env(repository_root, runner=runner)
     return {
         "schema_version": SCHEMA_VERSION,
         "status": "listed",
@@ -250,8 +363,14 @@ def list_backups(repository_root: Path) -> dict[str, object]:
     }
 
 
-def retrieve_backup(repository_root: Path, *, archive: str, destination: str) -> dict[str, object]:
-    repository, _keep = _repository_from_env(repository_root)
+def retrieve_backup(
+    repository_root: Path,
+    *,
+    archive: str,
+    destination: str,
+    runner: CommandRunner | None = None,
+) -> dict[str, object]:
+    repository, _keep = _repository_from_env(repository_root, runner=runner)
     name = _safe_archive_name(archive)
     target = Path(destination)
     if target.exists() and target.is_dir():
@@ -266,8 +385,8 @@ def retrieve_backup(repository_root: Path, *, archive: str, destination: str) ->
     }
 
 
-def prune_backups(repository_root: Path) -> dict[str, object]:
-    repository, keep = _repository_from_env(repository_root)
+def prune_backups(repository_root: Path, *, runner: CommandRunner | None = None) -> dict[str, object]:
+    repository, keep = _repository_from_env(repository_root, runner=runner)
     repository.prune(keep)
     return {
         "schema_version": SCHEMA_VERSION,
@@ -343,9 +462,10 @@ def restore_backup(
     *,
     destination: str,
     archive: str | None = None,
+    runner: CommandRunner | None = None,
 ) -> dict[str, object]:
     config_root, backup_dest, _keep, data_root = _load_backup_settings(repository_root)
-    repository = local_repository(backup_dest, data_root=data_root)
+    repository = open_repository(backup_dest, data_root=data_root, runner=runner)
     scratch = Path(destination)
     if not destination:
         raise _restore_error("pass --to DIR (scratch only; refuses live CONFIG_ROOT)")

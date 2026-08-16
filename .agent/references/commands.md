@@ -51,10 +51,11 @@ scripts/homeflix --json backup restore --to SCRATCH [--archive NAME]
 ./scripts/restore-config.sh --to /tmp/homeflix-restore-test
 ```
 
-Requires `BACKUP_DEST` in `.env`. Media and the checkout `.env` are not included.
-JSON shows `dest=set`, never the destination path. Restore refuses to write over
-live `CONFIG_ROOT`. SSH destinations are not implemented (#8). Fixture-accepted
-only; not live-host proof.
+Requires `BACKUP_DEST` in `.env` (local off-filesystem path or
+`user@host:/abs/path`). Media and the checkout `.env` are not included.
+JSON shows `dest=set`, never the destination path, username, or host. Restore
+refuses to write over live `CONFIG_ROOT`. Fixture-accepted only; not live-host
+proof.
 
 ## Acquisition VPN gate (non-disruptive)
 

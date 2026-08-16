@@ -9,11 +9,12 @@ running homeflix.
 > resumable verification. The [deep operations PRD](../docs/changes/deep-homeflix-operations/prd.md)
 > is queued as parent **#3**. Slices **#4** (stack contract), **#5** (truthful
 > `verify core`), **#6** (reliable Jellyfin discovery), **#7** (fail-closed local
-> backup/scratch restore), **#9** (secure acquisition VPN gate), and **#10** (VPN
-> fail-closed prove-and-restore) are implemented in this tree.
-> Remaining slices cover SSH backup transport and later acquisition. Disposable-host
-> and private-production live acceptance remain separate. **#6 and #7 are fixture-accepted
-> only; they are not live production verification.**
+> backup/scratch restore), **#8** (SSH artifact-repository parity), **#9** (secure
+> acquisition VPN gate), and **#10** (VPN fail-closed prove-and-restore) are
+> implemented in this tree.
+> Remaining slices cover later acquisition. Disposable-host and private-production
+> live acceptance remain separate. **#6, #7, and #8 are fixture-accepted only; they
+> are not live production verification.**
 
 **Two doors.** This wiki explains *why* homeflix is built the way it is. If you just want
 to run it, you want [`docs/`](../docs/) instead —

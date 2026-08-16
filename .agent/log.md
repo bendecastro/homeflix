@@ -554,3 +554,16 @@ SQLite to pass `PRAGMA integrity_check` with at least one database.
 `backup-config.sh` / `restore-config.sh` delegate local paths; `--install-cron`
 stays in the shell. Fixture-accepted only; not live-host proof.
 
+## [2026-08-16] build | SSH artifact-repository parity
+
+Issue #8: `BACKUP_DEST=user@host:/abs/path` dispatches to `SshArtifactRepository`
+with the same list/get/put/prune contract as local. Parser accepts only that
+documented form and rejects empty, relative/traversal/`~`, option-like, URL,
+Windows-drive, IPv6, multi-colon, and shell-meta dests before any
+`CommandRunner.run`. `ssh`/`scp` use `-oBatchMode=yes`, dest as one argv
+element, `--` before dest/path, a finite timeout, and redacted user/host/path.
+Put completes before prune; transfer/timeout failure leaves existing archives
+and foreign files untouched. Shell adapters still only exec the CLI; remote dest
+is not mkdir'd locally; cron `15 3 * * * /bin/bash $REPO/scripts/backup-config.sh`
+stays valid and idempotent. Fixture-accepted only; not live-host proof.
+
