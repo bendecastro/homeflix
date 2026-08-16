@@ -1,0 +1,8 @@
+{
+  "comment": "Radarr MediaBrowserService.Test only POSTs /Notifications/Admin via Notify(); it does not exercise library update.",
+  "method": "POST",
+  "path": "/Notifications/Admin",
+  "headers": {"X-MediaBrowser-Token": "REDACTED"},
+  "status": 204,
+  "proves": "built-in Test can pass while discovery is absent"
+}

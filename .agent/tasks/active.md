@@ -1,6 +1,6 @@
 # Active Tasks — Live Cursor
 
-Updated: 2026-08-14
+Updated: 2026-08-16
 
 > First thing the next agent reads after `index.md`. Keep it true.
 
@@ -11,12 +11,13 @@ Updated: 2026-08-14
   executable stack contract, reliable first-use reconciliation, truthful verification
   modes, fail-closed backup recovery, and the absorbed acquisition phase. Issue map:
   [tasks.md](../../docs/changes/deep-homeflix-operations/tasks.md).
-- **In this worktree:** issue **#10** VPN fail-closed prove-and-restore —
-  `verify vpn --disrupt` / `vpn verify --disrupt` requires current #9 evidence,
-  classifies only the active tunnel, proves blocked egress, and restores Gluetun
-  plus previously running namespace-dependent services on every exit. Routine
-  `verify core` / `vpn verify` stay non-destructive. Issue **#9** remains the
-  non-disruptive gate (`secrets vpn`, `vpn verify`).
+- **In this worktree:** issue **#6** reliable Jellyfin discovery — core
+  initialize/reconcile creates one path-targeted Emby/Jellyfin connection
+  (`/Library/Media/Updated`) and one unconditional `Library/Refresh` webhook in
+  both Radarr and Sonarr. The targeted Test is `/Notifications/Admin` only; the
+  path-targeted update is not a full-library scan. Inspection is GET-only and
+  redacts the dedicated key. Fixture-accepted only; not live-host proof. Do not
+  start acquisition services as part of this slice.
 - **Completed slice:** [Agent-first core setup](../project/agent-first-core-setup-plan.md),
   covering local Debian/Ubuntu discovery through API-initialized and verified core on existing
   mounted storage. All nine tasks passed fixture tests and independent spec plus
@@ -32,7 +33,8 @@ Updated: 2026-08-14
 
 ## Next up (priority order)
 
-1. Drain deep-operations issues #4–#13 in dependency order; #4, #6, and #7 can start.
+1. Drain deep-operations issues #4–#13 in dependency order; #4, #6, #9, and #10 are
+   in this tree; #7 can start independently.
 2. Verify core on a disposable Debian/Ubuntu target before claiming general host support.
 3. Execute the encrypted-storage slice with loop-device tests before any real-disk test.
 4. Resolve the independent Traefik dashboard, update policy, and remote-access decisions.

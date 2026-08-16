@@ -424,6 +424,9 @@ def configure_core(
         raise TimeoutError("core operation deadline exhausted")
     jellyfin = JellyfinClient(transport=chosen_transports.get("jellyfin", urllib_transport), deadline=operation_deadline, clock=clock)
     created_admin, libraries = jellyfin.reconcile(values["JELLYFIN_ADMIN_USER"] or "", values["JELLYFIN_ADMIN_PASSWORD"] or "")
+    jellyfin_key = getattr(jellyfin, "application_key", None)
+    if not isinstance(jellyfin_key, str) or not jellyfin_key:
+        raise ApiError("jellyfin", "reconcile application key", None, "invalid_response")
 
     arr_results: dict[str, dict[str, object]] = {}
     runtime: dict[str, tuple[str, dict[str, object], dict[str, object]]] = {}
@@ -434,7 +437,7 @@ def configure_core(
             headers={"Host": f"{service}.{domain}"},
             transport=chosen_transports.get(service, urllib_transport), deadline=operation_deadline, clock=clock,
         )
-        result = client.configure(selected, media_path)
+        result = client.configure(selected, media_path, jellyfin_api_key=jellyfin_key)
         arr_results[service] = result
         if client.selected_profile is None or client.selected_root is None:
             raise RuntimeError("Arr configuration did not produce runtime selections")
@@ -881,7 +884,7 @@ def verify_core(
             key = api_key_reader(values["CONFIG_ROOT"] or "", service, uid)
             domain = config.get("DOMAIN") or ""
             inspected = ArrClient(service, "http://127.0.0.1", key, headers={"Host": f"{service}.{domain}"}, transport=chosen.get(service, urllib_transport), deadline=operation_deadline, clock=clock).inspect(values["QUALITY_PROFILE"] or "", media_path)
-            checks.append(_application_check(service, inspected, ("profile_exact", "root_exact", "media_settings", "completed_handling"), "selected profile, root, and media settings match", "selected profile, root, or media settings differ"))
+            checks.append(_application_check(service, inspected, ("profile_exact", "root_exact", "media_settings", "completed_handling", "targeted_connection_exact", "refresh_connection_exact"), "selected profile, root, media settings, and Jellyfin discovery match", "selected profile, root, media settings, or Jellyfin discovery differ"))
             if inspected.get("runtime_root") is not None:
                 runtime[service] = (inspected["runtime_profile"], inspected["runtime_root"])  # type: ignore[assignment]
         seerr = JellyseerrClient(headers={"Host": f"jellyseerr.{config.get('DOMAIN') or ''}"}, transport=chosen.get("jellyseerr", urllib_transport), deadline=operation_deadline, clock=clock)

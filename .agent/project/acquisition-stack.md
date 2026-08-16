@@ -1,6 +1,6 @@
 # homeflix — Acquisition Stack
 
-Updated: 2026-08-11
+Updated: 2026-08-16
 Decision: [ADR-0005](../decisions/adr-0005-arr-stack-gluetun-protonvpn.md). Source:
 the prior private design package (see `references/source-research.md`).
 
@@ -49,6 +49,11 @@ NZBGet to `/data/usenet/<cat>`.
 Because downloads and media share one filesystem, imports are **instant hardlinks** — no
 copy, no second copy of the data, and the torrent keeps seeding from `torrents/`
 indefinitely.
+
+Core setup reconciles two Jellyfin connections in Radarr and Sonarr (path-targeted
+`/Library/Media/Updated` plus an unconditional `Library/Refresh` webhook). The
+built-in targeted Test is not proof that a new title will appear, and
+`/Library/Media/Updated` is not a full-library scan. Fixture-accepted only.
 
 > **Do not** give an *arr app `torrents/` and `media/` as separate bind mounts — Docker
 > makes them distinct mountpoints and hardlinks silently fail. See

@@ -5,12 +5,14 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
 from pathlib import Path
+import sqlite3
 import threading
+import tempfile
 import unittest
 from unittest.mock import patch
 from urllib import error
 
-from scripts.homeflix_setup.api import ApiError, HttpResponse, JellyfinClient, JsonClient
+from scripts.homeflix_setup.api import ApiError, HttpResponse, JellyfinClient, JsonClient, read_jellyfin_api_key
 
 FIXTURES = Path(__file__).parent / "fixtures" / "api"
 
@@ -217,6 +219,7 @@ class JellyfinApiTests(unittest.TestCase):
             (200, fixture("jellyfin-libraries-empty.json")),
             (204, {}), (204, {}), (204, {}),
             (200, fixture("jellyfin-libraries-options.json")),
+            (200, fixture("jellyfin-auth-keys.json")),
             (204, {}),
         ])
         client = JellyfinClient(transport=transport)
@@ -246,7 +249,9 @@ class JellyfinApiTests(unittest.TestCase):
             (200, fixture("jellyfin-auth.json")),
             (204, {}), (204, {}), (204, {}),
             (200, fixture("jellyfin-libraries-complete.json")),
-            (200, fixture("jellyfin-libraries-options.json")), (204, {}),
+            (200, fixture("jellyfin-libraries-options.json")),
+            (200, fixture("jellyfin-auth-keys.json")),
+            (204, {}),
         ])
         client = JellyfinClient(transport=transport)
         created, _ = client.reconcile("fixture-admin", "FIXTURE_PASSWORD_NOT_REAL")
@@ -261,6 +266,7 @@ class JellyfinApiTests(unittest.TestCase):
             (200, fixture("jellyfin-auth.json")),
             (200, fixture("jellyfin-libraries-complete.json")),
             (200, fixture("jellyfin-libraries-options.json")),
+            (200, fixture("jellyfin-auth-keys.json")),
             (204, {}),
         ])
         client = JellyfinClient(transport=transport)
@@ -268,6 +274,7 @@ class JellyfinApiTests(unittest.TestCase):
         self.assertFalse(created)
         self.assertEqual(libraries, ["Movies", "Shows", "Music"])
         self.assertIsNone(client.token)
+        self.assertEqual(client.application_key, "JELLYFIN_DEDICATED_KEY_NOT_REAL")
         self.assertFalse(any(request.full_url.endswith("/Startup/User") for request, _ in transport.requests))
         self.assertFalse(any(request.method == "POST" and "/Library/VirtualFolders?" in request.full_url for request, _ in transport.requests))
 
@@ -278,6 +285,7 @@ class JellyfinApiTests(unittest.TestCase):
             (200, fixture("jellyfin-libraries-complete.json")),
             (200, fixture("jellyfin-libraries-options-writing.json")),
             (204, {}), (204, {}),
+            (200, fixture("jellyfin-auth-keys.json")),
             (204, {}),
         ])
         client = JellyfinClient(transport=transport)
@@ -301,6 +309,7 @@ class JellyfinApiTests(unittest.TestCase):
             (200, fixture("jellyfin-auth.json")),
             (200, fixture("jellyfin-libraries-complete.json")),
             (200, fixture("jellyfin-libraries-options.json")),
+            (200, fixture("jellyfin-auth-keys.json")),
             (204, {}),
         ])
         client = JellyfinClient(transport=transport)
@@ -376,11 +385,12 @@ class JellyfinApiTests(unittest.TestCase):
             HttpResponse(200, json.dumps(fixture("jellyfin-auth.json")).encode()),
             HttpResponse(200, json.dumps(fixture("jellyfin-libraries-complete.json")).encode()),
             HttpResponse(200, json.dumps(fixture("jellyfin-libraries-options.json")).encode()),
+            HttpResponse(200, json.dumps(fixture("jellyfin-auth-keys.json")).encode()),
             HttpResponse(204, b""),
         ))
         def transport(outgoing, timeout):
             events.append((outgoing.full_url, timeout))
-            increments = (0.3, 0.3, 0.2, 0.1, 0.1)
+            increments = (0.3, 0.3, 0.2, 0.1, 0.05, 0.1)
             now[0] += increments[len(events) - 1]
             return next(responses)
         client = JellyfinClient(transport=transport, deadline=2.0, clock=lambda: now[0])
@@ -421,7 +431,7 @@ class JellyfinApiTests(unittest.TestCase):
     def test_repeated_reconcile_closes_every_ephemeral_session(self):
         responses = []
         for _ in range(2):
-            responses.extend(((200, fixture("jellyfin-startup-complete.json")), (200, fixture("jellyfin-auth.json")), (200, fixture("jellyfin-libraries-complete.json")), (200, fixture("jellyfin-libraries-options.json")), (204, {})))
+            responses.extend(((200, fixture("jellyfin-startup-complete.json")), (200, fixture("jellyfin-auth.json")), (200, fixture("jellyfin-libraries-complete.json")), (200, fixture("jellyfin-libraries-options.json")), (200, fixture("jellyfin-auth-keys.json")), (204, {})))
         transport = FixtureTransport(responses)
         client = JellyfinClient(transport=transport)
         for _ in range(2):
@@ -448,6 +458,71 @@ class JellyfinApiTests(unittest.TestCase):
             client.http.request("POST", "/Startup/Complete", operation="complete startup", payload={})
         self.assertEqual(len(transport.requests), 1)
         self.assertEqual(raised.exception.code, "transport_error")
+
+    def test_creates_dedicated_application_key_and_does_not_duplicate(self):
+        created = fixture("jellyfin-auth-keys.json")
+        transport = FixtureTransport([
+            (200, fixture("jellyfin-auth-keys-empty.json")),
+            (204, {}),
+            (200, created),
+            (200, created),
+        ])
+        client = JellyfinClient(transport=transport)
+        client.token = "MEMORY_ONLY_TOKEN"
+        first = client.ensure_application_key()
+        second = client.ensure_application_key()
+        self.assertEqual(first, second)
+        self.assertEqual(client.application_key, first)
+        posts = [request for request, _ in transport.requests if request.method == "POST"]
+        self.assertEqual(len(posts), 1)
+        self.assertIn("app=Radarr+and+Sonarr", posts[0].full_url)
+        self.assertTrue(all(request.headers.get("X-emby-token") == "MEMORY_ONLY_TOKEN" for request, _ in transport.requests))
+        self.assertNotIn("JELLYFIN_DEDICATED_KEY_NOT_REAL", json.dumps([request.full_url for request, _ in transport.requests]))
+
+    def test_duplicate_application_keys_conflict_without_create(self):
+        duplicate = {
+            "Items": [
+                {"AccessToken": "JELLYFIN_DEDICATED_KEY_NOT_REAL", "AppName": "Radarr and Sonarr"},
+                {"AccessToken": "OTHER_DEDICATED_KEY_NOT_REAL", "Name": "Radarr and Sonarr"},
+            ],
+            "TotalRecordCount": 2,
+        }
+        transport = FixtureTransport([(200, duplicate), (204, {})])
+        client = JellyfinClient(transport=transport)
+        client.token = "MEMORY_ONLY_TOKEN"
+        with self.assertRaises(ApiError) as raised:
+            client.ensure_application_key()
+        self.assertEqual(raised.exception.code, "application_key_conflict")
+        self.assertTrue(all(request.method == "GET" for request, _ in transport.requests))
+
+    def test_reads_dedicated_jellyfin_key_from_config_root_and_rejects_unsafe_files(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "config"
+            db_dir = root / "jellyfin" / "data" / "data"
+            db_dir.mkdir(parents=True)
+            db = db_dir / "jellyfin.db"
+            connection = sqlite3.connect(db)
+            connection.execute("CREATE TABLE ApiKeys (Id INTEGER PRIMARY KEY, AccessToken TEXT, Name TEXT)")
+            connection.execute(
+                "INSERT INTO ApiKeys (AccessToken, Name) VALUES (?, ?)",
+                ("JELLYFIN_DEDICATED_KEY_NOT_REAL", "Radarr and Sonarr"),
+            )
+            connection.commit()
+            connection.close()
+            root.chmod(0o755)
+            (root / "jellyfin").chmod(0o755)
+            (root / "jellyfin" / "data").chmod(0o755)
+            db_dir.chmod(0o755)
+            db.chmod(0o644)
+            uid = os.getuid()
+            self.assertEqual(read_jellyfin_api_key(root, uid), "JELLYFIN_DEDICATED_KEY_NOT_REAL")
+            original = db.stat().st_mode & 0o777
+            db.chmod(original | 0o020)
+            with self.assertRaises(ValueError):
+                read_jellyfin_api_key(root, uid)
+            db.chmod(original)
+            with self.assertRaises(ValueError):
+                read_jellyfin_api_key(root, uid + 100000)
 
 
 if __name__ == "__main__":

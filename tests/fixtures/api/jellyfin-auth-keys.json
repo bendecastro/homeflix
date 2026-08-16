@@ -1,0 +1,11 @@
+{
+  "Items": [
+    {
+      "Id": "fixture-key-id",
+      "AccessToken": "JELLYFIN_DEDICATED_KEY_NOT_REAL",
+      "AppName": "Radarr and Sonarr",
+      "Name": "Radarr and Sonarr"
+    }
+  ],
+  "TotalRecordCount": 1
+}

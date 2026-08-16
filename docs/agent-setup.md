@@ -81,6 +81,19 @@ and exact Movies/Shows/Music libraries, Radarr/Sonarr roots and media settings, 
 connections. They discover runtime IDs and reconcile equivalent resources rather than assuming
 fixed IDs.
 
+Core initialize also reconciles **two** Jellyfin connections in both Radarr and Sonarr:
+one path-targeted Emby/Jellyfin connection (`POST /Library/Media/Updated` with the *arr
+movie or series path), and one unconditional webhook to
+`http://jellyfin:8096/Library/Refresh` (`ValidateMediaLibrary`). The path-targeted call
+is not a full-library scan and still misses titles in empty or unwatched library folders.
+Identity is the implementation plus that internal address, not the display name. A no-change
+rerun is GET-only. Duplicates or conflicting owned settings fail without extra writes.
+`verify core` checks event selection, the internal Docker address, refresh behavior, and
+the required `X-Emby-Token` header, and never returns the dedicated Jellyfin key. Do not
+treat a passing built-in connection Test as proof that a new title will appear; that test
+only POSTs `/Notifications/Admin`. See [first use](first-use.md#4-make-imports-appear-promptly)
+for the operator-facing two-connection model.
+
 ## Recovery, status, and resume
 
 Run `scripts/homeflix --json status` to read ignored, non-secret checkpoint evidence. A
@@ -104,7 +117,8 @@ A live-host completion report should include, without secrets or private address
 - core preflight results, including a successful hardlink and cleanup check;
 - exact Compose project identity and the five healthy, ready core services;
 - acquisition-service absence and the expected QuickSync selection or “not selected” result;
-- initialized Jellyfin libraries, exact Radarr/Sonarr roots and settings, and initialized
+- initialized Jellyfin libraries, exact Radarr/Sonarr roots, media settings, and the two
+  Jellyfin discovery connections (targeted plus unconditional refresh), and initialized
   Jellyseerr default connections;
 - a successful `verify core`, followed by a no-duplicate rerun; and
 - confirmation that `.env`, `.homeflix/setup.json`, and the generated override remain ignored.

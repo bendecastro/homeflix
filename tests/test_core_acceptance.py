@@ -154,7 +154,7 @@ class CoreFixtureAcceptanceTests(unittest.TestCase):
             self.assertTrue(fixture.admin)
             self.assertEqual(set(fixture.libraries), {"Movies", "Shows", "Music"})
             self.assertEqual(fixture.roots, {"radarr": ["/data/media/movies"], "sonarr": []})
-            self.assertEqual(fixture.creations, {"account": 1, "library": 3, "library_options": 3, "root": 1, "settings": 1, "server": 0})
+            self.assertEqual(fixture.creations, {"account": 1, "library": 3, "library_options": 3, "root": 1, "settings": 1, "server": 0, "application_key": 1, "notification": 2})
             self.assertEqual(fixture.media_ok, {"radarr": True, "sonarr": False})
             self.assertEqual(fixture.completed_ok, {"radarr": True, "sonarr": False})
             self.assertFalse(fixture.initialized)
@@ -165,6 +165,15 @@ class CoreFixtureAcceptanceTests(unittest.TestCase):
                 quicksync_inspector=quicksync_inspector, **common,
             )
             self.assertEqual(resumed["status"], "verified")
+            self.assertFalse(resumed["configure"]["radarr"]["targeted_connection_changed"])
+            self.assertFalse(resumed["configure"]["radarr"]["refresh_connection_changed"])
+            self.assertTrue(resumed["configure"]["sonarr"]["targeted_connection_changed"])
+            self.assertTrue(resumed["configure"]["sonarr"]["refresh_connection_changed"])
+            radarr_check = next(item for item in resumed["verify"]["checks"] if item["domain"] == "radarr")
+            sonarr_check = next(item for item in resumed["verify"]["checks"] if item["domain"] == "sonarr")
+            self.assertEqual(radarr_check["status"], "pass")
+            self.assertEqual(sonarr_check["status"], "pass")
+            self.assertIn("Jellyfin discovery", radarr_check["reason"])
             self.assertEqual(set(fixture.containers), set(CORE_SERVICES))
             self.assertTrue(fixture.startup)
             self.assertTrue(fixture.admin)
@@ -172,7 +181,7 @@ class CoreFixtureAcceptanceTests(unittest.TestCase):
             self.assertTrue(fixture.jellyfin_connected)
             self.assertEqual(fixture.media_ok, {"radarr": True, "sonarr": True})
             self.assertEqual(fixture.completed_ok, {"radarr": True, "sonarr": True})
-            self.assertEqual(fixture.creations, {"account": 1, "library": 3, "library_options": 3, "root": 2, "settings": 2, "server": 2})
+            self.assertEqual(fixture.creations, {"account": 1, "library": 3, "library_options": 3, "root": 2, "settings": 2, "server": 2, "application_key": 1, "notification": 4})
             self.assertEqual(len(fixture.libraries), 3)
             self.assertEqual(fixture.roots, {"radarr": ["/data/media/movies"], "sonarr": ["/data/media/tv"]})
             self.assertEqual(fixture.updates["media"], {"radarr": 1, "sonarr": 1})
@@ -182,6 +191,17 @@ class CoreFixtureAcceptanceTests(unittest.TestCase):
             self.assertEqual(len(fixture.servers["sonarr"]), 1)
             self.assertTrue(fixture.servers["radarr"][0]["isDefault"])
             self.assertTrue(fixture.servers["sonarr"][0]["isDefault"])
+            self.assertEqual(len(fixture.application_keys), 1)
+            self.assertEqual(len(fixture.notifications["radarr"]), 2)
+            self.assertEqual(len(fixture.notifications["sonarr"]), 2)
+            self.assertEqual(
+                {item["implementation"] for item in fixture.notifications["radarr"]},
+                {"MediaBrowser", "Webhook"},
+            )
+            self.assertEqual(
+                {item["implementation"] for item in fixture.notifications["sonarr"]},
+                {"MediaBrowser", "Webhook"},
+            )
 
             before = (dict(fixture.creations), {kind: dict(values) for kind, values in fixture.updates.items()})
             configuration_mutations_before_rerun = tuple(fixture.configuration_mutations)
@@ -200,6 +220,7 @@ class CoreFixtureAcceptanceTests(unittest.TestCase):
                 ("jellyfin", "POST", "/Users/AuthenticateByName"),
                 ("jellyfin", "GET", "/Library/VirtualFolders"),
                 ("jellyfin", "GET", "/Library/VirtualFolders"),
+                ("jellyfin", "GET", "/Auth/Keys"),
                 ("jellyfin", "POST", "/Sessions/Logout"),
             ]
             for service in ("radarr", "sonarr"):
@@ -209,6 +230,7 @@ class CoreFixtureAcceptanceTests(unittest.TestCase):
                     (service, "GET", "/api/v3/config/naming"),
                     (service, "GET", "/api/v3/config/mediamanagement"),
                     (service, "GET", "/api/v3/config/downloadclient"),
+                    (service, "GET", "/api/v3/notification"),
                 ))
             expected_rerun_calls.extend((
                 ("jellyseerr", "GET", "/api/v1/settings/public"),
@@ -230,6 +252,7 @@ class CoreFixtureAcceptanceTests(unittest.TestCase):
                     (service, "GET", "/api/v3/config/naming"),
                     (service, "GET", "/api/v3/config/mediamanagement"),
                     (service, "GET", "/api/v3/config/downloadclient"),
+                    (service, "GET", "/api/v3/notification"),
                 ))
             expected_rerun_calls.extend((
                 ("jellyseerr", "GET", "/api/v1/settings/public"),
@@ -242,6 +265,8 @@ class CoreFixtureAcceptanceTests(unittest.TestCase):
             self.assertEqual(len(fixture.roots["sonarr"]), 1)
             self.assertEqual(len(fixture.servers["radarr"]), 1)
             self.assertEqual(len(fixture.servers["sonarr"]), 1)
+            self.assertEqual(len(fixture.notifications["radarr"]), 2)
+            self.assertEqual(len(fixture.notifications["sonarr"]), 2)
 
             mutation_commands = [command for command in fixture.commands if "up" in command]
             self.assertEqual(len(mutation_commands), 1)

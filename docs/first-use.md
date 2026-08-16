@@ -84,16 +84,19 @@ The internal host is `jellyfin`, not `localhost`: Radarr, Sonarr, and Jellyfin a
 containers on the same Docker network. Put the key in the `X-Emby-Token` header rather than
 in the URL, so it does not end up in logs or proxy access records.
 
-> **Why the second connection is required.** The **Emby / Jellyfin** connection cannot make
-> Jellyfin discover a title it has never seen. Before requesting a refresh, the *arr
-> application asks Jellyfin where that series or movie already lives; for a brand-new title
-> the answer is "nowhere", so the refresh has no target and Jellyfin returns a success with
-> no scan. Nothing logs an error and the connection **Test** still passes — the test only
-> proves Jellyfin is reachable, not that an import triggers a scan. The first item added to
-> an empty library is doubly affected, because Jellyfin also starts no real-time filesystem
-> watcher for a library folder that contains no items. `Library/Refresh` scans regardless of
-> what Jellyfin already knows, which is why the Webhook covers the gap. Keep both: the
-> targeted connection is cheaper for titles that already exist.
+> **Why the second connection is required.** The **Emby / Jellyfin** connection's built-in
+> **Test** only POSTs `/Notifications/Admin` — it proves Jellyfin is reachable, not that an
+> import will be discovered. On import, the connection still POSTs `/Library/Media/Updated`
+> with the *arr movie or series path after looking up any existing item paths. That call is
+> path-targeted, not a full-library scan, so it still fails to discover titles in
+> empty or unwatched library folders. Jellyfin also starts no real-time filesystem watcher for a
+> library folder that contains no items. `POST /Library/Refresh` runs an unconditional full
+> scan (`ValidateMediaLibrary`), which is why the Webhook covers the gap. Keep both: the
+> targeted connection is cheaper when the library folder is already watched.
+
+`scripts/homeflix initialize core` and `setup core` reconcile this same pair. Manual
+steps above remain the operator-facing contract when you inspect or repair the
+connections in the UI.
 
 ## 5. Make a useful first request
 

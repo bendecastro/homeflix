@@ -53,6 +53,13 @@ wiki — read the rows that match what you're doing.
 - `project/deployment.md` (self-heal pair and phase allowlists)
 - `references/commands.md`
 
+## Core application reconciliation
+
+- `docs/specs/setup-reconciliation.md`
+- `docs/first-use.md` (two-connection operator truth)
+- `scripts/homeflix_setup/api/arr.py` and `api/jellyfin.py`
+- `scripts/homeflix_setup/core.py` (`configure_core` / `verify_core`)
+
 ## Runtime verification work
 
 - `docs/specs/verification.md`

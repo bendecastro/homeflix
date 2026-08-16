@@ -1,0 +1,6 @@
+{
+  "Items": [],
+  "TotalRecordCount": 0,
+  "skips_update": false,
+  "comment": "MediaBrowserProxy.GetPaths returns empty when no TMDB/IMDB/name match. Current *arr Update still adds movie/series.Path and POSTs /Library/Media/Updated; empty GetPaths is not a no-op."
+}

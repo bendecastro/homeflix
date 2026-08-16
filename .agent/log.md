@@ -518,3 +518,25 @@ previously running dependents when the operation clock is already expired.
 Tests advance a real FakeClock through that hung probe instead of injecting
 `TimeoutError` from the runner.
 
+## [2026-08-16] build | Reconcile reliable Jellyfin discovery
+
+Issue #6: core initialize/reconcile creates exactly one targeted MediaBrowser
+connection and one unconditional `Library/Refresh` webhook in both Radarr and
+Sonarr. Identity is implementation plus the internal `jellyfin:8096` address, not
+display name. Equivalent connections are GET-only; duplicates or conflicting owned
+fields fail without extra writes. Inspection reports events, address, refresh
+behavior, and the `X-Emby-Token` header without returning the dedicated key.
+Fixtures show the built-in targeted Test can pass while new-title discovery is
+absent, and that the webhook closes that gap. Fixture-accepted only; not live
+production verification. Acquisition services are not started.
+
+## [2026-08-16] fix | Targeted update is path-targeted, not a GetPaths no-op
+
+Issue #6 rework: driver-verified *arr Update always POSTs `/Library/Media/Updated`
+with the movie/series path after GetPaths; empty GetPaths is not a skip.
+`/Library/Media/Updated` is still not a full-library scan and misses titles in
+empty or unwatched folders, so the `Library/Refresh` webhook remains the
+gap-closer (`ValidateMediaLibrary`). The built-in Test remains `/Notifications/Admin`
+only. Corrected first-use, agent-setup, gotchas, and the fixture test. Still
+fixture-accepted only; not live-host proof.
+

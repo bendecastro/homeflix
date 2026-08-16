@@ -570,6 +570,8 @@ class StatefulCoreFixture:
             self.servers = {"radarr": [], "sonarr": []}
             self.initialized = False
             self.jellyfin_connected = False
+            self.application_keys = []
+            self.notifications = {"radarr": [], "sonarr": []}
         else:
             self.containers = set(CORE_SERVICES)
             if missing == "container": self.containers.remove("radarr")
@@ -591,18 +593,87 @@ class StatefulCoreFixture:
             if missing == "jellyseerr_server": self.servers["sonarr"] = []
             self.initialized = True
             self.jellyfin_connected = True
+            discovery_ready = missing != "jellyfin_startup"
+            self.application_keys = [self._application_key()] if discovery_ready else []
+            self.notifications = {
+                "radarr": list(self._notifications("radarr")) if discovery_ready else [],
+                "sonarr": list(self._notifications("sonarr")) if discovery_ready else [],
+            }
         self.fail_next_sonarr_root = False
         self.commands = []
         self.api_calls = []
         self.configuration_mutations = []
         self.repository_root = None
-        self.creations = {"account": 0, "library": 0, "library_options": 0, "root": 0, "settings": 0, "server": 0}
+        self.creations = {"account": 0, "library": 0, "library_options": 0, "root": 0, "settings": 0, "server": 0, "application_key": 0, "notification": 0}
         self.updates = {
             "media": {"radarr": 0, "sonarr": 0},
             "naming": {"radarr": 0, "sonarr": 0},
             "completed": {"radarr": 0, "sonarr": 0},
             "server": {"radarr": 0, "sonarr": 0},
         }
+
+    @staticmethod
+    def _application_key():
+        return {
+            "Id": "fixture-key-id",
+            "AccessToken": StatefulCoreFixture.key,
+            "AppName": "Radarr and Sonarr",
+            "Name": "Radarr and Sonarr",
+        }
+
+    @classmethod
+    def _notifications(cls, service):
+        events = {
+            "onGrab": False,
+            "onDownload": service == "radarr",
+            "onUpgrade": service == "radarr",
+            "onRename": True,
+            "onHealthIssue": False,
+            "includeHealthWarnings": False,
+            "onHealthRestored": False,
+            "onApplicationUpdate": False,
+            "onManualInteractionRequired": False,
+        }
+        if service == "radarr":
+            events.update({
+                "onMovieAdded": False, "onMovieDelete": False,
+                "onMovieFileDelete": False, "onMovieFileDeleteForUpgrade": False,
+            })
+        else:
+            events.update({
+                "onImportComplete": True, "onSeriesAdd": False, "onSeriesDelete": False,
+                "onEpisodeFileDelete": False, "onEpisodeFileDeleteForUpgrade": False,
+            })
+        return (
+            {
+                "id": 21,
+                "implementation": "MediaBrowser",
+                "configContract": "MediaBrowserSettings",
+                "name": "Jellyfin",
+                "fields": [
+                    {"name": "host", "value": "jellyfin"},
+                    {"name": "port", "value": 8096},
+                    {"name": "useSsl", "value": False},
+                    {"name": "urlBase", "value": ""},
+                    {"name": "apiKey", "value": cls.key},
+                    {"name": "notify", "value": False},
+                    {"name": "updateLibrary", "value": True},
+                ],
+                **events,
+            },
+            {
+                "id": 22,
+                "implementation": "Webhook",
+                "configContract": "WebhookSettings",
+                "name": "Jellyfin library scan",
+                "fields": [
+                    {"name": "url", "value": "http://jellyfin:8096/Library/Refresh"},
+                    {"name": "method", "value": 1},
+                    {"name": "headers", "value": [{"key": "X-Emby-Token", "value": cls.key}]},
+                ],
+                **events,
+            },
+        )
 
     @staticmethod
     def _server(service):
@@ -718,6 +789,17 @@ class StatefulCoreFixture:
             self.library_options[query["name"][0]] = dict(DEFAULT_LIBRARY_OPTIONS)
             self.configuration_mutations.append(call)
             return self._response(204, {})
+        if outgoing.method == "GET" and path == "/Auth/Keys" and not split.query:
+            return self._response(200, {"Items": list(self.application_keys), "TotalRecordCount": len(self.application_keys)})
+        if outgoing.method == "POST" and path == "/Auth/Keys":
+            query = parse_qs(split.query)
+            if query.get("app") != ["Radarr and Sonarr"]:
+                raise AssertionError("unexpected Jellyfin application key name")
+            created = self._application_key()
+            self.application_keys.append(created)
+            self.creations["application_key"] += 1
+            self.configuration_mutations.append(call)
+            return self._response(204, {})
         raise AssertionError(f"unexpected Jellyfin fixture request {outgoing.method} {outgoing.full_url}")
 
     def arr(self, service):
@@ -771,6 +853,15 @@ class StatefulCoreFixture:
                 self.updates["completed"][service] += 1
                 self.configuration_mutations.append(call)
                 return self._response(200, {})
+            if outgoing.method == "GET" and path == "/api/v3/notification":
+                return self._response(200, list(self.notifications[service]))
+            if outgoing.method == "POST" and path == "/api/v3/notification":
+                payload = json.loads(outgoing.data)
+                payload["id"] = 20 + len(self.notifications[service])
+                self.notifications[service].append(payload)
+                self.creations["notification"] += 1
+                self.configuration_mutations.append(call)
+                return self._response(200, payload)
             raise AssertionError(f"unexpected {service} fixture request {outgoing.method} {outgoing.full_url}")
         return transport
 
@@ -868,7 +959,7 @@ class CoreVerificationAndResumeTests(unittest.TestCase):
             def __init__(self, service, *args, **kwargs): self.service = service
             def inspect(self, profile, path):
                 return {"profile_exact": True, "root_exact": True, "media_settings": True,
-                        "completed_handling": True, "runtime_profile": {"id": 4, "name": profile},
+                        "completed_handling": True, "targeted_connection_exact": True, "refresh_connection_exact": True, "runtime_profile": {"id": 4, "name": profile},
                         "runtime_root": {"id": 8, "path": path}}
         class Seerr:
             def __init__(self, **kwargs): pass
@@ -933,7 +1024,7 @@ class CoreVerificationAndResumeTests(unittest.TestCase):
             def inspect(self, *args): return {"initialized": True, "libraries_exact": True}
         class Arr:
             def __init__(self, service, *args, **kwargs): self.service = service
-            def inspect(self, profile, path): return {"profile_exact": True, "root_exact": True, "media_settings": True, "completed_handling": True, "runtime_profile": {"id": 1, "name": profile}, "runtime_root": {"id": 2, "path": path}}
+            def inspect(self, profile, path): return {"profile_exact": True, "root_exact": True, "media_settings": True, "completed_handling": True, "targeted_connection_exact": True, "refresh_connection_exact": True, "runtime_profile": {"id": 1, "name": profile}, "runtime_root": {"id": 2, "path": path}}
         class Seerr:
             def __init__(self, **kwargs): pass
             def authorize(self, key): pass
@@ -1000,7 +1091,7 @@ class CoreVerificationAndResumeTests(unittest.TestCase):
         class Arr:
             def __init__(self, service, *args, **kwargs): self.service = service
             def inspect(self, profile, path):
-                return {"profile_exact": True, "root_exact": True, "media_settings": True, "completed_handling": True, "runtime_profile": {"id": 1, "name": profile}, "runtime_root": {"id": 2, "path": path}}
+                return {"profile_exact": True, "root_exact": True, "media_settings": True, "completed_handling": True, "targeted_connection_exact": True, "refresh_connection_exact": True, "runtime_profile": {"id": 1, "name": profile}, "runtime_root": {"id": 2, "path": path}}
         class Seerr:
             def __init__(self, **kwargs): pass
             def authorize(self, key): pass
@@ -1048,7 +1139,7 @@ class CoreVerificationAndResumeTests(unittest.TestCase):
         class Arr:
             def __init__(self, service, *args, **kwargs): self.service = service
             def inspect(self, profile, path):
-                return {"profile_exact": True, "root_exact": True, "media_settings": True, "completed_handling": True, "runtime_profile": {"id": 1, "name": profile}, "runtime_root": {"id": 2, "path": path}}
+                return {"profile_exact": True, "root_exact": True, "media_settings": True, "completed_handling": True, "targeted_connection_exact": True, "refresh_connection_exact": True, "runtime_profile": {"id": 1, "name": profile}, "runtime_root": {"id": 2, "path": path}}
         class Seerr:
             def __init__(self, **kwargs): pass
             def authorize(self, key): pass
@@ -1091,7 +1182,7 @@ class CoreVerificationAndResumeTests(unittest.TestCase):
         class Arr:
             def __init__(self, service, *args, **kwargs): self.service = service
             def inspect(self, profile, path):
-                return {"profile_exact": True, "root_exact": True, "media_settings": True, "completed_handling": True, "runtime_profile": {"id": 1, "name": profile}, "runtime_root": {"id": 2, "path": path}}
+                return {"profile_exact": True, "root_exact": True, "media_settings": True, "completed_handling": True, "targeted_connection_exact": True, "refresh_connection_exact": True, "runtime_profile": {"id": 1, "name": profile}, "runtime_root": {"id": 2, "path": path}}
         class Seerr:
             def __init__(self, **kwargs): pass
             def authorize(self, key): pass
@@ -1250,6 +1341,7 @@ class CoreVerificationAndResumeTests(unittest.TestCase):
             ("jellyfin_false", "jellyfin", "failure"),
             ("jellyfin_wrong", "jellyfin", "unknown"),
             ("radarr_false", "radarr", "failure"),
+            ("radarr_discovery", "radarr", "failure"),
             ("sonarr_wrong", "sonarr", "unknown"),
             ("jellyseerr_false", "jellyseerr", "failure"),
             ("jellyseerr_wrong", "jellyseerr", "unknown"),
@@ -1283,8 +1375,9 @@ class CoreVerificationAndResumeTests(unittest.TestCase):
                     class Arr:
                         def __init__(self, service, *args, **kwargs): self.service = service
                         def inspect(self, profile, path):
-                            result = {"profile_exact": True, "root_exact": True, "media_settings": True, "completed_handling": True, "runtime_profile": {"id": 1, "name": profile}, "runtime_root": {"id": 2, "path": path}}
+                            result = {"profile_exact": True, "root_exact": True, "media_settings": True, "completed_handling": True, "targeted_connection_exact": True, "refresh_connection_exact": True, "runtime_profile": {"id": 1, "name": profile}, "runtime_root": {"id": 2, "path": path}}
                             if scenario == "radarr_false" and self.service == "radarr": result["root_exact"] = False
+                            if scenario == "radarr_discovery" and self.service == "radarr": result["refresh_connection_exact"] = False
                             if scenario == "sonarr_wrong" and self.service == "sonarr": result.pop("media_settings")
                             return result
                     class Seerr:
@@ -1309,14 +1402,14 @@ class CoreVerificationAndResumeTests(unittest.TestCase):
 
     def test_reconcile_repairs_live_drift_from_every_checkpoint_without_duplicates(self):
         cases = (
-            ({}, "container", None),
-            ({"configured": True}, "jellyfin_startup", "account"),
-            ({"core_containers_started": True}, "jellyfin_library", "library"),
-            ({"core_api_configured": True}, "arr_root", "root"),
-            ({"core_verified": True}, "arr_settings", "settings"),
-            ({"configured": True, "core_verified": True}, "jellyseerr_server", "server"),
+            ({}, "container", {}),
+            ({"configured": True}, "jellyfin_startup", {"account": 1, "application_key": 1, "notification": 4}),
+            ({"core_containers_started": True}, "jellyfin_library", {"library": 1, "library_options": 1}),
+            ({"core_api_configured": True}, "arr_root", {"root": 1}),
+            ({"core_verified": True}, "arr_settings", {"settings": 1}),
+            ({"configured": True, "core_verified": True}, "jellyseerr_server", {"server": 1}),
         )
-        for initial, missing, created_kind in cases:
+        for initial, missing, created_kinds in cases:
             with self.subTest(initial=initial, missing=missing):
                 temporary, root = self.make_root()
                 try:
@@ -1347,10 +1440,7 @@ class CoreVerificationAndResumeTests(unittest.TestCase):
                     self.assertEqual(first["status"], "verified")
                     self.assertEqual(second["status"], "verified")
                     expected = {name: 0 for name in fixture.creations}
-                    if created_kind is not None: expected[created_kind] = 1
-                    # A recreated library arrives writing into the read-only media mount,
-                    # so exactly one options repair follows it.
-                    if created_kind == "library": expected["library_options"] = 1
+                    expected.update(created_kinds)
                     self.assertEqual(counts_after_first, expected)
                     self.assertEqual(fixture.creations, expected)
                     self.assertEqual(set(fixture.containers), set(CORE_SERVICES))
@@ -1359,6 +1449,8 @@ class CoreVerificationAndResumeTests(unittest.TestCase):
                     self.assertEqual(fixture.roots["sonarr"], ["/data/media/tv"])
                     self.assertEqual(len(fixture.servers["radarr"]), 1)
                     self.assertEqual(len(fixture.servers["sonarr"]), 1)
+                    self.assertEqual(len(fixture.notifications["radarr"]), 2)
+                    self.assertEqual(len(fixture.notifications["sonarr"]), 2)
                     up_calls = sum("up" in command for command in fixture.commands)
                     self.assertEqual(up_calls, 1 if missing == "container" else 0)
                 finally:
@@ -1402,7 +1494,7 @@ class FakeRuntimeVerificationTests(unittest.TestCase):
             def inspect(self, profile, path):
                 payload = arr or {
                     "profile_exact": True, "root_exact": True, "media_settings": True,
-                    "completed_handling": True, "runtime_profile": {"id": 1, "name": profile},
+                    "completed_handling": True, "targeted_connection_exact": True, "refresh_connection_exact": True, "runtime_profile": {"id": 1, "name": profile},
                     "runtime_root": {"id": 2, "path": path},
                 }
                 return dict(payload)

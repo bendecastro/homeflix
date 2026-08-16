@@ -6,6 +6,7 @@ from pathlib import Path
 import re
 import time
 from typing import Any, Callable, Mapping
+from urllib.parse import urlsplit
 import xml.etree.ElementTree as ET
 
 from .client import ApiError, JsonClient, Transport, urllib_transport
@@ -13,6 +14,164 @@ from .securepath import read_config_file
 
 
 _KEY = re.compile(r"^[A-Za-z0-9_-]{16,128}$")
+_JELLYFIN_HOST = "jellyfin"
+_JELLYFIN_PORT = 8096
+_REFRESH_URL = "http://jellyfin:8096/Library/Refresh"
+_WEBHOOK_POST = 1
+_TOKEN_HEADER = "X-Emby-Token"
+_MEDIA_BROWSER = "MediaBrowser"
+_WEBHOOK = "Webhook"
+
+_RADARR_EVENTS = {
+    "onGrab": False,
+    "onDownload": True,
+    "onUpgrade": True,
+    "onRename": True,
+    "onMovieAdded": False,
+    "onMovieDelete": False,
+    "onMovieFileDelete": False,
+    "onMovieFileDeleteForUpgrade": False,
+    "onHealthIssue": False,
+    "includeHealthWarnings": False,
+    "onHealthRestored": False,
+    "onApplicationUpdate": False,
+    "onManualInteractionRequired": False,
+}
+_SONARR_EVENTS = {
+    "onGrab": False,
+    "onDownload": False,
+    "onUpgrade": False,
+    "onImportComplete": True,
+    "onRename": True,
+    "onSeriesAdd": False,
+    "onSeriesDelete": False,
+    "onEpisodeFileDelete": False,
+    "onEpisodeFileDeleteForUpgrade": False,
+    "onHealthIssue": False,
+    "includeHealthWarnings": False,
+    "onHealthRestored": False,
+    "onApplicationUpdate": False,
+    "onManualInteractionRequired": False,
+}
+
+
+def _owned_events(service: str) -> dict[str, bool]:
+    return dict(_RADARR_EVENTS if service == "radarr" else _SONARR_EVENTS)
+
+
+def _field_value(item: Mapping[str, Any], name: str) -> Any:
+    fields = item.get("fields")
+    if not isinstance(fields, list):
+        return None
+    matches = [field for field in fields if isinstance(field, dict) and field.get("name") == name]
+    if len(matches) != 1:
+        return None
+    return matches[0].get("value")
+
+
+def _header_pairs(value: object) -> list[tuple[str, str]]:
+    if not isinstance(value, list):
+        return []
+    pairs: list[tuple[str, str]] = []
+    for entry in value:
+        if not isinstance(entry, dict):
+            continue
+        name = entry.get("key", entry.get("name"))
+        header_value = entry.get("value")
+        if isinstance(name, str) and isinstance(header_value, str):
+            pairs.append((name, header_value))
+    return pairs
+
+
+def _events_exact(item: Mapping[str, Any], service: str) -> bool:
+    return all(item.get(name) is expected for name, expected in _owned_events(service).items())
+
+
+def _media_browser_address_exact(item: Mapping[str, Any]) -> bool:
+    url_base = _field_value(item, "urlBase")
+    return (
+        item.get("implementation") == _MEDIA_BROWSER
+        and _field_value(item, "host") == _JELLYFIN_HOST
+        and _field_value(item, "port") == _JELLYFIN_PORT
+        and _field_value(item, "useSsl") is False
+        and (url_base in {None, ""})
+    )
+
+
+def _refresh_url_identity(url: object) -> tuple[str, str, int, str] | None:
+    if not isinstance(url, str) or not url:
+        return None
+    parsed = urlsplit(url)
+    if parsed.scheme != "http" or parsed.hostname is None:
+        return None
+    port = parsed.port if parsed.port is not None else _JELLYFIN_PORT
+    return (parsed.scheme, parsed.hostname, port, parsed.path)
+
+
+def _webhook_owned_identity(item: Mapping[str, Any]) -> bool:
+    return item.get("implementation") == _WEBHOOK and _refresh_url_identity(_field_value(item, "url")) == (
+        "http",
+        _JELLYFIN_HOST,
+        _JELLYFIN_PORT,
+        "/Library/Refresh",
+    )
+
+
+def _inspect_targeted(items: list[Mapping[str, Any]], service: str) -> dict[str, object]:
+    matches = [item for item in items if _media_browser_address_exact(item)]
+    empty = {
+        "present": False,
+        "events_exact": False,
+        "address_exact": False,
+        "update_library": False,
+        "notify": False,
+    }
+    if len(matches) != 1:
+        return empty
+    item = matches[0]
+    update_library = _field_value(item, "updateLibrary") is True
+    notify = _field_value(item, "notify") is True
+    events_exact = _events_exact(item, service)
+    api_key = _field_value(item, "apiKey")
+    key_present = isinstance(api_key, str) and bool(api_key)
+    exact = events_exact and update_library and notify is False and key_present
+    return {
+        "present": True,
+        "events_exact": events_exact,
+        "address_exact": True,
+        "update_library": update_library,
+        "notify": notify,
+        "exact": exact,
+    }
+
+
+def _inspect_refresh(items: list[Mapping[str, Any]], service: str) -> dict[str, object]:
+    matches = [item for item in items if _webhook_owned_identity(item)]
+    empty = {
+        "present": False,
+        "events_exact": False,
+        "url_exact": False,
+        "method_exact": False,
+        "token_header": False,
+    }
+    if len(matches) != 1:
+        return empty
+    item = matches[0]
+    url = _field_value(item, "url")
+    url_exact = url == _REFRESH_URL
+    method_exact = _field_value(item, "method") == _WEBHOOK_POST
+    headers = _header_pairs(_field_value(item, "headers"))
+    token_names = [name for name, value in headers if name == _TOKEN_HEADER and value]
+    token_header = len(token_names) == 1
+    events_exact = _events_exact(item, service)
+    return {
+        "present": True,
+        "events_exact": events_exact,
+        "url_exact": url_exact,
+        "method_exact": method_exact,
+        "token_header": token_header,
+        "exact": events_exact and url_exact and method_exact and token_header,
+    }
 
 
 def read_api_key(config_root: str | Path, service: str, expected_uid: int) -> str:
@@ -85,6 +244,83 @@ class ArrClient:
         self.http.request("PUT", endpoint, operation=f"update {operation}", payload=updated)
         return True
 
+    def _list_notifications(self, operation: str) -> list[dict[str, Any]]:
+        current = self.http.request("GET", "/api/v3/notification", operation=operation)
+        if not isinstance(current, list) or not all(isinstance(item, dict) for item in current):
+            raise ApiError(self.service, operation, None, "invalid_response")
+        return current
+
+    def _notification_payload(self, implementation: str, fields: list[dict[str, Any]]) -> dict[str, Any]:
+        if implementation == _MEDIA_BROWSER:
+            name, contract = "Jellyfin", "MediaBrowserSettings"
+        else:
+            name, contract = "Jellyfin library scan", "WebhookSettings"
+        payload: dict[str, Any] = {
+            "name": name,
+            "implementation": implementation,
+            "configContract": contract,
+            "fields": fields,
+            **_owned_events(self.service),
+        }
+        return payload
+
+    def _create_notification(self, implementation: str, fields: list[dict[str, Any]], owned_match: Callable[[Mapping[str, Any]], bool]) -> None:
+        payload = self._notification_payload(implementation, fields)
+        try:
+            created = self.http.request("POST", "/api/v3/notification", operation="create notification", payload=payload)
+        except ApiError as caught:
+            if caught.code != "transport_error":
+                raise
+            current = self._list_notifications("reconcile notification creation")
+            found = [item for item in current if owned_match(item)]
+            if len(found) != 1:
+                raise
+            return
+        if not isinstance(created, dict) or type(created.get("id")) is not int:
+            raise ApiError(self.service, "create notification", None, "invalid_response")
+
+    def _ensure_discovery(self, jellyfin_api_key: str) -> tuple[bool, bool]:
+        if not re.fullmatch(r"^[A-Za-z0-9_-]{16,256}$", jellyfin_api_key):
+            raise ValueError("Jellyfin API key is invalid")
+        current = self._list_notifications("list notifications")
+        targeted_matches = [item for item in current if _media_browser_address_exact(item)]
+        refresh_matches = [item for item in current if _webhook_owned_identity(item)]
+        if len(targeted_matches) > 1 or len(refresh_matches) > 1:
+            raise ApiError(self.service, "reconcile notifications", None, "notification_conflict")
+        if targeted_matches:
+            inspected = _inspect_targeted(targeted_matches, self.service)
+            if inspected.get("exact") is not True or _field_value(targeted_matches[0], "apiKey") != jellyfin_api_key:
+                raise ApiError(self.service, "reconcile notifications", None, "notification_conflict")
+        if refresh_matches:
+            inspected = _inspect_refresh(refresh_matches, self.service)
+            headers = _header_pairs(_field_value(refresh_matches[0], "headers"))
+            token_values = [value for name, value in headers if name == _TOKEN_HEADER]
+            if inspected.get("exact") is not True or token_values != [jellyfin_api_key]:
+                raise ApiError(self.service, "reconcile notifications", None, "notification_conflict")
+        targeted_fields = [
+            {"name": "host", "value": _JELLYFIN_HOST},
+            {"name": "port", "value": _JELLYFIN_PORT},
+            {"name": "useSsl", "value": False},
+            {"name": "urlBase", "value": ""},
+            {"name": "apiKey", "value": jellyfin_api_key},
+            {"name": "notify", "value": False},
+            {"name": "updateLibrary", "value": True},
+        ]
+        refresh_fields = [
+            {"name": "url", "value": _REFRESH_URL},
+            {"name": "method", "value": _WEBHOOK_POST},
+            {"name": "headers", "value": [{"key": _TOKEN_HEADER, "value": jellyfin_api_key}]},
+        ]
+        targeted_changed = False
+        if not targeted_matches:
+            self._create_notification(_MEDIA_BROWSER, targeted_fields, _media_browser_address_exact)
+            targeted_changed = True
+        refresh_changed = False
+        if not refresh_matches:
+            self._create_notification(_WEBHOOK, refresh_fields, _webhook_owned_identity)
+            refresh_changed = True
+        return targeted_changed, refresh_changed
+
     def inspect(self, profile_name: str, root_path: str) -> dict[str, object]:
         """Inspect setup-owned Arr state using GET requests only."""
         profile = self.profile(profile_name)
@@ -96,6 +332,11 @@ class ArrClient:
         naming = self.http.request("GET", "/api/v3/config/naming", operation="inspect naming")
         media = self.http.request("GET", "/api/v3/config/mediamanagement", operation="inspect media management")
         completed = self.http.request("GET", "/api/v3/config/downloadclient", operation="inspect completed handling")
+        notifications = self.http.request("GET", "/api/v3/notification", operation="inspect notifications")
+        if not isinstance(notifications, list) or not all(isinstance(item, dict) for item in notifications):
+            raise ApiError(self.service, "inspect notifications", None, "invalid_response")
+        targeted = _inspect_targeted(notifications, self.service)
+        refresh = _inspect_refresh(notifications, self.service)
         rename = "renameMovies" if self.service == "radarr" else "renameEpisodes"
         return {
             "profile": profile["name"],
@@ -106,11 +347,15 @@ class ArrClient:
                 and isinstance(media, dict) and media.get("copyUsingHardlinks") is True
             ),
             "completed_handling": isinstance(completed, dict) and completed.get("enableCompletedDownloadHandling") is True,
+            "targeted_connection_exact": targeted.get("exact") is True,
+            "refresh_connection_exact": refresh.get("exact") is True,
+            "targeted_connection": {key: targeted[key] for key in ("present", "events_exact", "address_exact", "update_library", "notify")},
+            "refresh_connection": {key: refresh[key] for key in ("present", "events_exact", "url_exact", "method_exact", "token_header")},
             "runtime_profile": profile,
             "runtime_root": ({"id": root_matches[0]["id"], "path": root_path} if len(root_matches) == 1 else None),
         }
 
-    def configure(self, profile_name: str, root_path: str) -> dict[str, object]:
+    def configure(self, profile_name: str, root_path: str, *, jellyfin_api_key: str | None = None) -> dict[str, object]:
         profile = self.profile(profile_name)
         root = self.ensure_root(root_path)
         self.selected_profile = profile
@@ -128,4 +373,17 @@ class ArrClient:
         completed_changed = self._update_config("/api/v3/config/downloadclient", "completed download handling", {
             "enableCompletedDownloadHandling": True,
         })
-        return {"service": self.service, "profile": profile["name"], "root": root["path"], "naming_changed": naming_changed, "media_management_changed": naming_changed or media_changed, "completed_handling_changed": completed_changed}
+        targeted_changed = False
+        refresh_changed = False
+        if jellyfin_api_key is not None:
+            targeted_changed, refresh_changed = self._ensure_discovery(jellyfin_api_key)
+        return {
+            "service": self.service,
+            "profile": profile["name"],
+            "root": root["path"],
+            "naming_changed": naming_changed,
+            "media_management_changed": naming_changed or media_changed,
+            "completed_handling_changed": completed_changed,
+            "targeted_connection_changed": targeted_changed,
+            "refresh_connection_changed": refresh_changed,
+        }

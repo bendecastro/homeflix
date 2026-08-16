@@ -1,6 +1,6 @@
 # References — Commands
 
-Updated: 2026-08-14
+Updated: 2026-08-16
 Source: prior private design package (see `references/source-research.md`). Verify on the host;
 summarize output, never paste secrets.
 
@@ -21,9 +21,10 @@ scripts/homeflix --json verify core
 ```
 
 Inspects live Docker, the static stack contract, core service readiness, DATA_ROOT
-`/data` identity, a cleaned-up hardlink probe, and application exactness. Unselected
-QuickSync is not-applicable. Any mandatory unknown or skip fails the command. Does
-not start, stop, or restart Compose services.
+`/data` identity, a cleaned-up hardlink probe, and application exactness including
+the two owned Jellyfin discovery connections per *arr app. Unselected QuickSync is
+not-applicable. Any mandatory unknown or skip fails the command. Does not start,
+stop, or restart Compose services. Does not return API keys.
 
 ## Stack lifecycle (from the deploy dir on the host)
 

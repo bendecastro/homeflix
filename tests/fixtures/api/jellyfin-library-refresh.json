@@ -1,0 +1,9 @@
+{
+  "method": "POST",
+  "path": "/Library/Refresh",
+  "headers": {"X-Emby-Token": "REDACTED"},
+  "status": 204,
+  "token_in_url": false,
+  "full_library_scan": true,
+  "comment": "Jellyfin LibraryController.RefreshLibrary runs ValidateMediaLibrary (unconditional full scan). This closes the gap that /Library/Media/Updated leaves in empty or unwatched library folders."
+}

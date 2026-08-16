@@ -202,11 +202,11 @@ class ConfigureCoreTests(unittest.TestCase):
             class FakeJellyfin:
                 def __init__(self, **kwargs): pass
                 def reconcile(self, username, password):
-                    calls.append(("jf", username, password)); return True, ["Movies", "Shows", "Music"]
+                    calls.append(("jf", username, password)); self.application_key = KEY; return True, ["Movies", "Shows", "Music"]
             class FakeArr:
                 def __init__(self, service, base, key, **kwargs):
                     self.service = service; calls.append((service, base, key, kwargs["headers"]))
-                def configure(self, name, path):
+                def configure(self, name, path, **kwargs):
                     self.selected_profile = {"id": 41, "name": name}
                     self.selected_root = {"id": 8, "path": path}
                     return {"service": self.service, "profile": name, "root": path, "media_management_changed": False, "completed_handling_changed": False}

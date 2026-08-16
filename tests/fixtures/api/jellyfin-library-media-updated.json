@@ -1,0 +1,10 @@
+{
+  "comment": "MediaBrowserService.Update always adds movie/series.Path after GetPaths and POSTs /Library/Media/Updated. Empty GetPaths does not skip the update. This path-targeted call is not a full-library scan and still fails to discover titles in empty or unwatched library folders.",
+  "method": "POST",
+  "path": "/Library/Media/Updated",
+  "headers": {"X-Emby-Token": "REDACTED"},
+  "query": {"path": "/data/media/movies/Example (2024)"},
+  "status": 204,
+  "path_targeted": true,
+  "full_library_scan": false
+}

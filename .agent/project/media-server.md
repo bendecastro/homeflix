@@ -1,6 +1,6 @@
 # homeflix — Media Server (player layer)
 
-Updated: 2026-06-14
+Updated: 2026-08-16
 Decision: [ADR-0004](../decisions/adr-0004-jellyfin-media-server.md). Source:
 the prior private design package.
 
@@ -18,6 +18,8 @@ the prior private design package.
 - Libraries to add in-app: Movies `/data/media/movies`, TV `/data/media/tv`,
   Music `/data/media/music`.
 - Paths per [ADR-0008](../decisions/adr-0008-single-filesystem-data-root-hardlinks.md).
+- Imports appear via the two *arr connections (targeted plus `Library/Refresh`). Core
+  initialize reconciles them; fixture-accepted only.
 
 ## Jellyseerr (requests)
 

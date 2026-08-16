@@ -243,8 +243,8 @@ class StatusCliTests(unittest.TestCase):
         result = {
             "status": "configured",
             "jellyfin": {"administrator_created": True, "libraries": ["Movies", "Shows", "Music"]},
-            "radarr": {"profile": "Fixture HD", "root": "/data/media/movies"},
-            "sonarr": {"profile": "Fixture HD", "root": "/data/media/tv"},
+            "radarr": {"profile": "Fixture HD", "root": "/data/media/movies", "targeted_connection_changed": True, "refresh_connection_changed": True},
+            "sonarr": {"profile": "Fixture HD", "root": "/data/media/tv", "targeted_connection_changed": False, "refresh_connection_changed": False},
             "jellyseerr": {"initialized": True},
         }
         with tempfile.TemporaryDirectory() as directory:
@@ -253,7 +253,13 @@ class StatusCliTests(unittest.TestCase):
                 code, stdout, stderr = run_main("--json", "initialize", "core", repository_root=root)
             self.assertEqual(code, 0)
             self.assertEqual(stderr, "")
-            self.assertEqual(json.loads(stdout)["status"], "configured")
+            payload = json.loads(stdout)
+            self.assertEqual(payload["status"], "configured")
+            self.assertTrue(payload["radarr"]["targeted_connection_changed"])
+            self.assertTrue(payload["radarr"]["refresh_connection_changed"])
+            self.assertNotIn("apiKey", stdout)
+            self.assertNotIn("X-Emby-Token", stdout)
+            self.assertNotIn("JELLYFIN", stdout)
             for error_code in ("profile_not_found", "transport_error", "deadline_exhausted"):
                 with self.subTest(error_code=error_code), patch("scripts.homeflix_setup.cli.configure_core", side_effect=ApiError("radarr", "initialize", None, error_code)):
                     code, stdout, stderr = run_main("--json", "initialize", "core", repository_root=root)

@@ -1,6 +1,6 @@
 # References — Gotchas
 
-Updated: 2026-08-14
+Updated: 2026-08-16
 
 Traps specific to the homeflix design, plus the generic classics. Add real ones as they
 bite.
@@ -68,6 +68,14 @@ bite.
 - **Forced vs full English.** “Forced” = foreign-language lines only; full English is the
   complete track. The recommended profile asks for both so players can offer
   `English - Forced` without forcing always-on captions.
+- **A passing Emby/Jellyfin connection Test does not prove new-title discovery.** The
+  built-in Test only POSTs `/Notifications/Admin`. On import, the targeted update always
+  POSTs `/Library/Media/Updated` with the *arr movie/series path even when Jellyfin's
+  `GetPaths` lookup is empty; that call is not a full-library scan and still misses
+  titles in empty or unwatched library folders. Core reconcile keeps that targeted
+  connection **and** an unconditional webhook to `POST /Library/Refresh`
+  (`ValidateMediaLibrary`) with header `X-Emby-Token` (token not in the URL). Fixture-
+  accepted only; not live-host proof.
 
 ## Generic classics (watch for)
 
@@ -100,16 +108,16 @@ bite.
   Proxy subnet selection must separately avoid all existing IPv4 routes across routing
   tables, including Docker bridges, VLANs and secondary LANs, while recognizing and
   preserving Homeflix's own existing proxy network on reruns.
-- **[2026-08-11] The *arr "Update Library" connection cannot discover a title Jellyfin has
-  never seen.** Before requesting a refresh, Radarr/Sonarr ask Jellyfin where the movie or
-  series already lives. For a brand-new title that lookup returns an empty set, so the
-  follow-up update targets nothing and Jellyfin answers `204`. No error is logged anywhere,
-  and the connection **Test** still passes because it only proves reachability. The same is
-  true of `POST /Library/Series/Updated` with an unknown TVDB id. Jellyfin's real-time
-  `LibraryMonitor` compounds it: it starts no filesystem watcher for a library folder that
-  contains no items, so the very first item added to an empty library has no safety net
-  either. The fix is a second **Webhook** connection posting to `/Library/Refresh`, which
-  scans unconditionally; keep the targeted connection for titles that already exist.
+- **[2026-08-11] The *arr "Update Library" connection is not a full-library scan.** On
+  import, Radarr/Sonarr still POST `/Library/Media/Updated` with the movie or series path
+  after `GetPaths` — they do not no-op just because Jellyfin has never indexed the title.
+  `/Library/Media/Updated` still fails to discover titles in empty or unwatched library
+  folders, and Jellyfin's `LibraryMonitor` starts no filesystem watcher for a folder that
+  contains no items. The connection **Test** still passes because it only POSTs
+  `/Notifications/Admin`. The fix is a second **Webhook** connection posting to
+  `/Library/Refresh`, which runs `ValidateMediaLibrary`; keep the targeted connection for
+  path-targeted updates. Corrected 2026-08-16: earlier notes claimed empty `GetPaths`
+  skipped the update. Current *arr always sends the *arr path.
 - **[2026-08-11] Passing `/dev/dri` into Jellyfin does not enable hardware transcoding.**
   The device mapping only makes the GPU available. Jellyfin still defaults to
   `HardwareAccelerationType: none` and transcodes on the CPU, silently. Hardware
