@@ -16,7 +16,15 @@ from typing import Callable, Mapping, Sequence
 from urllib import error, request
 import uuid
 
-from .api import ApiError, ArrClient, JellyfinClient, JellyseerrClient, read_api_key, read_settings_api_key
+from .api import (
+    ApiError,
+    ArrClient,
+    JellyfinClient,
+    JellyseerrClient,
+    read_api_key,
+    read_jellyfin_api_key,
+    read_settings_api_key,
+)
 from .api.client import Transport, urllib_transport
 from .command import CommandRunner
 from .compose import (
@@ -742,6 +750,7 @@ def _run_discovery_probe(
             values.get("JELLYFIN_ADMIN_USER") or "",
             values.get("JELLYFIN_ADMIN_PASSWORD") or "",
             token,
+            access_token=values.get("JELLYFIN_ACCESS_TOKEN") or None,
         )
     except (OSError, RuntimeError, ValueError, TypeError, ApiError, TimeoutError):
         appeared = False
@@ -774,6 +783,7 @@ def verify_core(
     transports: Mapping[str, Transport] | None = None,
     api_key_reader: Callable[[str | Path, str, int], str] = read_api_key,
     settings_key_reader: Callable[[str | Path, int], str] = read_settings_api_key,
+    jellyfin_key_reader: Callable[[str | Path, int], str] = read_jellyfin_api_key,
     http_waiter: Callable[..., ReadinessResult] = wait_for_http,
     readiness_timeout: float = READINESS_TIMEOUT,
     clock: Callable[[], float] = time.monotonic,
@@ -940,22 +950,32 @@ def verify_core(
     chosen = dict(transports or {})
     runtime: dict[str, tuple[dict[str, object], dict[str, object]]] = {}
     try:
-        if any(not value for value in values.values()) or re.fullmatch(r"[0-9]+", values["PUID"] or "") is None:
+        if not values.get("CONFIG_ROOT") or re.fullmatch(r"[0-9]+", values.get("PUID") or "") is None:
             raise ValueError("required verification configuration is missing")
         uid = int(values["PUID"] or "")
+        config_root = values["CONFIG_ROOT"] or ""
         if clock() >= operation_deadline:
             raise TimeoutError("core operation deadline exhausted")
-        jf = JellyfinClient(transport=chosen.get("jellyfin", urllib_transport), deadline=operation_deadline, clock=clock).inspect(values["JELLYFIN_ADMIN_USER"] or "", values["JELLYFIN_ADMIN_PASSWORD"] or "")
+        admin_user = values.get("JELLYFIN_ADMIN_USER") or ""
+        admin_password = values.get("JELLYFIN_ADMIN_PASSWORD") or ""
+        access_token = None if admin_user and admin_password else jellyfin_key_reader(config_root, uid)
+        values["JELLYFIN_ACCESS_TOKEN"] = access_token
+        jf = JellyfinClient(
+            transport=chosen.get("jellyfin", urllib_transport),
+            deadline=operation_deadline,
+            clock=clock,
+        ).inspect(admin_user, admin_password, access_token=access_token)
         checks.append(_application_check("jellyfin", jf, ("initialized", "libraries_exact"), "initialized with exact libraries", "initialization or exact libraries differ"))
+        seerr = JellyseerrClient(headers={"Host": f"jellyseerr.{config.get('DOMAIN') or ''}"}, transport=chosen.get("jellyseerr", urllib_transport), deadline=operation_deadline, clock=clock)
+        seerr.authorize(settings_key_reader(config_root, uid))
+        profile_name = values.get("QUALITY_PROFILE") or seerr.selected_quality_profile()
         for service, media_path in (("radarr", "/data/media/movies"), ("sonarr", "/data/media/tv")):
-            key = api_key_reader(values["CONFIG_ROOT"] or "", service, uid)
+            key = api_key_reader(config_root, service, uid)
             domain = config.get("DOMAIN") or ""
-            inspected = ArrClient(service, "http://127.0.0.1", key, headers={"Host": f"{service}.{domain}"}, transport=chosen.get(service, urllib_transport), deadline=operation_deadline, clock=clock).inspect(values["QUALITY_PROFILE"] or "", media_path)
+            inspected = ArrClient(service, "http://127.0.0.1", key, headers={"Host": f"{service}.{domain}"}, transport=chosen.get(service, urllib_transport), deadline=operation_deadline, clock=clock).inspect(profile_name, media_path)
             checks.append(_application_check(service, inspected, ("profile_exact", "root_exact", "media_settings", "completed_handling", "targeted_connection_exact", "refresh_connection_exact"), "selected profile, root, media settings, and Jellyfin discovery match", "selected profile, root, media settings, or Jellyfin discovery differ"))
             if inspected.get("runtime_root") is not None:
                 runtime[service] = (inspected["runtime_profile"], inspected["runtime_root"])  # type: ignore[assignment]
-        seerr = JellyseerrClient(headers={"Host": f"jellyseerr.{config.get('DOMAIN') or ''}"}, transport=chosen.get("jellyseerr", urllib_transport), deadline=operation_deadline, clock=clock)
-        seerr.authorize(settings_key_reader(values["CONFIG_ROOT"] or "", uid))
         inspected_seerr = seerr.inspect(runtime)
         checks.append(_application_check("jellyseerr", inspected_seerr, tuple(inspected_seerr), "initialized with exact internal default services", "initialization or internal default services differ"))
     except ApiError as caught:

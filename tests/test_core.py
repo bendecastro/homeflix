@@ -958,7 +958,7 @@ class CoreVerificationAndResumeTests(unittest.TestCase):
                 return subprocess.CompletedProcess(argv, 0, json.dumps(records), "")
         class Jellyfin:
             def __init__(self, **kwargs): pass
-            def inspect(self, username, password): return {"initialized": True, "libraries_exact": True}
+            def inspect(self, username, password, **kwargs): return {"initialized": True, "libraries_exact": True}
         class Arr:
             def __init__(self, service, *args, **kwargs): self.service = service
             def inspect(self, profile, path):
@@ -1025,7 +1025,7 @@ class CoreVerificationAndResumeTests(unittest.TestCase):
         runner = Runner()
         class Jellyfin:
             def __init__(self, **kwargs): pass
-            def inspect(self, *args): return {"initialized": True, "libraries_exact": True}
+            def inspect(self, *args, **kwargs): return {"initialized": True, "libraries_exact": True}
         class Arr:
             def __init__(self, service, *args, **kwargs): self.service = service
             def inspect(self, profile, path): return {"profile_exact": True, "root_exact": True, "media_settings": True, "completed_handling": True, "targeted_connection_exact": True, "refresh_connection_exact": True, "runtime_profile": {"id": 1, "name": profile}, "runtime_root": {"id": 2, "path": path}}
@@ -1091,7 +1091,7 @@ class CoreVerificationAndResumeTests(unittest.TestCase):
                 return subprocess.CompletedProcess(argv, 0, json.dumps(records), "")
         class Jellyfin:
             def __init__(self, **kwargs): pass
-            def inspect(self, *args): return {"initialized": True, "libraries_exact": True}
+            def inspect(self, *args, **kwargs): return {"initialized": True, "libraries_exact": True}
         class Arr:
             def __init__(self, service, *args, **kwargs): self.service = service
             def inspect(self, profile, path):
@@ -1139,7 +1139,7 @@ class CoreVerificationAndResumeTests(unittest.TestCase):
                 return subprocess.CompletedProcess(argv, 0, json.dumps(records), "")
         class Jellyfin:
             def __init__(self, **kwargs): pass
-            def inspect(self, *args): return {"initialized": True, "libraries_exact": True}
+            def inspect(self, *args, **kwargs): return {"initialized": True, "libraries_exact": True}
         class Arr:
             def __init__(self, service, *args, **kwargs): self.service = service
             def inspect(self, profile, path):
@@ -1182,7 +1182,7 @@ class CoreVerificationAndResumeTests(unittest.TestCase):
                 return subprocess.CompletedProcess(argv, 0, json.dumps(records), "")
         class Jellyfin:
             def __init__(self, **kwargs): pass
-            def inspect(self, *args): return {"initialized": True, "libraries_exact": True}
+            def inspect(self, *args, **kwargs): return {"initialized": True, "libraries_exact": True}
         class Arr:
             def __init__(self, service, *args, **kwargs): self.service = service
             def inspect(self, profile, path):
@@ -1265,7 +1265,7 @@ class CoreVerificationAndResumeTests(unittest.TestCase):
                             return subprocess.CompletedProcess(argv, 0, json.dumps(records), "")
                     class Jellyfin:
                         def __init__(self, **kwargs): pass
-                        def inspect(self, *args): return {"initialized": True, "libraries_exact": True}
+                        def inspect(self, *args, **kwargs): return {"initialized": True, "libraries_exact": True}
                     class Arr:
                         def __init__(self, service, *args, **kwargs): self.service = service
                         def inspect(self, profile, path):
@@ -1394,7 +1394,7 @@ class CoreVerificationAndResumeTests(unittest.TestCase):
                             return subprocess.CompletedProcess(argv, 0, json.dumps(records), "")
                     class Jellyfin:
                         def __init__(self, **kwargs): pass
-                        def inspect(self, *args):
+                        def inspect(self, *args, **kwargs):
                             if scenario == "jellyfin_false": return {"initialized": False, "libraries_exact": True}
                             if scenario == "jellyfin_wrong": return {"initialized": "yes", "libraries_exact": True}
                             return {"initialized": True, "libraries_exact": True}
@@ -1545,7 +1545,7 @@ class FakeRuntimeVerificationTests(unittest.TestCase):
     def clients(self, *, jellyfin=None, arr=None, seerr=None):
         class Jellyfin:
             def __init__(self, **kwargs): pass
-            def inspect(self, *args):
+            def inspect(self, *args, **kwargs):
                 return jellyfin or {"initialized": True, "libraries_exact": True}
         class Arr:
             def __init__(self, service, *args, **kwargs): self.service = service
@@ -1559,6 +1559,7 @@ class FakeRuntimeVerificationTests(unittest.TestCase):
         class Seerr:
             def __init__(self, **kwargs): pass
             def authorize(self, key): pass
+            def selected_quality_profile(self): return "Fixture HD"
             def inspect(self, runtime):
                 return seerr or {"initialized": True, "jellyfin": True, "radarr": True, "sonarr": True}
         return Jellyfin, Arr, Seerr
@@ -1775,9 +1776,9 @@ class FakeRuntimeVerificationTests(unittest.TestCase):
 
         class ProbeJellyfin:
             def __init__(self, **kwargs): pass
-            def inspect(self, *args):
+            def inspect(self, *args, **kwargs):
                 return {"initialized": True, "libraries_exact": True}
-            def prove_unconditional_discovery(self, username, password, token):
+            def prove_unconditional_discovery(self, username, password, token, **kwargs):
                 seen["tokens"].append(token)
                 matches = [path for path in movies.iterdir() if path.name == token]
                 seen["paths"].append([path.name for path in movies.iterdir()])
@@ -1809,6 +1810,63 @@ class FakeRuntimeVerificationTests(unittest.TestCase):
         self.assertNotIn(seen["tokens"][0], rendered)
         self.assertNotIn(str(data), rendered)
         self.assertNotIn("keep-me", rendered)
+
+    def test_existing_stack_verify_uses_app_key_and_jellyseerr_profile(self):
+        temporary, root, _data = self.make_root(); self.addCleanup(temporary.cleanup)
+        env = (root / ".env").read_text(encoding="utf-8")
+        (root / ".env").write_text(
+            "\n".join(line for line in env.splitlines() if not line.startswith(("JELLYFIN_ADMIN_USER=", "JELLYFIN_ADMIN_PASSWORD=", "QUALITY_PROFILE="))) + "\n",
+            encoding="utf-8",
+        )
+        seen: dict[str, object] = {"token": None, "profile": None}
+
+        class Healthy:
+            def run(self, argv, **kwargs):
+                command = tuple(argv)
+                if command[:2] == ("docker", "info"):
+                    return subprocess.CompletedProcess(argv, 0, "Server Version: fixture\n", "")
+                records = [
+                    {"Service": service, "State": "running", "Health": "healthy", "Project": "homeflix"}
+                    for service in CORE_SERVICES
+                ]
+                return subprocess.CompletedProcess(argv, 0, json.dumps(records), "")
+
+        class TokenJellyfin:
+            def __init__(self, **kwargs): pass
+            def inspect(self, username, password, **kwargs):
+                seen["token"] = kwargs.get("access_token")
+                if username or password:
+                    raise AssertionError("existing-stack verify must not use admin password")
+                return {"initialized": True, "libraries_exact": True}
+
+        class TrackingArr:
+            def __init__(self, service, *args, **kwargs): self.service = service
+            def inspect(self, profile, path):
+                seen["profile"] = profile
+                return {
+                    "profile_exact": True, "root_exact": True, "media_settings": True,
+                    "completed_handling": True, "targeted_connection_exact": True,
+                    "refresh_connection_exact": True, "runtime_profile": {"id": 1, "name": profile},
+                    "runtime_root": {"id": 2, "path": path},
+                }
+
+        _jellyfin, _arr, seerr = self.clients()
+        with patch("scripts.homeflix_setup.core.JellyfinClient", TokenJellyfin), patch("scripts.homeflix_setup.core.ArrClient", TrackingArr), patch("scripts.homeflix_setup.core.JellyseerrClient", seerr):
+            result = verify_core(
+                root, runner=Healthy(),
+                api_key_reader=lambda *args: "FIXTURE_API_KEY_1234567890ABCDE",
+                settings_key_reader=lambda *args: "FIXTURE_API_KEY_1234567890ABCDE",
+                jellyfin_key_reader=lambda *args: "JELLYFIN_DEDICATED_KEY_NOT_REAL",
+                http_waiter=lambda *args, **kwargs: ReadinessResult(True, "ready"),
+                quicksync_inspector=lambda *args: None,
+                contract_evaluator=lambda _root: {"passed": True, "findings": []},
+                mount_inspector=lambda *args, **kwargs: True,
+                hardlink_prober=lambda *args, **kwargs: True,
+            )
+        self.assertTrue(result["passed"], result)
+        self.assertEqual(seen["token"], "JELLYFIN_DEDICATED_KEY_NOT_REAL")
+        self.assertEqual(seen["profile"], "Fixture HD")
+        self.assert_secret_free(result)
 
     def test_unknown_project_service_still_fails_verify(self):
         temporary, root, _data = self.make_root(); self.addCleanup(temporary.cleanup)

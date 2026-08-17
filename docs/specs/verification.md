@@ -10,6 +10,8 @@
 - Core Traefik readiness SHALL use a family-facing proxy path and SHALL NOT require a published dashboard on `:8080`. `(satisfied #15)`
 - Rendering SHALL restore `create_host_path: false` when the project file declared it and the Compose JSON renderer omitted the key. Runtime `verify core` SHALL use that same restored model. `(satisfied #15)`
 - An explicit `verify core --discover-probe` intent MAY create and delete a uniquely named library probe to prove unconditional Jellyfin refresh; default `verify core` SHALL NOT write library files. `(satisfied #14)`
+- Existing-stack `verify core` SHALL inspect using the dedicated Jellyfin application key and the unique default non-4K quality profile already selected in Jellyseerr when admin or `QUALITY_PROFILE` env keys are absent. `(satisfied #16)`
+- Application-data directory walks SHALL accept group-writable directories owned by the expected uid; secret files and other-writable directories SHALL still be refused. `(satisfied #16)`
 - Disruptive fail-closed verification SHALL require an explicit operator command and SHALL NOT run as part of routine runtime verification. `(satisfied #10)`
 - Disruptive verification SHALL identify only the active tunnel interface, prove external access is blocked after disruption, and restore Gluetun plus every previously running namespace-dependent service after success, failure, timeout, or interruption. `(satisfied #10)`
 - The post-disruption blocked-egress probe SHALL be bounded so it cannot consume the compensation window. Restore SHALL use an independent budget (or floor timeout) so Gluetun and previously running dependents still restart when the prove deadline is exhausted. `(satisfied #10)`

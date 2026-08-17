@@ -116,6 +116,27 @@ class JellyseerrClient:
         self.http.request("PUT", f"/api/v1/settings/{service}/{existing['id']}", operation=f"update {service} settings", payload=updated)
         return True
 
+    def selected_quality_profile(self) -> str:
+        """Return the unique default non-4K profile name shared by Radarr and Sonarr."""
+        names: list[str] = []
+        for service in ("radarr", "sonarr"):
+            current = self.http.request("GET", f"/api/v1/settings/{service}", operation=f"inspect {service} settings")
+            if not isinstance(current, list):
+                raise ApiError("jellyseerr", f"inspect {service} settings", None, "invalid_response")
+            defaults = [
+                item for item in current
+                if isinstance(item, dict) and item.get("isDefault") is True and item.get("is4k") is False
+            ]
+            if len(defaults) != 1:
+                raise ApiError("jellyseerr", f"inspect {service} settings", None, "profile_conflict" if defaults else "profile_not_found")
+            name = defaults[0].get("activeProfileName")
+            if not isinstance(name, str) or not name:
+                raise ApiError("jellyseerr", f"inspect {service} settings", None, "invalid_response")
+            names.append(name)
+        if names[0] != names[1]:
+            raise ApiError("jellyseerr", "inspect quality profile", None, "profile_conflict")
+        return names[0]
+
     def inspect_arr(self, service: str, profile: dict[str, Any], root: dict[str, Any]) -> bool:
         """Validate exactly one selected default non-4K server using GET only."""
         current = self.http.request("GET", f"/api/v1/settings/{service}", operation=f"inspect {service} settings")

@@ -642,3 +642,10 @@ controlled equivalent for unconditional Jellyfin refresh. Fixture-accepted only.
 JSON drops it. Traefik readiness probes Jellyfin through `:80` instead of
 unpublished `:8080`. Fixture-accepted only.
 
+## [2026-08-17] build | Existing-stack verify without admin env
+
+#16: `verify core` reads the dedicated Jellyfin app key and Jellyseerr's
+selected quality profile when `.env` has no admin password or QUALITY_PROFILE.
+LinuxServer 0775 config dirs owned by PUID are readable; secret files stay
+fail-closed on group/other write. Fixture-accepted only.
+

@@ -524,6 +524,20 @@ class JellyfinApiTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 read_jellyfin_api_key(root, uid + 100000)
 
+    def test_inspect_with_access_token_skips_password_login(self):
+        transport = FixtureTransport([
+            (200, fixture("jellyfin-startup-complete.json")),
+            (200, fixture("jellyfin-libraries-complete.json")),
+        ])
+        client = JellyfinClient(transport=transport)
+        result = client.inspect("", "", access_token="JELLYFIN_DEDICATED_KEY_NOT_REAL")
+        self.assertEqual(result, {"initialized": True, "libraries_exact": True})
+        paths = [request.full_url for request, _ in transport.requests]
+        self.assertTrue(any(path.endswith("/Library/VirtualFolders") for path in paths))
+        self.assertFalse(any("/Users/AuthenticateByName" in path for path in paths))
+        self.assertFalse(any("/Sessions/Logout" in path for path in paths))
+        self.assertIsNone(client.token)
+
     def test_unconditional_discovery_uses_refresh_not_admin_or_targeted_update(self):
         token = "HomeflixDiscoveryProbe-fixture"
         transport = FixtureTransport([

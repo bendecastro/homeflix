@@ -196,11 +196,17 @@ class JellyfinClient:
         self.logout()
         return created, libraries
 
-    def inspect(self, username: str, password: str) -> dict[str, object]:
-        """Authenticate ephemerally, inspect with GET, then close the session."""
+    def inspect(self, username: str, password: str, *, access_token: str | None = None) -> dict[str, object]:
+        """Inspect libraries via an ephemeral admin login or a dedicated application key."""
         if not self.startup_completed():
             return {"initialized": False, "libraries_exact": False}
-        self.authenticate(username, password)
+        session_login = access_token is None
+        if access_token is not None:
+            if not _KEY.fullmatch(access_token):
+                raise ValueError("Jellyfin API key is invalid")
+            self.token = access_token
+        else:
+            self.authenticate(username, password)
         try:
             existing = self.http.request(
                 "GET", "/Library/VirtualFolders", operation="inspect libraries", headers=self._headers()
@@ -212,21 +218,35 @@ class JellyfinClient:
                 for name, (kind, path) in LIBRARIES.items()
             )
         except Exception:
-            try:
-                self.logout()
-            except Exception:
-                pass
+            if session_login:
+                try:
+                    self.logout()
+                except Exception:
+                    pass
+            else:
+                self.token = None
             raise
-        self.logout()
+        if session_login:
+            self.logout()
+        else:
+            self.token = None
         return {"initialized": True, "libraries_exact": exact}
 
-    def prove_unconditional_discovery(self, username: str, password: str, token: str) -> bool:
+    def prove_unconditional_discovery(
+        self, username: str, password: str, token: str, *, access_token: str | None = None
+    ) -> bool:
         """Refresh the whole library and observe whether *token* becomes an item."""
         if not token or len(token) > 128 or any(ord(character) < 32 for character in token):
             raise ValueError("discovery probe token is invalid")
         if not self.startup_completed():
             return False
-        self.authenticate(username, password)
+        session_login = access_token is None
+        if access_token is not None:
+            if not _KEY.fullmatch(access_token):
+                raise ValueError("Jellyfin API key is invalid")
+            self.token = access_token
+        else:
+            self.authenticate(username, password)
         try:
             self.http.request("POST", "/Library/Refresh", operation="refresh libraries", payload={}, headers=self._headers())
             query = urlencode({"Recursive": "true", "SearchTerm": token, "IncludeItemTypes": "Movie,Folder"})
@@ -245,7 +265,10 @@ class JellyfinClient:
                     return False
                 self.http.sleep(min(0.25, remaining))
         finally:
-            self.logout()
+            if session_login:
+                self.logout()
+            else:
+                self.token = None
 
     def ensure_library_options(self) -> list[str]:
         existing = self.http.request("GET", "/Library/VirtualFolders", operation="list library options", headers=self._headers())

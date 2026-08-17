@@ -128,6 +128,20 @@ class JellyseerrApiTests(unittest.TestCase):
         self.assertTrue(all(request.method == "GET" for request in transport.requests))
         self.assertTrue(all(request.headers.get("X-api-key") == KEY for request in transport.requests))
 
+    def test_selected_quality_profile_requires_matching_default_non_4k_names(self):
+        seed = JellyseerrClient()
+        radarr = seed._payload("radarr", KEY, *profile_root("radarr")); radarr["id"] = 3
+        sonarr = seed._payload("sonarr", KEY, *profile_root("sonarr")); sonarr["id"] = 4
+        transport = QueueTransport([(200, [radarr]), (200, [sonarr])])
+        client = JellyseerrClient(transport=transport); client.authorize(KEY)
+        self.assertEqual(client.selected_quality_profile(), "Fixture HD")
+        sonarr["activeProfileName"] = "Other"
+        transport = QueueTransport([(200, [radarr]), (200, [sonarr])])
+        client = JellyseerrClient(transport=transport); client.authorize(KEY)
+        with self.assertRaises(ApiError) as raised:
+            client.selected_quality_profile()
+        self.assertEqual(raised.exception.code, "profile_conflict")
+
     def test_equivalent_servers_and_initialized_state_are_rerun_noops(self):
         profile, root = profile_root("radarr")
         seed = JellyseerrClient()
@@ -168,6 +182,9 @@ class JellyseerrApiTests(unittest.TestCase):
             path.write_text(json.dumps({"main": {"apiKey": KEY}}), encoding="utf-8")
             root.chmod(0o755); service.chmod(0o755); path.chmod(0o644)
             uid = os.getuid()
+            self.assertEqual(read_settings_api_key(root, uid), KEY)
+            root.chmod(0o775)
+            service.chmod(0o775)
             self.assertEqual(read_settings_api_key(root, uid), KEY)
             for unsafe in (root, service, path):
                 with self.subTest(unsafe=unsafe.name):

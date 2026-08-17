@@ -49,17 +49,25 @@ class ArrApiTests(unittest.TestCase):
             root.chmod(0o755); service.chmod(0o755); config.chmod(0o644)
             uid = os.getuid()
             self.assertEqual(read_api_key(root, "radarr", uid), FIXTURE_KEY)
+            root.chmod(0o775)
+            service.chmod(0o775)
+            self.assertEqual(read_api_key(root, "radarr", uid), FIXTURE_KEY)
             root_link = root.with_name("config-link")
             root_link.symlink_to(root, target_is_directory=True)
             with self.assertRaises(ValueError):
                 read_api_key(root_link, "radarr", uid)
-            for unsafe in (root, service, config):
+            for unsafe in (root, service):
                 with self.subTest(unsafe=unsafe.name):
                     original = unsafe.stat().st_mode & 0o777
-                    unsafe.chmod(original | 0o020)
+                    unsafe.chmod(original | 0o002)
                     with self.assertRaises(ValueError):
                         read_api_key(root, "radarr", uid)
                     unsafe.chmod(original)
+            original = config.stat().st_mode & 0o777
+            config.chmod(original | 0o020)
+            with self.assertRaises(ValueError):
+                read_api_key(root, "radarr", uid)
+            config.chmod(original)
             with self.assertRaises(ValueError):
                 read_api_key(root, "radarr", uid + 100000)
             moved = service.with_name("real")

@@ -19,7 +19,14 @@ def _verify(metadata: os.stat_result, expected_uid: int, *, directory: bool) -> 
         raise ValueError("application configuration object has an unsafe type")
     if metadata.st_uid not in {0, expected_uid}:
         raise ValueError("application configuration owner is unsafe")
-    if metadata.st_mode & (stat.S_IWGRP | stat.S_IWOTH):
+    # LinuxServer config dirs are commonly 0775. Group-writable directories
+    # owned by the expected uid are therefore allowed. Secret files and
+    # other-writable paths are not: a file the group can replace is unsafe,
+    # and other-write on a directory is a swap primitive.
+    if directory:
+        if metadata.st_mode & stat.S_IWOTH:
+            raise ValueError("application configuration permissions are unsafe")
+    elif metadata.st_mode & (stat.S_IWGRP | stat.S_IWOTH):
         raise ValueError("application configuration permissions are unsafe")
 
 
