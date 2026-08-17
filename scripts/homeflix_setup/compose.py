@@ -30,6 +30,7 @@ ALLOWED_PROXY_NETWORKS = tuple(
 )
 CORE_SERVICES = ("traefik", "jellyfin", "jellyseerr", "radarr", "sonarr")
 GLUETUN_SERVICES = ("gluetun",)
+ACQUISITION_SERVICES = ("gluetun", "qbittorrent", "prowlarr")
 _COMPOSE_STATES = {"created", "dead", "exited", "paused", "removing", "restarting", "running"}
 _COMPOSE_HEALTH = {"", "healthy", "starting", "unhealthy"}
 _COMPOSE_SERVICE_NAME = re.compile(r"[a-z0-9][a-z0-9_.-]*\Z", re.ASCII)
@@ -383,6 +384,27 @@ def compose_up_gluetun(
         runner,
         GLUETUN_SERVICES,
         label="gluetun",
+        project_name=project_name,
+        timeout=timeout,
+    )
+
+
+def compose_up_acquisition(
+    repository_root: str | os.PathLike[str],
+    services: Sequence[str],
+    runner: Runner,
+    *,
+    project_name: str | None = None,
+    timeout: float = 300,
+) -> subprocess.CompletedProcess[str]:
+    """Start the torrent acquisition allowlist. NZBGet stays off this path."""
+
+    return _compose_up_allowlist(
+        repository_root,
+        services,
+        runner,
+        ACQUISITION_SERVICES,
+        label="acquisition",
         project_name=project_name,
         timeout=timeout,
     )

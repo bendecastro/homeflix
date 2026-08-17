@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import json
 import re
 import time
@@ -27,6 +27,7 @@ class ApiError(Exception):
 class HttpResponse:
     status: int
     body: bytes
+    headers: Mapping[str, str] = field(default_factory=dict)
 
 
 Transport = Callable[[request.Request, float], HttpResponse]
@@ -40,7 +41,8 @@ class _NoRedirect(request.HTTPRedirectHandler):
 def urllib_transport(outgoing: request.Request, timeout: float) -> HttpResponse:
     opener = request.build_opener(request.ProxyHandler({}), _NoRedirect())
     with opener.open(outgoing, timeout=timeout) as response:
-        return HttpResponse(response.status, response.read(2 * 1024 * 1024 + 1))
+        headers = {str(name): str(value) for name, value in response.headers.items()}
+        return HttpResponse(response.status, response.read(2 * 1024 * 1024 + 1), headers)
 
 
 class JsonClient:

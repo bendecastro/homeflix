@@ -16,6 +16,7 @@ from .backup import BackupError, create_backup, list_backups, prune_backups, res
 from .command import CommandRunner
 from .compose import configure, render_compose_config
 from .contract import evaluate_stack_contract
+from .acquisition import configure_acquisition, deploy_acquisition, verify_acquisition
 from .core import READINESS_TIMEOUT, _load_private_environment, configure_core, deploy_core, verify_core
 from .discover import HostFacts, discover_host
 from .envfile import EnvDocument
@@ -84,11 +85,11 @@ def build_parser() -> argparse.ArgumentParser:
     initialize_parser = subparsers.add_parser(
         "initialize", help="reconcile application APIs after core deployment"
     )
-    initialize_parser.add_argument("phase", choices=("core",))
+    initialize_parser.add_argument("phase", choices=("core", "acquisition"))
     deploy_parser = subparsers.add_parser(
         "deploy", help="reconcile an explicit deployment phase allowlist"
     )
-    deploy_parser.add_argument("phase", choices=("core",))
+    deploy_parser.add_argument("phase", choices=("core", "acquisition"))
     deploy_parser.add_argument(
         "--dry-run", action="store_true", help="print exact planned commands without probing or changing the host"
     )
@@ -96,14 +97,14 @@ def build_parser() -> argparse.ArgumentParser:
         "verify",
         help="inspect a deployment phase; vpn --disrupt is the explicit fail-closed exception",
     )
-    verify_parser.add_argument("phase", choices=("core", "contract", "vpn"))
+    verify_parser.add_argument("phase", choices=("core", "contract", "vpn", "acquisition"))
     verify_parser.add_argument(
         "--disrupt",
         action="store_true",
         help="run explicit fail-closed VPN disruption (vpn phase only)",
     )
     setup_parser = subparsers.add_parser("setup", help="run a resumable convenience setup composition")
-    setup_parser.add_argument("phase", choices=("core",))
+    setup_parser.add_argument("phase", choices=("core", "acquisition"))
     setup_parser.add_argument("--dry-run", action="store_true")
     setup_parser.add_argument("--data-root")
     setup_parser.add_argument("--config-root")
@@ -311,6 +312,23 @@ def main(argv: Sequence[str] | None = None, *, repository_root: Path | None = No
                 label="API initialization refused",
                 error=RuntimeError("core APIs could not be configured safely"),
             )
+    elif arguments.command == "initialize" and arguments.phase == "acquisition":
+        try:
+            result = configure_acquisition(root)
+        except ApiError as error:
+            return _input_error(
+                json_output=arguments.json_output,
+                code=error.code,
+                label="API initialization refused",
+                error=error,
+            )
+        except (OSError, RuntimeError, ValueError):
+            return _input_error(
+                json_output=arguments.json_output,
+                code="initialization_refused",
+                label="API initialization refused",
+                error=RuntimeError("acquisition APIs could not be configured safely"),
+            )
     elif arguments.command == "verify" and arguments.phase == "vpn":
         try:
             result = verify_vpn_fail_closed(root, disrupt=arguments.disrupt)
@@ -350,6 +368,23 @@ def main(argv: Sequence[str] | None = None, *, repository_root: Path | None = No
             result = verify_core(root)
         except (OSError, RuntimeError, ValueError, subprocess.SubprocessError):
             return _input_error(json_output=arguments.json_output, code="verification_refused", label="verification refused", error=RuntimeError("core state could not be verified safely"))
+    elif arguments.command == "verify" and arguments.phase == "acquisition":
+        if arguments.disrupt:
+            return _input_error(
+                json_output=arguments.json_output,
+                code="verification_refused",
+                label="verification refused",
+                error=RuntimeError("disruptive verification applies only to verify vpn"),
+            )
+        try:
+            result = verify_acquisition(root)
+        except (OSError, RuntimeError, ValueError, subprocess.SubprocessError):
+            return _input_error(
+                json_output=arguments.json_output,
+                code="verification_refused",
+                label="verification refused",
+                error=RuntimeError("acquisition state could not be verified safely"),
+            )
     elif arguments.command == "setup" and arguments.phase == "core":
         if arguments.dry_run:
             result = {
@@ -474,6 +509,91 @@ def main(argv: Sequence[str] | None = None, *, repository_root: Path | None = No
                                                 result = {"status": "checkpoint_failed", "phases": phases, "reason": "Verified core state could not be checkpointed"}
                                             else:
                                                 result = {"status": "verified", "phases": phases, "verify": verified}
+    elif arguments.command == "setup" and arguments.phase == "acquisition":
+        if arguments.dry_run:
+            result = {
+                "status": "planned",
+                "state_written": False,
+                "phases": ["preflight:acquisition", "deploy:acquisition", "initialize:acquisition", "verify:acquisition"],
+                "services": ["gluetun", "qbittorrent", "prowlarr"],
+                "commands": [
+                    ["scripts/homeflix", "preflight", "--phase", "acquisition"],
+                    ["docker", "compose", "--project-name", "homeflix", "up", "--detach", "--no-deps", "gluetun"],
+                    ["docker", "compose", "--project-name", "homeflix", "up", "--detach", "--no-deps", "qbittorrent", "prowlarr"],
+                    ["scripts/homeflix", "initialize", "acquisition"],
+                    ["scripts/homeflix", "verify", "acquisition"],
+                ],
+                "required_human_inputs": ["provider/indexer credentials when no usable indexer exists"],
+                "acquisition_mutations": ["gluetun", "qbittorrent", "prowlarr"],
+            }
+        else:
+            operation_deadline = time.monotonic() + READINESS_TIMEOUT
+            phase_names = ("preflight:acquisition", "deploy:acquisition", "initialize:acquisition", "verify:acquisition")
+            phases: list[dict[str, object]] = []
+
+            def stop_acquisition(status: str, phase: str, details: object | None = None) -> dict[str, object]:
+                phases.append({"phase": phase, "status": "fail"})
+                completed = {item["phase"] for item in phases}
+                phases.extend({"phase": name, "status": "skipped"} for name in phase_names if name not in completed)
+                failure: dict[str, object] = {"status": status, "phases": phases}
+                if details is not None:
+                    failure["details"] = details
+                return failure
+
+            try:
+                config = _load_private_environment(root / ".env")
+                preflight = run_preflight(config, "acquisition", _DeadlineRunner(operation_deadline), deadline=operation_deadline)
+            except TimeoutError:
+                result = stop_acquisition("timeout", "preflight:acquisition")
+            except (OSError, RuntimeError, ValueError, subprocess.SubprocessError):
+                result = stop_acquisition("preflight_failed", "preflight:acquisition")
+            else:
+                if not preflight.passed:
+                    result = stop_acquisition("preflight_failed", "preflight:acquisition", preflight.to_dict())
+                else:
+                    phases.append({"phase": "preflight:acquisition", "status": "pass"})
+                    try:
+                        deployed = deploy_acquisition(root, deadline=operation_deadline)
+                    except TimeoutError:
+                        result = stop_acquisition("timeout", "deploy:acquisition")
+                    except (OSError, RuntimeError, ValueError, subprocess.SubprocessError):
+                        result = stop_acquisition("deployment_failed", "deploy:acquisition")
+                    else:
+                        if deployed.get("passed") is not True and deployed.get("status") != "ready":
+                            result = stop_acquisition("deployment_failed", "deploy:acquisition", deployed)
+                        else:
+                            phases.append({"phase": "deploy:acquisition", "status": "complete"})
+                            try:
+                                initialized = configure_acquisition(root, deadline=operation_deadline)
+                            except TimeoutError:
+                                result = stop_acquisition("timeout", "initialize:acquisition")
+                            except ApiError as error:
+                                result = stop_acquisition(
+                                    "timeout" if error.code == "deadline_exhausted" else "initialization_failed",
+                                    "initialize:acquisition",
+                                )
+                            except (OSError, RuntimeError, ValueError):
+                                result = stop_acquisition("initialization_failed", "initialize:acquisition")
+                            else:
+                                phases.append({"phase": "initialize:acquisition", "status": "complete"})
+                                try:
+                                    verified = verify_acquisition(root, deadline=operation_deadline)
+                                except (OSError, RuntimeError, ValueError, subprocess.SubprocessError):
+                                    result = stop_acquisition("verification_failed", "verify:acquisition")
+                                else:
+                                    if verified.get("status") == "credentials_required":
+                                        phases.append({"phase": "verify:acquisition", "status": "credentials_required"})
+                                        result = {
+                                            "status": "credentials_required",
+                                            "passed": False,
+                                            "phases": phases,
+                                            "verify": verified,
+                                        }
+                                    elif verified.get("passed") is not True:
+                                        result = stop_acquisition("verification_failed", "verify:acquisition", verified)
+                                    else:
+                                        phases.append({"phase": "verify:acquisition", "status": "pass"})
+                                        result = {"status": "verified", "phases": phases, "verify": verified}
     elif arguments.command == "deploy" and arguments.phase == "core":
         try:
             result = deploy_core(root, dry_run=arguments.dry_run)
@@ -483,6 +603,16 @@ def main(argv: Sequence[str] | None = None, *, repository_root: Path | None = No
                 code="deployment_refused",
                 label="deployment refused",
                 error=RuntimeError("core deployment could not be completed safely"),
+            )
+    elif arguments.command == "deploy" and arguments.phase == "acquisition":
+        try:
+            result = deploy_acquisition(root, dry_run=arguments.dry_run)
+        except (OSError, RuntimeError, ValueError, subprocess.SubprocessError):
+            return _input_error(
+                json_output=arguments.json_output,
+                code="deployment_refused",
+                label="deployment refused",
+                error=RuntimeError("acquisition deployment could not be completed safely"),
             )
     elif arguments.command == "vpn" and arguments.vpn_command == "verify":
         if arguments.disrupt:
@@ -550,26 +680,33 @@ def main(argv: Sequence[str] | None = None, *, repository_root: Path | None = No
         if preparation.refusal:
             print(f"homeflix: {preparation.refusal['message']}", file=sys.stderr)
             print(f"Action: {preparation.refusal['action']}", file=sys.stderr)
-    elif arguments.command == "initialize":
+    elif arguments.command == "initialize" and arguments.phase == "core":
         print("Core API initialization: " + str(result["status"]))
         print("Jellyfin libraries: " + " ".join(result["jellyfin"]["libraries"]))
         for service in ("radarr", "sonarr"):
             print(f"{service}: profile={result[service]['profile']} root={result[service]['root']}")
         print("Jellyseerr initialized: " + str(result["jellyseerr"]["initialized"]).lower())
+    elif arguments.command == "initialize":
+        print(f"Acquisition API initialization: {result['status']}")
     elif arguments.command == "deploy":
+        label = "Core" if arguments.phase == "core" else "Acquisition"
         if result["status"] == "planned":
-            print("Core services: " + " ".join(result["services"]))
-            for command in result["read_only_commands"]:
+            print(f"{label} services: " + " ".join(result["services"]))
+            for command in result.get("read_only_commands", []):
                 print("Read-only command: " + " ".join(command))
-            for command in result["mutation_commands"]:
+            for command in result.get("mutation_commands", []):
                 print("Mutation command: " + " ".join(command))
-        else:
+        elif arguments.phase == "core":
             print(f"Core deployment: {result['status']}")
             for item in result["services"]:
                 print(
                     f"{item['service']}: state={item['current_state']} "
                     f"ready={str(item['ready']).lower()} reason={item['reason']}"
                 )
+        else:
+            print(f"Acquisition deployment: {result['status']}")
+            for item in result.get("checks", []):
+                print(f"{str(item['status']).upper()}: {item['domain']}: {item['reason']}")
     elif arguments.command == "verify" and arguments.phase == "contract":
         print(f"Stack contract: {result['status']}")
         for item in result["findings"]:
@@ -584,9 +721,10 @@ def main(argv: Sequence[str] | None = None, *, repository_root: Path | None = No
             for command in result.get("mutation_commands", []):
                 print("Mutation command: " + " ".join(command))
     elif arguments.command in {"verify", "setup"}:
-        print(f"Core {arguments.command}: {result['status']}")
+        label = "Core" if getattr(arguments, "phase", "core") == "core" else "Acquisition"
+        print(f"{label} {arguments.command}: {result['status']}")
         if arguments.command == "verify":
-            for item in result["checks"]:
+            for item in result.get("checks", []):
                 print(f"{str(item['status']).upper()}: {item['domain']}: {item['reason']}")
     elif arguments.command == "backup" and arguments.backup_command == "create":
         print(
@@ -665,13 +803,13 @@ def main(argv: Sequence[str] | None = None, *, repository_root: Path | None = No
     if arguments.command == "deploy":
         return 0 if result["status"] in {"planned", "ready", "already_ready"} else 1
     if arguments.command == "initialize":
-        return 0
+        return 0 if result.get("status") in {"configured", "credentials_required"} else 1
     if arguments.command == "verify":
         return 0 if result.get("passed") is True else 1
     if arguments.command == "vpn":
         return 0 if result.get("status") in {"planned", "verified"} or result.get("passed") is True else 1
     if arguments.command == "setup":
-        return 0 if result.get("status") in {"planned", "verified"} else 1
+        return 0 if result.get("status") in {"planned", "verified", "credentials_required"} else 1
     if arguments.command == "backup":
         return 0 if result.get("status") in {"created", "listed", "retrieved", "pruned", "restored"} else 1
     return 1 if discovered is not None and not discovered.supported else 0

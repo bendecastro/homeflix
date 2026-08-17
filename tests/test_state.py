@@ -202,6 +202,25 @@ class SetupStateTests(TemporaryDirectoryTestCase, unittest.TestCase):
             ).save(path)
         self.assertFalse(path.exists())
 
+    def test_fail_closed_boolean_is_allowlisted_and_extra_keys_stay_rejected(self) -> None:
+        path = self.temp_path / "setup.json"
+        evidence = {
+            "recorded_at": "2026-08-14T12:00:00Z",
+            "image_id": "sha256:fixturegluetunimage",
+            "config_digest": "a" * 64,
+            "tunnel_healthy": True,
+            "tunnel_device": True,
+            "namespace_dns": True,
+            "egress_distinct": True,
+            "fail_closed": True,
+        }
+        SetupState(evidence=evidence).save(path)
+        self.assertEqual(SetupState.load(path).evidence["fail_closed"], True)
+        with self.assertRaisesRegex(ValueError, "not permitted"):
+            SetupState(evidence={**evidence, "forwarded_port": 5914}).save(path)
+        with self.assertRaisesRegex(ValueError, "must be boolean"):
+            SetupState(evidence={**evidence, "fail_closed": "yes"}).save(path)
+
     def test_secret_like_checkpoint_names_are_rejected(self) -> None:
         path = self.temp_path / "setup.json"
         for name in ("api_key", "password_saved", "jellyfin_token", "env_value", "credential"):

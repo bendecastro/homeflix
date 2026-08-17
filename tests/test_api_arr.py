@@ -498,6 +498,116 @@ class ArrApiTests(unittest.TestCase):
         self.assertEqual(raised.exception.code, "profile_not_found")
         self.assertNotIn("6", str(raised.exception))
 
+    def test_creates_one_qbittorrent_client_at_gluetun_and_rejects_direct_hosts(self) -> None:
+        created = []
+
+        def routes_for(existing=None):
+            table = {
+                ("GET", "/api/v3/downloadclient"): [existing if existing is not None else []],
+                ("POST", "/api/v3/downloadclient"): [{"id": 8, "implementation": "QBittorrent"}],
+                ("PUT", "/api/v3/downloadclient/3"): [{}],
+            }
+            return table
+
+        transport = RouteTransport(routes_for())
+        client = ArrClient("radarr", "http://127.0.0.1", FIXTURE_KEY, transport=transport)
+        changed = client.ensure_qbittorrent_client(
+            host="gluetun", port=6969, username="admin", password="secret-pass"
+        )
+        self.assertTrue(changed)
+        posted = json.loads(transport.requests[-1].data.decode())
+        fields = {item["name"]: item["value"] for item in posted["fields"]}
+        self.assertEqual(fields["host"], "gluetun")
+        self.assertEqual(fields["port"], 6969)
+        self.assertEqual(fields["movieCategory"], "movies")
+        self.assertFalse(posted["removeCompletedDownloads"])
+        created.append(posted)
+
+        for host in ("localhost", "127.0.0.1", "::1", "qbittorrent"):
+            with self.subTest(host=host):
+                with self.assertRaises(ApiError) as raised:
+                    ArrClient("radarr", "http://127.0.0.1", FIXTURE_KEY, transport=RouteTransport(routes_for())).ensure_qbittorrent_client(
+                        host=host, port=6969, username="admin", password="secret-pass"
+                    )
+                self.assertEqual(raised.exception.code, "invalid_download_client_host")
+
+        existing = [{
+            "id": 3,
+            "implementation": "QBittorrent",
+            "fields": [
+                {"name": "host", "value": "localhost"},
+                {"name": "port", "value": 8080},
+                {"name": "movieCategory", "value": "radarr"},
+                {"name": "username", "value": "admin"},
+            ],
+        }]
+        repair = RouteTransport({
+            ("GET", "/api/v3/downloadclient"): [existing, existing],
+            ("PUT", "/api/v3/downloadclient/3"): [{}],
+        })
+        repaired = ArrClient("radarr", "http://127.0.0.1", FIXTURE_KEY, transport=repair).ensure_qbittorrent_client(
+            host="gluetun", port=6969, username="admin", password="secret-pass"
+        )
+        self.assertTrue(repaired)
+        payload = json.loads(repair.requests[-1].data.decode())
+        repaired_fields = {item["name"]: item["value"] for item in payload["fields"]}
+        self.assertEqual(repaired_fields["host"], "gluetun")
+        self.assertEqual(repaired_fields["movieCategory"], "movies")
+
+        already = [{
+            "id": 4,
+            "implementation": "QBittorrent",
+            "fields": [
+                {"name": "host", "value": "gluetun"},
+                {"name": "port", "value": 6969},
+                {"name": "movieCategory", "value": "movies"},
+                {"name": "username", "value": "admin"},
+                {"name": "password", "value": "old-pass"},
+            ],
+        }]
+        rotated = RouteTransport({
+            ("GET", "/api/v3/downloadclient"): [already, already],
+            ("PUT", "/api/v3/downloadclient/4"): [{}],
+        })
+        rewritten = ArrClient("radarr", "http://127.0.0.1", FIXTURE_KEY, transport=rotated).ensure_qbittorrent_client(
+            host="gluetun", port=6969, username="admin", password="new-pass", force_password=True
+        )
+        self.assertTrue(rewritten)
+        rotated_fields = {item["name"]: item["value"] for item in json.loads(rotated.requests[-1].data.decode())["fields"]}
+        self.assertEqual(rotated_fields["password"], "new-pass")
+
+        conflict = RouteTransport({
+            ("GET", "/api/v3/downloadclient"): [[
+                {"id": 1, "implementation": "QBittorrent", "fields": []},
+                {"id": 2, "implementation": "QBittorrent", "fields": []},
+            ]],
+        })
+        with self.assertRaises(ApiError) as raised:
+            ArrClient("sonarr", "http://127.0.0.1", FIXTURE_KEY, transport=conflict).ensure_qbittorrent_client(
+                host="gluetun", port=6969, username="admin", password="secret-pass"
+            )
+        self.assertEqual(raised.exception.code, "download_client_conflict")
+        inspected = ArrClient(
+            "radarr",
+            "http://127.0.0.1",
+            FIXTURE_KEY,
+            transport=RouteTransport({
+                ("GET", "/api/v3/downloadclient"): [[{
+                    "id": 8,
+                    "implementation": "QBittorrent",
+                    "fields": [
+                        {"name": "host", "value": "gluetun"},
+                        {"name": "port", "value": 6969},
+                        {"name": "movieCategory", "value": "movies"},
+                        {"name": "password", "value": "secret-pass"},
+                    ],
+                }]],
+            }),
+        ).inspect_download_client(host="gluetun", port=6969)
+        self.assertTrue(inspected["exact"])
+        self.assertNotIn("secret-pass", json.dumps(inspected))
+        self.assertNotIn("secret-pass", str(raised.exception))
+
 
 if __name__ == "__main__":
     unittest.main()

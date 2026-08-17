@@ -21,6 +21,8 @@ _WEBHOOK_POST = 1
 _TOKEN_HEADER = "X-Emby-Token"
 _MEDIA_BROWSER = "MediaBrowser"
 _WEBHOOK = "Webhook"
+_QBITTORRENT = "QBittorrent"
+_FORBIDDEN_DOWNLOAD_HOSTS = {"localhost", "127.0.0.1", "::1", "qbittorrent", "0.0.0.0"}
 
 _RADARR_EVENTS = {
     "onGrab": False,
@@ -176,7 +178,7 @@ def _inspect_refresh(items: list[Mapping[str, Any]], service: str) -> dict[str, 
 
 def read_api_key(config_root: str | Path, service: str, expected_uid: int) -> str:
     """Read one API key through verified CONFIG_ROOT and service components."""
-    if service not in {"radarr", "sonarr"}:
+    if service not in {"radarr", "sonarr", "prowlarr"}:
         raise ValueError("service API key location is invalid")
     raw = read_config_file(config_root, (service, "config.xml"), expected_uid)
     try:
@@ -320,6 +322,116 @@ class ArrClient:
             self._create_notification(_WEBHOOK, refresh_fields, _webhook_owned_identity)
             refresh_changed = True
         return targeted_changed, refresh_changed
+
+    def _download_clients(self, operation: str) -> list[dict[str, Any]]:
+        current = self.http.request("GET", "/api/v3/downloadclient", operation=operation)
+        if not isinstance(current, list) or not all(isinstance(item, dict) for item in current):
+            raise ApiError(self.service, operation, None, "invalid_response")
+        return current
+
+    def _category_field(self) -> str:
+        return "movieCategory" if self.service == "radarr" else "tvCategory"
+
+    def _desired_category(self) -> str:
+        return "movies" if self.service == "radarr" else "tv"
+
+    def _qbittorrent_matches(self, items: list[Mapping[str, Any]]) -> list[Mapping[str, Any]]:
+        return [item for item in items if item.get("implementation") == _QBITTORRENT]
+
+    def inspect_download_client(self, *, host: str, port: int) -> dict[str, object]:
+        matches = self._qbittorrent_matches(self._download_clients("inspect download clients"))
+        empty = {
+            "present": False,
+            "exact": False,
+            "host_exact": False,
+            "port_exact": False,
+            "category_exact": False,
+            "count": len(matches),
+        }
+        if len(matches) != 1:
+            return empty
+        item = matches[0]
+        host_exact = _field_value(item, "host") == host
+        port_exact = _field_value(item, "port") == port
+        category_exact = _field_value(item, self._category_field()) == self._desired_category()
+        return {
+            "present": True,
+            "exact": host_exact and port_exact and category_exact,
+            "host_exact": host_exact,
+            "port_exact": port_exact,
+            "category_exact": category_exact,
+            "count": 1,
+        }
+
+    def ensure_qbittorrent_client(
+        self,
+        *,
+        host: str,
+        port: int,
+        username: str,
+        password: str,
+        force_password: bool = False,
+    ) -> bool:
+        if not isinstance(host, str) or host.strip().casefold() in _FORBIDDEN_DOWNLOAD_HOSTS:
+            raise ApiError(self.service, "reconcile download client", None, "invalid_download_client_host")
+        if type(port) is not int or not 1 <= port <= 65535:
+            raise ApiError(self.service, "reconcile download client", None, "invalid_download_client_port")
+        current = self._download_clients("list download clients")
+        matches = self._qbittorrent_matches(current)
+        if len(matches) > 1:
+            raise ApiError(self.service, "reconcile download client", None, "download_client_conflict")
+        category_field = self._category_field()
+        category = self._desired_category()
+        owned_fields = [
+            {"name": "host", "value": host},
+            {"name": "port", "value": port},
+            {"name": "useSsl", "value": False},
+            {"name": "username", "value": username},
+            {"name": "password", "value": password},
+            {"name": category_field, "value": category},
+        ]
+        if matches:
+            item = dict(matches[0])
+            inspected = self.inspect_download_client(host=host, port=port)
+            # qBittorrent password is write-only on the *arr API; inspect cannot
+            # see it. After a WebUI rotation, force_password writes the new value.
+            if (
+                inspected.get("exact") is True
+                and _field_value(item, "username") == username
+                and not force_password
+            ):
+                return False
+            if type(item.get("id")) is not int:
+                raise ApiError(self.service, "reconcile download client", None, "invalid_response")
+            fields = item.get("fields")
+            field_list = [dict(field) for field in fields] if isinstance(fields, list) else []
+            values = {field["name"]: field for field in field_list if isinstance(field, dict) and "name" in field}
+            for field in owned_fields:
+                values[field["name"]] = {**values.get(field["name"], {}), **field}
+            item["fields"] = list(values.values())
+            item["enable"] = True
+            item["removeCompletedDownloads"] = False
+            item["implementation"] = _QBITTORRENT
+            item["configContract"] = "QBittorrentSettings"
+            self.http.request(
+                "PUT",
+                f"/api/v3/downloadclient/{item['id']}",
+                operation="update download client",
+                payload=item,
+            )
+            return True
+        payload = {
+            "enable": True,
+            "name": "qBittorrent",
+            "implementation": _QBITTORRENT,
+            "configContract": "QBittorrentSettings",
+            "removeCompletedDownloads": False,
+            "fields": owned_fields,
+        }
+        created = self.http.request("POST", "/api/v3/downloadclient", operation="create download client", payload=payload)
+        if not isinstance(created, dict) or type(created.get("id")) is not int:
+            raise ApiError(self.service, "create download client", None, "invalid_response")
+        return True
 
     def inspect(self, profile_name: str, root_path: str) -> dict[str, object]:
         """Inspect setup-owned Arr state using GET requests only."""

@@ -26,6 +26,17 @@ the two owned Jellyfin discovery connections per *arr app. Unselected QuickSync 
 not-applicable. Any mandatory unknown or skip fails the command. Does not start,
 stop, or restart Compose services. Does not return API keys.
 
+## Torrent acquisition (after current fail-closed evidence)
+
+```bash
+scripts/homeflix --json verify vpn --disrupt   # stores fail_closed when it succeeds
+scripts/homeflix --json setup acquisition      # or deploy / initialize / verify acquisition
+```
+
+Starts only Gluetun, qBittorrent, and Prowlarr. Stops at a resumable indexer
+credential gate rather than claiming end-to-end acquisition. JSON never prints
+passwords, API keys, or forwarded-port values. Fixture-accepted only.
+
 ## Stack lifecycle (from the deploy dir on the host)
 
 ```bash

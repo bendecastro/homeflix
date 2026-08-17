@@ -7,17 +7,20 @@ SSH transport. An agent may use its own SSH capability to operate a checkout on 
 but SSH-accessible orchestration remains a capability and design target, not a shipped CLI
 feature.
 
-Encrypted-storage provisioning and the rest of acquisition (download clients and indexers)
-remain later slices. The VPN gate is a separate, explicit command: enter provider
-credentials with `scripts/homeflix secrets vpn` on an unredirected controlling terminal,
-then collect current non-disruptive evidence with `scripts/homeflix --json vpn verify`
-(or `--dry-run`). Dry-run mutates only Gluetun. Missing or stale evidence leaves
-acquisition stopped. Proving the kill switch is a separate explicit command —
-`scripts/homeflix --json verify vpn --disrupt` (or `vpn verify --disrupt`) — and
-requires that current gate evidence. Routine `verify core` and `vpn verify` never
-disable the tunnel. The automated implementation is **fixture-tested only** and has
-**not received disposable real Debian/Ubuntu acceptance**. Treat live-host completion as
-unverified until the evidence below is collected on the target.
+Encrypted-storage provisioning and optional Usenet remain later slices. The VPN gate is a
+separate, explicit command: enter provider credentials with `scripts/homeflix secrets vpn`
+on an unredirected controlling terminal, then collect current non-disruptive evidence with
+`scripts/homeflix --json vpn verify` (or `--dry-run`). Dry-run mutates only Gluetun. Proving
+the kill switch is `scripts/homeflix --json verify vpn --disrupt` (or `vpn verify --disrupt`)
+and requires that current gate evidence. After a successful fail-closed run, torrent
+acquisition is `scripts/homeflix --json setup acquisition` (or `deploy` / `initialize` /
+`verify acquisition`). It starts only qBittorrent and Prowlarr behind Gluetun and stops at
+a resumable indexer-credential gate rather than claiming end-to-end acquisition. Missing
+or stale fail-closed evidence leaves those clients stopped. NZBGet stays unselected.
+Routine `verify core` and `vpn verify` never disable the tunnel. The automated
+implementation is **fixture-tested only** and has **not received disposable real
+Debian/Ubuntu acceptance**. Treat live-host completion as unverified until the evidence
+below is collected on the target.
 
 ## Copy and paste an intent
 

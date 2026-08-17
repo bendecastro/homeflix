@@ -36,6 +36,7 @@ VPN_BLOCKED_EGRESS_TIMEOUT = 5.0
 EGRESS_URL = "https://api.ipify.org"
 _CHECK_STATUSES = ("pass", "warning", "failure", "not-applicable", "unknown")
 _EVIDENCE_BOOLS = ("tunnel_healthy", "tunnel_device", "namespace_dns", "egress_distinct")
+_OPTIONAL_EVIDENCE_BOOLS = ("fail_closed",)
 _MANDATORY_DOMAINS = frozenset({
     "stack_contract",
     "preflight",
@@ -157,7 +158,7 @@ def vpn_evidence_is_current(
 
     if not evidence:
         return False
-    allowed = {"recorded_at", "image_id", "config_digest", *_EVIDENCE_BOOLS}
+    allowed = {"recorded_at", "image_id", "config_digest", *_EVIDENCE_BOOLS, *_OPTIONAL_EVIDENCE_BOOLS}
     if set(evidence) - allowed:
         return False
     recorded = evidence.get("recorded_at")
@@ -168,6 +169,8 @@ def vpn_evidence_is_current(
     if stored_image != image_id or stored_digest != config_digest:
         return False
     if any(evidence.get(name) is not True for name in _EVIDENCE_BOOLS):
+        return False
+    if "fail_closed" in evidence and type(evidence["fail_closed"]) is not bool:
         return False
     try:
         stamp = datetime.fromisoformat(recorded.replace("Z", "+00:00"))
@@ -278,6 +281,17 @@ def _inspect_image_id(runner: CommandRunner, *, timeout: float) -> str | None:
     if result.returncode != 0 or not image:
         return None
     return image
+
+
+def _record_fail_closed(root: Path) -> bool:
+    """Add fail_closed only onto current #9 evidence. Never invent a new gate record."""
+
+    existing = _load_stored_evidence(root)
+    if not existing:
+        return False
+    updated = dict(existing)
+    updated["fail_closed"] = True
+    return _store_evidence(root, updated)
 
 
 def _store_evidence(root: Path, evidence: Mapping[str, object]) -> bool:
@@ -827,6 +841,8 @@ def verify_vpn_fail_closed(
                     checks.append(_check("post_egress", None, "egress comparison could not be inspected"))
 
     passed = _fail_closed_passed(checks, snapshot) and restore_complete and disrupted
+    if passed:
+        _record_fail_closed(root)
     return _fail_closed_result(
         checks,
         disrupted=disrupted,

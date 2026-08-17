@@ -15,7 +15,7 @@ CURRENT_SCHEMA_VERSION = 1
 
 _CHECKPOINT_NAME = re.compile(r"^[a-z][a-z0-9]*(?:[_-][a-z0-9]+)*$")
 _CHECKPOINTS = {"configured", "core_containers_started", "core_api_configured", "core_verified"}
-_EVIDENCE_BOOLS = ("tunnel_healthy", "tunnel_device", "namespace_dns", "egress_distinct")
+_EVIDENCE_BOOLS = ("tunnel_healthy", "tunnel_device", "namespace_dns", "egress_distinct", "fail_closed")
 _EVIDENCE_STRING_LIMITS = {
     "recorded_at": 40,
     "image_id": 128,

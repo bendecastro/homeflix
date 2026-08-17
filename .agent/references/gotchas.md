@@ -7,6 +7,13 @@ bite.
 
 ## homeflix-specific (from the design review)
 
+- **Do not start qBittorrent or Prowlarr without current fail-closed evidence.**
+  `deploy acquisition` requires stored `fail_closed: true` from a successful
+  `verify vpn --disrupt`. `#9` tunnel evidence alone is not enough. Fixture-accepted.
+- **Radarr/Sonarr must reach qBittorrent as `gluetun:<port>`, never `localhost` or
+  `qbittorrent`.** Those clients share Gluetun's network namespace. A localhost
+  client from *arr would miss the download client; a `qbittorrent` hostname does
+  not resolve on the *arr network.
 - **Never split `/data` into two bind mounts for an *arr app.** Give Radarr/Sonarr/Lidarr
   the single root `${DATA_ROOT}:/data`. If you instead mount `torrents/` and `media/`
   separately, Docker makes them distinct mountpoints and **hardlinks fail even though the

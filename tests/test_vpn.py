@@ -583,6 +583,30 @@ class VpnVerifyGateTests(unittest.TestCase):
                 now=now,
             )
         )
+        self.assertTrue(
+            vpn_evidence_is_current(
+                {**fresh, "fail_closed": True},
+                image_id="sha256:aaa",
+                config_digest="abc",
+                now=now,
+            )
+        )
+        self.assertTrue(
+            vpn_evidence_is_current(
+                {**fresh, "fail_closed": False},
+                image_id="sha256:aaa",
+                config_digest="abc",
+                now=now,
+            )
+        )
+        self.assertFalse(
+            vpn_evidence_is_current(
+                {**fresh, "fail_closed": "yes"},
+                image_id="sha256:aaa",
+                config_digest="abc",
+                now=now,
+            )
+        )
 
     def test_deadline_exhaustion_fails_closed_without_starting_gated_services(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -805,6 +829,8 @@ class VpnFailClosedTransactionTests(unittest.TestCase):
                 sleep=lambda _seconds: None,
                 readiness_timeout=5.0,
             )
+            stored = SetupState.load(root / ".homeflix" / "setup.json").evidence
+            digest = vpn_config_digest(EnvDocument.load(root / ".env"))
 
         self.assertTrue(result["passed"], result)
         self.assertEqual(result["status"], "verified")
@@ -835,6 +861,44 @@ class VpnFailClosedTransactionTests(unittest.TestCase):
         self.assertFalse(any("nzbget" in text and "restart" in text for text in rendered_commands))
         self.assertFalse(any("prowlarr" in text and ("restart" in text or "up" in text) for text in rendered_commands))
         _assert_bounded(result)
+        self.assertTrue(stored.get("fail_closed") is True)
+        self.assertTrue(vpn_evidence_is_current(
+            stored,
+            image_id="sha256:fixturegluetunimage",
+            config_digest=digest,
+        ))
+
+    def test_failed_or_interrupted_disrupt_does_not_set_fail_closed(self) -> None:
+        cases = (
+            {"fail_at": "disrupt"},
+            {"raise_at": "disrupt"},
+            {"fail_at": "blocked_egress"},
+        )
+        for kwargs in cases:
+            with self.subTest(**kwargs), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                write_env(root)
+                write_current_evidence(root)
+                before = SetupState.load(root / ".homeflix" / "setup.json").evidence
+                self.assertNotIn("fail_closed", before)
+                runner = FakeVpnRunner(inventory=[_running("qbittorrent")], **kwargs)
+                result = verify_vpn_fail_closed(
+                    root,
+                    runner=runner,
+                    disrupt=True,
+                    clock=FakeClock(),
+                    sleep=lambda _seconds: None,
+                    readiness_timeout=5.0,
+                )
+                self.assertFalse(result["passed"], result)
+                stored = SetupState.load(root / ".homeflix" / "setup.json").evidence
+                self.assertNotEqual(stored.get("fail_closed"), True)
+                self.assertTrue(vpn_evidence_is_current(
+                    stored,
+                    image_id="sha256:fixturegluetunimage",
+                    config_digest=vpn_config_digest(EnvDocument.load(root / ".env")),
+                ))
+                _assert_bounded(result)
 
     def test_default_route_through_the_tunnel_is_still_classified_as_tunnel(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

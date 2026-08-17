@@ -567,3 +567,15 @@ and foreign files untouched. Shell adapters still only exec the CLI; remote dest
 is not mkdir'd locally; cron `15 3 * * * /bin/bash $REPO/scripts/backup-config.sh`
 stays valid and idempotent. Fixture-accepted only; not live-host proof.
 
+## [2026-08-16] build | Torrent acquisition tracer
+
+Issue #11: `setup/deploy/initialize/verify acquisition` start qBittorrent and
+Prowlarr only after stored fail-closed evidence (`fail_closed: true` written by a
+successful `verify vpn --disrupt`). qBittorrent temp/default credentials are
+consumed internally and replaced by a generated `.env` password. Paths,
+categories, localhost-auth bypass, and listen-port agreement are reconciled
+without printing ports or secrets. Prowlarr owns one Radarr and one Sonarr app;
+*arr download clients use host `gluetun`. Reruns are idempotent. Verify is
+read-only and reports `credentials_required` when no indexer is usable. NZBGet
+is not started. Fixture-accepted only; not live-host proof.
+

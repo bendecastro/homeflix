@@ -11,7 +11,12 @@ Updated: 2026-08-16
   executable stack contract, reliable first-use reconciliation, truthful verification
   modes, fail-closed backup recovery, and the absorbed acquisition phase. Issue map:
   [tasks.md](../../docs/changes/deep-homeflix-operations/tasks.md).
-- **In this worktree:** issue **#8** SSH artifact-repository parity — `BACKUP_DEST`
+- **In this worktree:** issue **#11** torrent acquisition tracer — after current
+  fail-closed evidence, `deploy`/`initialize`/`verify`/`setup acquisition` start
+  only qBittorrent and Prowlarr behind Gluetun, reconcile single-root qBittorrent
+  state and `gluetun` *arr/Prowlarr connections, and stop at a resumable
+  indexer-credential gate. NZBGet stays stopped. Fixture-accepted only.
+- **Also in this worktree:** issue **#8** SSH artifact-repository parity — `BACKUP_DEST`
   `user@host:/abs/path` uses the same list/get/put/prune contract as the local
   adapter via `ssh`/`scp` (`-oBatchMode=yes`, argv lists, finite timeout, redacted
   dest). Invalid dest forms are refused before any command. Compatibility shells
