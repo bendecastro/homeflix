@@ -22,6 +22,7 @@ from .command import CommandRunner
 from .compose import (
     CORE_SERVICES,
     SUPPORT_SERVICES,
+    _restore_omitted_create_host_path,
     compose_command,
     compose_inventory,
     compose_ps,
@@ -584,6 +585,8 @@ def _evaluate_runtime_contract(
         raise ValueError("rendered Compose configuration was malformed") from error
     if not isinstance(mapping, Mapping):
         raise ValueError("rendered Compose configuration was malformed")
+    source = (root / "docker-compose.yml").read_text(encoding="utf-8")
+    mapping = _restore_omitted_create_host_path(dict(mapping), source)
     return evaluate_stack_contract(mapping)
 
 
