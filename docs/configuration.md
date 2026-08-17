@@ -33,7 +33,7 @@ Neither command accepts secret values as arguments or JSON.
 | `DATA_ROOT` | — | Downloads **and** media. **Must be one filesystem.** Not under `/home`. |
 | `CONFIG_ROOT` | — | Service configs and databases. The thing to back up. |
 | `CACHE_ROOT` | — | Jellyfin transcode scratch. Ephemeral. |
-| `BACKUP_DEST` | — | Off-box rsync destination for `scripts/backup-config.sh` (`user@host:/path` or a directory on another filesystem). Required for backups; empty means the script refuses to run. Does not include the checkout `.env`. |
+| `BACKUP_DEST` | — | Off-box destination for `scripts/backup-config.sh` (`user@host:/path`, `host:/path` where the user comes from your SSH config, or a directory on another filesystem). Remote paths must be absolute. Required for backups; empty means the script refuses to run. Does not include the checkout `.env`. |
 | `BACKUP_KEEP` | `7` | Dated archives retained at `BACKUP_DEST`. Oldest are deleted first. |
 
 Expected structure under `DATA_ROOT`:

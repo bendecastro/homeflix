@@ -783,13 +783,13 @@ class CompatibilityScriptTests(unittest.TestCase):
 
 
 VALID_SSH_DEST = "user@host:/var/backups/homeflix"
+ALIAS_SSH_DEST = "host:/var/backups/homeflix"
 
 INVALID_SSH_DESTS = (
     "",
     "   ",
     "@host:/var/backups/homeflix",
     "user@:/var/backups/homeflix",
-    "host:/var/backups/homeflix",
     "user@host:",
     "user@host",
     "user@host:rel/path",
@@ -830,7 +830,7 @@ class FakeSshRunner:
         self,
         store: Path,
         *,
-        user: str = "user",
+        user: str | None = "user",
         host: str = "host",
         remote_path: str = "/var/backups/homeflix",
     ) -> None:
@@ -841,6 +841,10 @@ class FakeSshRunner:
         self.calls: list[dict[str, object]] = []
         self.fail_at: str | None = None
         self.timeout_at: str | None = None
+
+    @property
+    def target(self) -> str:
+        return f"{self.user}@{self.host}" if self.user else self.host
 
     def run(
         self,
@@ -866,7 +870,7 @@ class FakeSshRunner:
 
     def operation(self, argv: list[str]) -> str:
         if argv[:1] == ["scp"]:
-            prefix = f"{self.user}@{self.host}:"
+            prefix = f"{self.target}:"
             if any(argument.startswith(prefix) for argument in argv[1:-1]):
                 return "get"
             return "put"
@@ -883,7 +887,7 @@ class FakeSshRunner:
         if argv[:3] != ["scp", "-oBatchMode=yes", "--"] or len(argv) != 5:
             return subprocess.CompletedProcess(argv, 2, "", "bad scp argv")
         source, destination = argv[3], argv[4]
-        prefix = f"{self.user}@{self.host}:"
+        prefix = f"{self.target}:"
         if destination.startswith(prefix):
             name = Path(destination[len(prefix) :]).name
             target = self.store / name
@@ -899,7 +903,7 @@ class FakeSshRunner:
         return subprocess.CompletedProcess(argv, 2, "", "unmapped scp dest")
 
     def _ssh(self, argv: list[str]) -> subprocess.CompletedProcess[str]:
-        expected_prefix = ["ssh", "-oBatchMode=yes", "--", f"{self.user}@{self.host}"]
+        expected_prefix = ["ssh", "-oBatchMode=yes", "--", self.target]
         if argv[:4] != expected_prefix:
             return subprocess.CompletedProcess(argv, 2, "", "bad ssh argv")
         remote = argv[4:]
@@ -1073,6 +1077,28 @@ class SshRepositoryCommandTests(unittest.TestCase):
             self.assertIn("host", redact)
             self.assertIn("/var/backups/homeflix", redact)
 
+    def test_userless_alias_dest_uses_bare_host_argv_and_still_redacts(self) -> None:
+        runner = FakeSshRunner(self.store, user=None)
+        repo = SshArtifactRepository(parse_ssh_destination(ALIAS_SSH_DEST), runner)
+        source = self.root / "homeflix-config-20200303T000000Z.tar.gz"
+        source.write_bytes(b"payload")
+        repo.put(source)
+        self.assertEqual(repo.list_archives(), [source.name])
+
+        recorded = [call["argv"] for call in runner.calls]
+        self.assertEqual(
+            recorded[0],
+            ["scp", "-oBatchMode=yes", "--", str(source), f"{ALIAS_SSH_DEST}/{source.name}"],
+        )
+        self.assertEqual(
+            recorded[1],
+            ["ssh", "-oBatchMode=yes", "--", "host", "ls", "-1t", "--", "/var/backups/homeflix"],
+        )
+        for call in runner.calls:
+            self.assertIn("host", call["redact"])
+            self.assertIn("/var/backups/homeflix", call["redact"])
+            self.assertNotIn(None, call["redact"])
+
     def test_put_failure_and_timeout_do_not_issue_prune(self) -> None:
         existing = self.store / "homeflix-config-20200101T000000Z.tar.gz"
         existing.write_bytes(b"keep")
@@ -1137,6 +1163,19 @@ class SshDestinationParserTests(unittest.TestCase):
         self.assertEqual(parsed.path, "/var/backups/homeflix")
         self.assertTrue(dest_is_remote(VALID_SSH_DEST))
         self.assertFalse(dest_is_remote("/var/backups/homeflix"))
+
+    def test_userless_alias_form_is_accepted_and_defers_user_to_ssh_config(self) -> None:
+        parsed = parse_ssh_destination(ALIAS_SSH_DEST)
+        self.assertIsNone(parsed.user)
+        self.assertEqual(parsed.host, "host")
+        self.assertEqual(parsed.path, "/var/backups/homeflix")
+        self.assertEqual(parsed.target, "host")
+        self.assertEqual(parsed.spec, ALIAS_SSH_DEST)
+        self.assertEqual(
+            parsed.remote_archive("homeflix-config-20240101T000000Z.tar.gz"),
+            f"{ALIAS_SSH_DEST}/homeflix-config-20240101T000000Z.tar.gz",
+        )
+        self.assertTrue(dest_is_remote(ALIAS_SSH_DEST))
 
     def test_documented_form_rejects_unsupported_dests_before_any_run(self) -> None:
         for dest in INVALID_SSH_DESTS:

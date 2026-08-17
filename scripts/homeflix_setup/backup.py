@@ -46,25 +46,29 @@ def dest_is_remote(value: str) -> bool:
 _SSH_USER = r"[A-Za-z0-9_][A-Za-z0-9._-]*"
 _SSH_HOST = r"[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?"
 _SSH_COMPONENT = r"[A-Za-z0-9._-]+"
-_SSH_DEST_RE = re.compile(rf"^({_SSH_USER})@({_SSH_HOST}):(/{_SSH_COMPONENT}(?:/{_SSH_COMPONENT})*)$")
+_SSH_DEST_RE = re.compile(
+    rf"^(?:({_SSH_USER})@)?({_SSH_HOST}):(/{_SSH_COMPONENT}(?:/{_SSH_COMPONENT})*)$"
+)
+# A userless destination is otherwise indistinguishable from a Windows drive path.
+_WINDOWS_DRIVE_RE = re.compile(r"^[A-Za-z]:")
 
 
 class SshDestination:
-    def __init__(self, user: str, host: str, path: str) -> None:
+    def __init__(self, user: str | None, host: str, path: str) -> None:
         self.user = user
         self.host = host
         self.path = path
 
     @property
     def target(self) -> str:
-        return f"{self.user}@{self.host}"
+        return f"{self.user}@{self.host}" if self.user else self.host
 
     @property
     def spec(self) -> str:
-        return f"{self.user}@{self.host}:{self.path}"
+        return f"{self.target}:{self.path}"
 
     def remote_archive(self, name: str) -> str:
-        return f"{self.user}@{self.host}:{self.path}/{name}"
+        return f"{self.target}:{self.path}/{name}"
 
     def remote_path(self, name: str) -> str:
         return f"{self.path}/{name}"
@@ -74,6 +78,8 @@ def parse_ssh_destination(value: str) -> SshDestination:
     if not value or value.startswith("-") or value.count(":") != 1:
         raise BackupError("BACKUP_DEST is not a valid SSH destination")
     if any(ord(character) < 32 or ord(character) == 127 for character in value):
+        raise BackupError("BACKUP_DEST is not a valid SSH destination")
+    if _WINDOWS_DRIVE_RE.match(value):
         raise BackupError("BACKUP_DEST is not a valid SSH destination")
     match = _SSH_DEST_RE.fullmatch(value)
     if match is None:
@@ -132,7 +138,7 @@ class LocalArtifactRepository:
 
 
 class SshArtifactRepository:
-    """Store Homeflix backup artifacts at a validated user@host:/abs/path destination."""
+    """Store Homeflix backup artifacts at a validated [user@]host:/abs/path destination."""
 
     def __init__(self, destination: SshDestination, runner: CommandRunner) -> None:
         self.destination = destination
@@ -140,7 +146,8 @@ class SshArtifactRepository:
 
     def _secrets(self) -> tuple[str, ...]:
         dest = self.destination
-        return (dest.spec, dest.target, dest.user, dest.host, dest.path)
+        values = (dest.spec, dest.target, dest.user, dest.host, dest.path)
+        return tuple(value for value in values if value)
 
     def _run(self, argv: list[str], *, require_success: bool = True) -> subprocess.CompletedProcess[str]:
         try:
