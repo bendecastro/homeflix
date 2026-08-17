@@ -13,6 +13,7 @@
 - Existing-stack `verify core` SHALL inspect using the dedicated Jellyfin application key and the unique default non-4K quality profile already selected in Jellyseerr when admin or `QUALITY_PROFILE` env keys are absent. `(satisfied #16)`
 - Application-data directory walks SHALL accept group-writable directories owned by the expected uid; secret files and other-writable directories SHALL still be refused. `(satisfied #16)`
 - Disruptive fail-closed verification SHALL require an explicit operator command and SHALL NOT run as part of routine runtime verification. `(satisfied #10)`
+- Non-disruptive VPN-gate evidence SHALL be collectable while gated services are already running, and only while every running gated service shares the Gluetun network namespace; a gated service running outside that namespace, or whose namespace cannot be inspected, SHALL fail the gate. `(satisfied #18)`
 - Disruptive verification SHALL identify only the active tunnel interface, prove external access is blocked after disruption, and restore Gluetun plus every previously running namespace-dependent service after success, failure, timeout, or interruption. `(satisfied #10)`
 - The post-disruption blocked-egress probe SHALL be bounded so it cannot consume the compensation window. Restore SHALL use an independent budget (or floor timeout) so Gluetun and previously running dependents still restart when the prove deadline is exhausted. `(satisfied #10)`
 - A disruptive verification success SHALL require healthy post-restore egress through a non-host address. `(satisfied #10)`

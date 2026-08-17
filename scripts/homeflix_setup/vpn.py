@@ -186,6 +186,18 @@ def _gluetun_up_argv(root: Path, project_name: str | None) -> list[str]:
     return [*compose_command(root, project_name=project_name), "up", "--detach", "--no-deps", *GLUETUN_SERVICES]
 
 
+def namespace_shared(runner: CommandRunner, service: str, *, timeout: float) -> bool | None:
+    result = runner.run(
+        ("docker", "inspect", "--format", "{{.HostConfig.NetworkMode}}", service),
+        check=False,
+        timeout=timeout,
+    )
+    mode = (result.stdout or "").strip()
+    if result.returncode or not mode:
+        return None
+    return mode == "container:gluetun"
+
+
 def _running_gated(inventory: Sequence[Mapping[str, str]]) -> list[str]:
     running: list[str] = []
     for item in inventory:
@@ -386,15 +398,24 @@ def verify_vpn(
         inventory = compose_inventory(root, command_runner, project_name=project_name, timeout=remaining)
         running = _running_gated(inventory)
         if running:
+            # Already-running clients cannot leak while they have no network stack
+            # of their own, so the gate is observable in place instead of refused.
+            for service in running:
+                remaining = _remaining(operation_deadline, clock, 10)
+                if namespace_shared(command_runner, service, timeout=remaining) is not True:
+                    checks.append(
+                        _check(
+                            "gated_services",
+                            False,
+                            "gated services are running outside the Gluetun namespace",
+                        )
+                    )
+                    return _failed(checks)
             checks.append(
-                _check(
-                    "gated_services",
-                    False,
-                    "gated services are already running",
-                )
+                _check("gated_services", True, "gated services are running inside the Gluetun namespace")
             )
-            return _failed(checks)
-        checks.append(_check("gated_services", True, "gated services are stopped"))
+        else:
+            checks.append(_check("gated_services", True, "gated services are stopped"))
     except (OSError, RuntimeError, ValueError, subprocess.SubprocessError, TimeoutError):
         checks.append(_check("gated_services", None, "gated services could not be inspected"))
         return _failed(checks)

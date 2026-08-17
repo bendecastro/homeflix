@@ -40,6 +40,7 @@ from .state import ACQUISITION_CLIENT_SELECTIONS, SetupState
 from .vpn import (
     VPN_HEALTH_TIMEOUT,
     _inspect_image_id,
+    namespace_shared,
     vpn_config_digest,
     vpn_evidence_is_current,
 )
@@ -397,18 +398,6 @@ def read_forwarded_port(runner: CommandRunner, *, timeout: float = 10.0) -> int 
     return value
 
 
-def _namespace_shared(runner: CommandRunner, service: str, *, timeout: float) -> bool | None:
-    result = runner.run(
-        ("docker", "inspect", "--format", "{{.HostConfig.NetworkMode}}", service),
-        check=False,
-        timeout=timeout,
-    )
-    mode = (result.stdout or "").strip()
-    if result.returncode or not mode:
-        return None
-    return mode == "container:gluetun"
-
-
 def _require_gate(
     root: Path,
     runner: CommandRunner,
@@ -677,7 +666,7 @@ def verify_acquisition(
         shared = True
         for service in selected:
             remaining = _remaining(operation_deadline, clock, 10)
-            mode = _namespace_shared(command_runner, service, timeout=remaining)
+            mode = namespace_shared(command_runner, service, timeout=remaining)
             if mode is not True:
                 shared = False
         checks.append(_check("namespace", shared, "clients share the Gluetun namespace" if shared else "clients do not share the Gluetun namespace"))

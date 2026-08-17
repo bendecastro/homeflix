@@ -98,6 +98,7 @@ class FakeVpnRunner:
         host_ip: str | None = HOST_EGRESS,
         tunnel_ip: str | None = TUNNEL_EGRESS,
         image_id: str = "sha256:fixturegluetunimage",
+        namespace_mode: str = "container:gluetun",
         up_returncode: int = 0,
         links: str = SAFE_LINKS,
         default_route: str = DEFAULT_ROUTE_ETH,
@@ -114,6 +115,7 @@ class FakeVpnRunner:
         self.host_ip = host_ip
         self.tunnel_ip = tunnel_ip
         self.image_id = image_id
+        self.namespace_mode = namespace_mode
         self.up_returncode = up_returncode
         self.links = links
         self.default_route = default_route
@@ -188,6 +190,10 @@ class FakeVpnRunner:
                 return subprocess.CompletedProcess(command, 1, "", "egress unavailable")
             return subprocess.CompletedProcess(command, 0, self.host_ip + "\n", "")
         if command[:2] == ("docker", "inspect"):
+            if "{{.HostConfig.NetworkMode}}" in command:
+                if self.namespace_mode is None:
+                    return subprocess.CompletedProcess(command, 1, "", "no such container")
+                return subprocess.CompletedProcess(command, 0, self.namespace_mode + "\n", "")
             return subprocess.CompletedProcess(command, 0, self.image_id + "\n", "")
         if command[:3] == ("docker", "exec", "gluetun") and command[3:5] == ("ip", "-o"):
             if "route" in command:
@@ -483,6 +489,40 @@ class VpnVerifyGateTests(unittest.TestCase):
             config_digest=digest,
         ))
 
+    def test_gate_succeeds_on_running_stack_when_clients_share_the_gluetun_namespace(self) -> None:
+        inventory = [
+            {"Service": service, "State": "running", "Health": "healthy", "Project": "homeflix"}
+            for service in ("qbittorrent", "prowlarr")
+        ]
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            write_env(root)
+            runner = FakeVpnRunner(inventory=inventory)
+            result = _verify(root, runner)
+            digest = vpn_config_digest(EnvDocument.load(root / ".env"))
+            state = SetupState.load(root / ".homeflix" / "setup.json")
+
+        self.assertTrue(result["passed"], result)
+        self.assertEqual(result["status"], "verified")
+        checks = {item["domain"]: item for item in result["checks"]}
+        self.assertEqual(checks["gated_services"]["status"], "pass")
+        self.assertIn("namespace", checks["gated_services"]["reason"])
+        mutations = [command for command in runner.commands if "up" in command]
+        self.assertEqual(len(mutations), 1)
+        self.assertIn("gluetun", mutations[0])
+        for forbidden in GATED_SERVICES:
+            self.assertNotIn(forbidden, " ".join(mutations[0]))
+        self.assertTrue(vpn_evidence_is_current(
+            state.evidence,
+            image_id="sha256:fixturegluetunimage",
+            config_digest=digest,
+        ))
+        self.assertIsNot(state.evidence.get("fail_closed"), True)
+        rendered = json.dumps(result)
+        self.assertNotIn(VPN_SECRET, rendered)
+        for address in FIXTURE_IPS:
+            self.assertNotIn(address, rendered)
+
     def test_successful_gate_invokes_contract_and_acquisition_preflight(self) -> None:
         contract_roots: list[Path] = []
         preflight_phases: list[str] = []
@@ -514,7 +554,7 @@ class VpnVerifyGateTests(unittest.TestCase):
         self.assertEqual(preflight_phases, ["acquisition"])
         self.assertTrue(any("up" in command and "gluetun" in command for command in runner.commands))
 
-    def test_refuses_equal_unknown_unhealthy_missing_tun_dns_or_running_gated_services(self) -> None:
+    def test_refuses_equal_unknown_unhealthy_missing_tun_dns_or_ungated_running_clients(self) -> None:
         cases = (
             {"tunnel_ip": HOST_EGRESS, "domain": "egress"},
             {"host_ip": None, "domain": "egress"},
@@ -530,6 +570,19 @@ class VpnVerifyGateTests(unittest.TestCase):
                         "Project": "homeflix",
                     }
                 ],
+                "namespace_mode": "bridge",
+                "domain": "gated_services",
+            },
+            {
+                "inventory": [
+                    {
+                        "Service": "qbittorrent",
+                        "State": "running",
+                        "Health": "healthy",
+                        "Project": "homeflix",
+                    }
+                ],
+                "namespace_mode": None,
                 "domain": "gated_services",
             },
         )
