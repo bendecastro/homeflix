@@ -13,8 +13,9 @@ from unittest.mock import patch
 
 from scripts.homeflix_setup.compose import (
     ACQUISITION_SERVICES, CORE_SERVICES, GLUETUN_SERVICES, PROXY_SUBNET_CANDIDATES,
-    _atomic_write, build_override, compose_inventory, compose_ps, compose_stop_acquisition,
-    compose_up, compose_up_acquisition, compose_up_gluetun, configure,
+    _atomic_write, _restore_omitted_create_host_path, build_override, compose_inventory,
+    compose_ps, compose_stop_acquisition, compose_up, compose_up_acquisition,
+    compose_up_gluetun, configure,
 )
 from scripts.homeflix_setup.discover import (
     GraphicsDeviceFact, GraphicsFact, HostFacts, LanNetworkFact, MountFact,
@@ -311,6 +312,49 @@ class ComposeExecutionTests(unittest.TestCase):
         self.assertIn("stop", stop_runner.commands[0])
         self.assertIn("nzbget", stop_runner.commands[0])
         self.assertNotIn("rm", stop_runner.commands[0])
+
+
+class RestoreCreateHostPathTests(unittest.TestCase):
+    SOURCE = """
+services:
+  radarr:
+    volumes:
+      - type: bind
+        source: /data
+        target: /data
+        bind:
+          create_host_path: false
+  sonarr:
+    volumes:
+      - type: bind
+        source: /data
+        target: /data
+  lidarr:
+    volumes:
+      - type: bind
+        source: /data
+        target: /data
+        bind:
+          create_host_path: false
+"""
+
+    def test_restores_false_only_when_source_declared_it(self) -> None:
+        rendered = {
+            "services": {
+                "radarr": {"volumes": [{"target": "/data", "bind": {}}]},
+                "sonarr": {"volumes": [{"target": "/data", "bind": {}}]},
+                "lidarr": {"volumes": [{"target": "/data", "bind": {}}]},
+            }
+        }
+        restored = _restore_omitted_create_host_path(rendered, self.SOURCE)
+        self.assertIs(restored["services"]["radarr"]["volumes"][0]["bind"]["create_host_path"], False)
+        self.assertNotIn("create_host_path", restored["services"]["sonarr"]["volumes"][0]["bind"])
+        self.assertIs(restored["services"]["lidarr"]["volumes"][0]["bind"]["create_host_path"], False)
+
+    def test_does_not_override_explicit_true(self) -> None:
+        rendered = {"services": {"radarr": {"volumes": [{"target": "/data", "bind": {"create_host_path": True}}]}}}
+        restored = _restore_omitted_create_host_path(rendered, self.SOURCE)
+        self.assertIs(restored["services"]["radarr"]["volumes"][0]["bind"]["create_host_path"], True)
 
 
 class StorageBindTests(unittest.TestCase):

@@ -281,6 +281,59 @@ def _validated_project_name(value: str | None) -> str:
     return normalized
 
 
+_ARR_DATA_SERVICES = ("radarr", "sonarr", "lidarr")
+
+
+def _service_blocks(source: str) -> dict[str, str]:
+    """Split top-level Compose service mappings from the project file."""
+    blocks: dict[str, list[str]] = {}
+    current: str | None = None
+    in_services = False
+    for line in source.splitlines():
+        if line.startswith("services:"):
+            in_services = True
+            current = None
+            continue
+        if not in_services:
+            continue
+        if line and not line.startswith(" ") and not line.startswith("\t"):
+            break
+        if re.fullmatch(r"  [A-Za-z0-9][A-Za-z0-9_.-]*:\s*", line):
+            current = line.strip()[:-1]
+            blocks[current] = [line]
+            continue
+        if current is not None:
+            blocks[current].append(line)
+    return {name: "\n".join(body) for name, body in blocks.items()}
+
+
+def _restore_omitted_create_host_path(rendered: dict[str, object], source: str) -> dict[str, object]:
+    """Older Compose drops create_host_path: false from JSON; restore from source."""
+    services = rendered.get("services")
+    if not isinstance(services, dict):
+        return rendered
+    declared = {
+        name: "create_host_path: false" in block
+        for name, block in _service_blocks(source).items()
+    }
+    for name in _ARR_DATA_SERVICES:
+        service = services.get(name)
+        if not isinstance(service, dict) or not declared.get(name):
+            continue
+        volumes = service.get("volumes")
+        if not isinstance(volumes, list):
+            continue
+        for volume in volumes:
+            if not isinstance(volume, dict) or volume.get("target") != "/data":
+                continue
+            bind = volume.get("bind")
+            if bind is None:
+                volume["bind"] = {"create_host_path": False}
+            elif isinstance(bind, dict) and "create_host_path" not in bind:
+                bind["create_host_path"] = False
+    return rendered
+
+
 def render_compose_config(repository_root: str | os.PathLike[str]) -> dict[str, object]:
     """Render Compose once to a mapping. The stack-contract module never calls this."""
 
@@ -310,7 +363,8 @@ def render_compose_config(repository_root: str | os.PathLike[str]) -> dict[str, 
         raise RuntimeError("rendered Compose configuration was not valid JSON") from error
     if not isinstance(rendered, dict):
         raise RuntimeError("rendered Compose configuration was not an object")
-    return rendered
+    source = (root / "docker-compose.yml").read_text(encoding="utf-8")
+    return _restore_omitted_create_host_path(rendered, source)
 
 
 def compose_command(

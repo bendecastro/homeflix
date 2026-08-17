@@ -236,7 +236,7 @@ def _readiness_targets(config: EnvDocument) -> dict[str, tuple[str, dict[str, st
     if not domain:
         raise ValueError("DOMAIN must be configured for core readiness")
     return {
-        "traefik": ("http://127.0.0.1:8080/api/rawdata", {}),
+        "traefik": ("http://127.0.0.1/System/Info/Public", {"Host": f"jellyfin.{domain}"}),
         "jellyfin": ("http://127.0.0.1:8096/System/Info/Public", {}),
         "jellyseerr": ("http://127.0.0.1/api/v1/status", {"Host": f"jellyseerr.{domain}"}),
         "radarr": ("http://127.0.0.1/ping", {"Host": f"radarr.{domain}"}),

@@ -636,3 +636,9 @@ helpers already running; unknown services still fail. `acquisition_absent` is a
 warning on an existing stack. `verify core --discover-probe` is the explicit
 controlled equivalent for unconditional Jellyfin refresh. Fixture-accepted only.
 
+## [2026-08-17] fix | Portable contract render and Traefik readiness
+
+#15: restore omitted `create_host_path: false` from source after older Compose
+JSON drops it. Traefik readiness probes Jellyfin through `:80` instead of
+unpublished `:8080`. Fixture-accepted only.
+

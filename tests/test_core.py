@@ -92,7 +92,10 @@ class ReadinessHelperTests(unittest.TestCase):
             env = Path(directory) / ".env"
             env.write_text("DOMAIN=homeflix.test\n", encoding="utf-8")
             targets = _readiness_targets(EnvDocument.load(env))
-        self.assertEqual(targets["traefik"], ("http://127.0.0.1:8080/api/rawdata", {}))
+        self.assertEqual(
+            targets["traefik"],
+            ("http://127.0.0.1/System/Info/Public", {"Host": "jellyfin.homeflix.test"}),
+        )
         self.assertEqual(targets["jellyfin"], ("http://127.0.0.1:8096/System/Info/Public", {}))
         self.assertEqual(targets["jellyseerr"][1], {"Host": "jellyseerr.homeflix.test"})
         self.assertEqual(targets["radarr"], ("http://127.0.0.1/ping", {"Host": "radarr.homeflix.test"}))

@@ -7,6 +7,8 @@
 - Runtime verification SHALL remain non-destructive and SHALL fail when any mandatory runtime domain is unavailable, unknown, or skipped. `(satisfied #5; VPN gate #9)`
 - Optional or intentionally unselected capabilities MAY report not applicable without weakening mandatory evidence. `(satisfied #5)`
 - Core runtime verification SHALL succeed when classified non-core or optional helper services are already present; their presence is a warning, not a mandatory failure. Unknown project services SHALL still fail. `(satisfied #14)`
+- Core Traefik readiness SHALL use a family-facing proxy path and SHALL NOT require a published dashboard on `:8080`. `(satisfied #15)`
+- Rendering SHALL restore `create_host_path: false` when the project file declared it and the Compose JSON renderer omitted the key. `(satisfied #15)`
 - An explicit `verify core --discover-probe` intent MAY create and delete a uniquely named library probe to prove unconditional Jellyfin refresh; default `verify core` SHALL NOT write library files. `(satisfied #14)`
 - Disruptive fail-closed verification SHALL require an explicit operator command and SHALL NOT run as part of routine runtime verification. `(satisfied #10)`
 - Disruptive verification SHALL identify only the active tunnel interface, prove external access is blocked after disruption, and restore Gluetun plus every previously running namespace-dependent service after success, failure, timeout, or interruption. `(satisfied #10)`
