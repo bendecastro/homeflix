@@ -528,6 +528,20 @@ class VpnVerifyGateTests(unittest.TestCase):
                 self.assertTrue(result["passed"], result)
                 self.assertEqual(checks["gated_services"]["status"], "pass")
 
+    def test_gate_distinguishes_wrong_namespace_from_uninspectable_namespace(self) -> None:
+        inventory = [{"Service": "qbittorrent", "State": "running", "Health": "healthy", "Project": "homeflix"}]
+        expected = {"bridge": ("failure", "outside"), None: ("unknown", "could not be inspected")}
+        for mode, (status, fragment) in expected.items():
+            with self.subTest(mode=mode), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                write_env(root)
+                runner = FakeVpnRunner(inventory=inventory, namespace_mode=mode)
+                result = _verify(root, runner)
+                check = {item["domain"]: item for item in result["checks"]}["gated_services"]
+                self.assertFalse(result["passed"])
+                self.assertEqual(check["status"], status)
+                self.assertIn(fragment, check["reason"])
+
     def test_gate_stores_evidence_without_fail_closed_on_a_running_stack(self) -> None:
         inventory = [
             {"Service": service, "State": "running", "Health": "healthy", "Project": "homeflix"}

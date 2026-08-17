@@ -423,11 +423,23 @@ def verify_vpn(
         inventory = compose_inventory(root, command_runner, project_name=project_name, timeout=remaining)
         running = _running_gated(inventory)
         if running:
-            # Already-running clients cannot leak while they have no network stack
-            # of their own, so the gate is observable in place instead of refused.
+            # Sharing Gluetun's namespace leaves a client no way to egress
+            # independently of it, so the gate is observable in place instead of
+            # refused. Whether Gluetun itself holds is proven by the disruptive
+            # transaction, not here.
             for service in running:
                 remaining = _remaining(operation_deadline, clock, 10)
-                if namespace_shared(command_runner, service, timeout=remaining) is not True:
+                shared = namespace_shared(command_runner, service, timeout=remaining)
+                if shared is None:
+                    checks.append(
+                        _check(
+                            "gated_services",
+                            None,
+                            "gated service namespace could not be inspected",
+                        )
+                    )
+                    return _failed(checks)
+                if not shared:
                     checks.append(
                         _check(
                             "gated_services",
