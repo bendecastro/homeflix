@@ -3,8 +3,8 @@
 ## Requirements
 
 - The system SHALL preserve separate core and acquisition phases. Acquisition credentials or capabilities SHALL NOT block core setup. `(satisfied #9 for credential isolation)`
-- Reconciliation SHALL inspect live state and make only the smallest safe changes to setup-owned state. `(pending #3)`
-- A no-change rerun SHALL NOT duplicate accounts, libraries, roots, connections, categories, clients, applications, or indexers. `(pending #3)`
+- Reconciliation SHALL inspect live state and make only the smallest safe changes to setup-owned state. `(satisfied #6 for core; satisfied #11/#12 for acquisition)`
+- A no-change rerun SHALL NOT duplicate accounts, libraries, roots, connections, categories, clients, applications, or indexers. `(satisfied #6 for core; satisfied #11/#12 for acquisition)`
 - Core reconciliation SHALL configure reliable Jellyfin discovery for both known and genuinely new imported titles. `(satisfied #6)`
 - Core reconciliation SHALL verify unconditional library refresh behavior rather than trusting only a targeted connection's built-in test. `(satisfied #6)`
 - Acquisition reconciliation SHALL require current VPN health and fail-closed evidence before starting any risky service. `(satisfied #11; VPN gate #9; fail-closed #10)`
@@ -12,7 +12,7 @@
 - qBittorrent reconciliation SHALL configure the single-root download paths, selected categories, durable credentials, localhost port-update prerequisite, and current forwarded listen port without exposing secret values. `(satisfied #11)`
 - Optional NZBGet SHALL remain stopped and unconfigured unless selected; provider servers SHALL remain disabled until credentials are present. `(satisfied #12)`
 - Prowlarr and the *arr applications SHALL use Docker service addresses that preserve the Gluetun topology. `(satisfied #11 for torrent; satisfied #12 for Usenet)`
-- Reconciliation SHALL preserve unrelated user-owned application choices and SHALL fail on ambiguous conflicting resources. `(satisfied #11 for torrent clients/apps; pending #3)`
+- Reconciliation SHALL preserve unrelated user-owned application choices and SHALL fail on ambiguous conflicting resources. `(satisfied #6 for core connections; satisfied #11 for torrent clients/apps; satisfied #12 for Usenet)`
 
 ## Key scenarios
 

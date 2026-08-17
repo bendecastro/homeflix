@@ -5,6 +5,7 @@ import io
 import json
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import tempfile
 import unittest
@@ -461,6 +462,42 @@ class PreflightTests(unittest.TestCase):
         self.assertEqual(result["counts"]["warn"], 2)
         self.assertEqual(result["counts"]["fail"], 0)
         self.assertEqual(acquisition["counts"]["fail"], 2)
+
+
+class PreflightCompatibilityTests(unittest.TestCase):
+    def test_preflight_wrapper_is_exec_only_and_passes_argv(self) -> None:
+        script = Path(__file__).resolve().parents[1] / "scripts" / "preflight.sh"
+        source = script.read_text(encoding="utf-8")
+        self.assertIn('exec "${SCRIPT_DIR}/homeflix" preflight "$@"', source)
+        self.assertNotRegex(source, r'(^|\n)\s*(source|\.)\s+[^\n]*\.env')
+        self.assertNotIn("run_preflight", source)
+        self.assertNotIn("DATA_ROOT", source)
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            scripts = root / "scripts"
+            scripts.mkdir()
+            shutil.copy2(script, scripts / "preflight.sh")
+            log = root / "argv.log"
+            launcher = scripts / "homeflix"
+            launcher.write_text(
+                "#!/usr/bin/env bash\n"
+                f"printf '%s\\0' \"$@\" > {str(log)!r}\n",
+                encoding="utf-8",
+            )
+            launcher.chmod(0o755)
+            (root / ".env").write_text("echo SOURCED_ENV >&2\nexit 99\n", encoding="utf-8")
+            result = subprocess.run(
+                [str(scripts / "preflight.sh"), "--phase", "acquisition", "--json"],
+                check=False,
+                capture_output=True,
+                text=True,
+                cwd=root,
+            )
+            recorded = log.read_bytes().split(b"\0")[:-1]
+        self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+        self.assertNotIn("SOURCED_ENV", result.stdout + result.stderr)
+        self.assertEqual(recorded, [b"preflight", b"--phase", b"acquisition", b"--json"])
 
 
 if __name__ == "__main__":

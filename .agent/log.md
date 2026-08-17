@@ -603,3 +603,21 @@ prior selection differs. NZBGet rotation writes `.env` after official
 merges into `loadconfig()` so `${MainDir}` file references are kept.
 Fixture-accepted only; not live production verification.
 
+## [2026-08-17] build | Program-level fixture acceptance and spec handoff
+
+Issue #13: living specs drop stale `(pending #3)` tags for work #4–#12 already
+implemented; live request-to-library stays explicitly deferred. Compatibility
+adapters stay exec-only (`preflight.sh` passes argv to `homeflix preflight` and
+does not source `.env`; there is no `verify.sh`). The superseded acquisition
+plan keeps its safety decisions and is no longer an executable checkbox queue.
+Operator docs and CLI help describe core, `--clients` acquisition, verification
+modes including `verify vpn --disrupt`, and backup as capabilities. The deep
+operations program is fixture-accepted. Disposable-host and private-production live acceptance remain separate.
+
+## [2026-08-17] fix | Split encrypted-storage follow-up from shipped VPN/acquisition
+
+Issue #13 rework: `agent-first-setup` delivery status no longer lumps
+encrypted-storage with VPN/acquisition as unshipped follow-ups. Encrypted
+storage remains later; #4–#13 VPN/acquisition is fixture-accepted shipped CLI.
+Disposable-host and private-production live acceptance remain separate.
+

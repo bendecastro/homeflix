@@ -56,7 +56,8 @@ docker compose --env-file .env.example config --quiet
 bash -n scripts/preflight.sh
 ```
 
-`./scripts/preflight.sh` is an integration check for a configured host: it reads `.env`,
-contacts Docker, and creates then removes hardlink test files under `DATA_ROOT`. Run it only
-when host validation is intended. Starting the stack (`docker compose up`) changes external
-state and must not be treated as a routine repository check.
+`scripts/preflight.sh` is a compatibility adapter that execs `scripts/homeflix preflight`
+and does not source `.env`. The CLI preflight is an integration check for a configured
+host: it contacts Docker and creates then removes hardlink test files under `DATA_ROOT`.
+Run it only when host validation is intended. Starting the stack (`docker compose up`)
+changes external state and must not be treated as a routine repository check.

@@ -1,6 +1,6 @@
 # Completed — Durable Done-Log
 
-Updated: 2026-08-14
+Updated: 2026-08-17
 
 Dated record of finished plans/phases. One line each; details live in the plan page
 and `log.md`.
@@ -10,3 +10,5 @@ and `log.md`.
   mounted storage; disposable real-host acceptance remains outstanding.
 - **2026-08-14** — Shipped portable CONFIG_ROOT backup/restore scripts, dropped the
   Glances Docker socket, and documented that Compose `depends_on` is not reboot ordering.
+- **2026-08-17** — Completed program-level fixture acceptance and spec handoff (#13).
+  Deep operations slices #4–#13 are fixture-accepted. Disposable-host and private-production live acceptance remain separate.

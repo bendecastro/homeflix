@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
+import subprocess
 import tempfile
 import unittest
 from urllib.parse import unquote
@@ -112,6 +113,170 @@ class DocumentationContractTests(unittest.TestCase):
         manual = readme.split("## Manual quickstart fallback", 1)[1].split("## What you get", 1)[0]
         self.assertNotIn("sudo mkdir", manual)
         self.assertNotIn('"$DATA_ROOT"', manual)
+
+    def test_implemented_spec_rows_cannot_return_to_pending_parent(self) -> None:
+        specs = {
+            "setup-reconciliation.md": (ROOT / "docs" / "specs" / "setup-reconciliation.md").read_text(encoding="utf-8"),
+            "verification.md": (ROOT / "docs" / "specs" / "verification.md").read_text(encoding="utf-8"),
+            "backup-recovery.md": (ROOT / "docs" / "specs" / "backup-recovery.md").read_text(encoding="utf-8"),
+            "stack-contract.md": (ROOT / "docs" / "specs" / "stack-contract.md").read_text(encoding="utf-8"),
+        }
+        stale_pending = (
+            "inspect live state and make only the smallest safe changes to setup-owned state. `(pending #3)`",
+            "A no-change rerun SHALL NOT duplicate accounts, libraries, roots, connections, categories, clients, applications, or indexers. `(pending #3)`",
+            "fail on ambiguous conflicting resources. `(satisfied #11 for torrent clients/apps; pending #3)`",
+            "explicit static, read-only runtime, and disruptive verification intents. `(pending #3;",
+            "live request-to-library remains pending #3",
+            "cannot be snapshotted consistently SHALL prevent artifact publication. `(pending #3)`",
+            "reliable Jellyfin discovery for both known and genuinely new imported titles. `(pending #3)`",
+        )
+        for name, text in specs.items():
+            for phrase in stale_pending:
+                with self.subTest(document=name, phrase=phrase):
+                    self.assertNotIn(phrase, text)
+            with self.subTest(document=name, phrase="pending #3"):
+                self.assertNotIn("pending #3", text)
+        verification = specs["verification.md"]
+        self.assertIn("(satisfied #4", verification)
+        self.assertIn("(satisfied #5", verification)
+        self.assertIn("(satisfied #10", verification)
+        self.assertIn("Disposable-host and private-production live acceptance remain separate.", verification)
+        spec = specs["setup-reconciliation.md"]
+        self.assertIn("(satisfied #6", spec)
+        self.assertIn("(satisfied #11", spec)
+        self.assertIn("(satisfied #12", spec)
+        self.assertIn("live request-to-library", spec)
+
+    def test_wiki_records_program_fixture_acceptance_without_live_claims(self) -> None:
+        index = (ROOT / ".agent" / "index.md").read_text(encoding="utf-8")
+        active = (ROOT / ".agent" / "tasks" / "active.md").read_text(encoding="utf-8")
+        completed = (ROOT / ".agent" / "tasks" / "completed.md").read_text(encoding="utf-8")
+        log = (ROOT / ".agent" / "log.md").read_text(encoding="utf-8")
+        roadmap = (ROOT / ".agent" / "project" / "roadmap.md").read_text(encoding="utf-8")
+        setup = (ROOT / ".agent" / "project" / "agent-first-setup.md").read_text(encoding="utf-8")
+        sentence = "Disposable-host and private-production live acceptance remain separate."
+        for document in (index, completed, log):
+            self.assertIn(sentence, document)
+        self.assertIn("fixture-accepted", index)
+        self.assertIn("#13", completed)
+        self.assertNotIn("Remaining slices cover program-level fixture acceptance.", index)
+        self.assertNotIn("issue **#12**", active)
+        self.assertNotIn("issue **#13**", active)
+        self.assertNotIn("#12/#13 in flight", active)
+        self.assertNotRegex(active, r"(?i)in this worktree:\s*issue \*\*#1[23]\*\*")
+        self.assertIn("program is fixture-accepted", active)
+        self.assertIn("not live production verification", index)
+        self.assertIn("fixture-accepted", roadmap)
+        self.assertIn("#4", setup)
+        self.assertIn("fixture-accepted", setup)
+        setup_normalized = re.sub(r"\s+", " ", setup)
+        contradiction = (
+            "The encrypted-storage and VPN/acquisition slices remain "
+            "approved follow-up plans, not shipped features."
+        )
+        self.assertNotIn(contradiction, setup_normalized)
+        self.assertNotRegex(
+            setup_normalized,
+            r"(?i)VPN/acquisition.{0,80}(?:approved follow-up|not shipped features)",
+        )
+        self.assertRegex(
+            setup_normalized,
+            r"(?i)VPN/acquisition.{0,80}(?:fixture-accepted shipped CLI|shipped CLI)",
+        )
+        self.assertRegex(
+            setup_normalized,
+            r"(?i)[Ee]ncrypted storage remains.{0,60}(?:later|approved follow-up)",
+        )
+        self.assertNotIn("/home/", index + active + completed)
+        self.assertNotIn("Europe/Lisbon", index + active + completed)
+
+    def test_runtime_artifacts_remain_git_ignored(self) -> None:
+        for path in (".env", ".homeflix/", "docker-compose.override.yml"):
+            with self.subTest(path=path):
+                result = subprocess.run(
+                    ["git", "check-ignore", "-q", "--", path],
+                    cwd=ROOT,
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                )
+                self.assertEqual(result.returncode, 0, f"{path} must remain gitignored")
+
+    def test_superseded_acquisition_plan_is_not_an_executable_queue(self) -> None:
+        plan = (ROOT / ".agent" / "project" / "agent-first-acquisition-plan.md").read_text(encoding="utf-8")
+        self.assertRegex(plan, r"(?im)^Status:\s*Superseded")
+        self.assertNotRegex(plan, r"(?m)^- \[ \]")
+        self.assertIn("Do not execute this page as a separate plan", plan)
+        self.assertIn("fail-closed", plan)
+        self.assertIn("controlling-terminal", plan)
+        self.assertIn("never store public IPs", plan)
+        self.assertIn("Rollback stops the selected acquisition services", plan)
+
+    def test_docs_and_help_expose_capabilities_not_a_brittle_sequence(self) -> None:
+        readme = (ROOT / "README.md").read_text(encoding="utf-8")
+        guide = (ROOT / "docs" / "agent-setup.md").read_text(encoding="utf-8")
+        quickstart = (ROOT / "docs" / "quickstart.md").read_text(encoding="utf-8")
+        configuration = (ROOT / "docs" / "configuration.md").read_text(encoding="utf-8")
+        agents = (ROOT / "AGENTS.md").read_text(encoding="utf-8")
+        env_example = (ROOT / ".env.example").read_text(encoding="utf-8")
+        top_help = subprocess.run(
+            [str(ROOT / "scripts" / "homeflix"), "--help"],
+            check=False, capture_output=True, text=True,
+        )
+        verify_help = subprocess.run(
+            [str(ROOT / "scripts" / "homeflix"), "verify", "--help"],
+            check=False, capture_output=True, text=True,
+        )
+        setup_help = subprocess.run(
+            [str(ROOT / "scripts" / "homeflix"), "setup", "--help"],
+            check=False, capture_output=True, text=True,
+        )
+        backup_help = subprocess.run(
+            [str(ROOT / "scripts" / "homeflix"), "backup", "--help"],
+            check=False, capture_output=True, text=True,
+        )
+        self.assertEqual(top_help.returncode, 0, top_help.stderr)
+        self.assertEqual(verify_help.returncode, 0, verify_help.stderr)
+        self.assertEqual(setup_help.returncode, 0, setup_help.stderr)
+        self.assertEqual(backup_help.returncode, 0, backup_help.stderr)
+        self.assertIn("preflight", top_help.stdout)
+        self.assertIn("verify", top_help.stdout)
+        self.assertIn("backup", top_help.stdout)
+        self.assertIn("vpn --disrupt", top_help.stdout)
+        for phase in ("core", "contract", "vpn", "acquisition"):
+            self.assertIn(phase, verify_help.stdout)
+        self.assertIn("--disrupt", verify_help.stdout)
+        self.assertIn("--clients", setup_help.stdout)
+        self.assertIn("torrent", setup_help.stdout)
+        self.assertIn("{create,list,retrieve,prune,restore}", backup_help.stdout)
+        for document in (guide, quickstart):
+            self.assertIn("--clients", document)
+            self.assertIn("verify vpn --disrupt", document)
+            self.assertIn("backup create", document)
+        self.assertIn("capabilities, not a universal script", guide)
+        self.assertNotIn("planned follow-ups, not shipped setup phases", readme)
+        self.assertIn("fixture-accepted", readme)
+        self.assertIn("secrets vpn", configuration)
+        self.assertNotIn("There is no VPN-secret setup command in the current core slice.", configuration)
+        self.assertNotIn("scripts/preflight.sh sources this file", env_example)
+        self.assertNotIn("it reads `.env`", agents)
+        self.assertIn("scripts/homeflix preflight", agents)
+
+    def test_verify_remains_cli_only_without_verify_sh(self) -> None:
+        self.assertFalse((ROOT / "scripts" / "verify.sh").exists())
+        self.assertTrue((ROOT / "scripts" / "homeflix").is_file())
+        help_text = subprocess.run(
+            [str(ROOT / "scripts" / "homeflix"), "verify", "--help"],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(help_text.returncode, 0, help_text.stderr)
+        self.assertIn("contract", help_text.stdout)
+        self.assertIn("core", help_text.stdout)
+        self.assertIn("vpn", help_text.stdout)
+        self.assertIn("--disrupt", help_text.stdout)
+        self.assertIn("acquisition", help_text.stdout)
 
     def test_public_environment_template_uses_only_portable_examples(self) -> None:
         template = (ROOT / ".env.example").read_text(encoding="utf-8")

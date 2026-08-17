@@ -22,9 +22,12 @@ Open the checkout with a capable coding agent and paste one of these exact inten
 
 The current CLI supports **local Debian/Ubuntu with existing mounted storage**. It runs in the
 target checkout and does not provide SSH transport; an agent may use its own SSH capability.
-Core includes Traefik, Jellyfin, Jellyseerr, Radarr, and Sonarr. Encrypted storage and acquisition
-(VPN/download/indexer services) are planned follow-ups, not shipped setup phases. Automation is
-fixture-tested only and has not received disposable real-host Debian/Ubuntu acceptance.
+Core includes Traefik, Jellyfin, Jellyseerr, Radarr, and Sonarr. Acquisition
+(`setup acquisition --clients`), verification modes (`verify contract`, `verify core`,
+`verify vpn`, `verify vpn --disrupt`), and CONFIG_ROOT backup are shipped CLI
+capabilities. Encrypted-storage provisioning remains a later slice. Automation is
+fixture-accepted only; disposable-host and private-production live acceptance remain
+separate.
 
 Start with the [agent setup guide](docs/agent-setup.md), which requires capability discovery,
 reviewed mutation plans, secure human gates, and live evidence before completion.

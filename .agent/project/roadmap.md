@@ -1,7 +1,7 @@
 # homeflix — Build Roadmap
 
-Status: In progress (design done; deploying)
-Updated: 2026-06-14
+Status: In progress (public operations program fixture-accepted; live host deploy remains)
+Updated: 2026-08-17
 
 The spine of the build. Because a full design already exists (the prior private design package),
 Phase 0 is largely complete — the focus is reconcile → deploy → verify → close gaps.
@@ -68,6 +68,9 @@ Phase 0 is largely complete — the focus is reconcile → deploy → verify →
 
 ## Phase 6 — Polish & v2 wishlist
 From `tasks/parking-lot.md`: more libraries, 4K, better metadata, etc.
+
+The public deep-operations program (#4–#13) is fixture-accepted. Disposable-host
+and private-production live acceptance remain separate from that fixture claim.
 
 ## Active phase
 See `tasks/active.md`.

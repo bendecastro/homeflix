@@ -1,7 +1,7 @@
 # Agent-first setup
 
 Status: Approved
-Updated: 2026-08-09
+Updated: 2026-08-17
 
 ## Goal
 
@@ -28,9 +28,11 @@ provisioning does not claim to support them initially.
 The existing-storage core slice is implemented for a checkout running locally on a Debian or
 Ubuntu target and passes fixture acceptance, including interruption-safe resume. The CLI has no
 SSH transport; an agent may operate a target checkout through its own SSH capability. The
-encrypted-storage and VPN/acquisition slices remain approved follow-up plans, not shipped
-features. No disposable real-host acceptance has occurred, so the public implementation is not
-yet described as generally production-verified.
+VPN/acquisition program (issues #4–#13) is fixture-accepted shipped CLI: stack contract,
+truthful verification, fail-closed backup, the VPN gate, and selected acquisition. Encrypted
+storage remains a later approved follow-up plan, not a shipped feature. Disposable-host and
+private-production live acceptance remain separate. No disposable real-host acceptance has
+occurred, so the public implementation is not yet described as generally production-verified.
 
 ## Architecture
 
@@ -107,10 +109,12 @@ Direct host ports provide a working fallback while LAN DNS remains unconfigured.
 2. [Encrypted storage provisioning](agent-first-storage-plan.md): optional guarded LUKS2 and
    ext4 preparation plus recovery artifacts.
 3. [Deep Homeflix operations](../../docs/changes/deep-homeflix-operations/prd.md), issues
-   #9–#13: secure VPN handoff, kill-switch gate, and download/indexer integration. This
-   supersedes the earlier acquisition implementation plan.
+   #4–#13: stack contract, truthful verification, reliable discovery, fail-closed
+   backup, VPN gate, selected acquisition, and program fixture acceptance. This
+   supersedes the earlier acquisition implementation plan. The program is
+   fixture-accepted only.
 
-Each slice is independently testable and useful. Core setup ships first.
+Each slice is independently testable and useful. Core setup shipped first.
 
 ## Success criteria
 

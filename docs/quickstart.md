@@ -94,12 +94,22 @@ credentials, when Usenet is selected, enter only via `scripts/homeflix secrets u
 ## 5. Preflight
 
 ```bash
-./scripts/preflight.sh
+./scripts/homeflix preflight
+# compatibility adapter (same command): ./scripts/preflight.sh
 ```
 
-This verifies Docker, your `.env`, the folder layout, ownership, free space, and the
-compose file. Most importantly it **creates an actual hardlink** between `torrents/` and
-`media/` and confirms both names share one inode.
+This is `scripts/homeflix preflight`, not a separate checker. The wrapper execs that
+CLI and does not source `.env`. The command validates configuration and storage
+without starting containers. Most importantly it **creates an actual hardlink**
+between `torrents/` and `media/` and confirms both names share one inode.
+
+Other CLI capabilities, used when needed rather than as one required sequence:
+
+- Acquisition: `scripts/homeflix --json setup acquisition --clients {torrent,usenet,both}`
+- Verification: `scripts/homeflix --json verify {contract,core,vpn,acquisition}`
+  and the explicit `verify vpn --disrupt` fail-closed exception
+- Backup: `scripts/homeflix --json backup create` (also `list` / `retrieve` / `prune` /
+  scratch `restore`)
 
 Fix anything it reports before continuing. A failure here is much cheaper than
 discovering the same problem after you've built a library.

@@ -22,7 +22,9 @@ selection, including QuickSync and temporary direct setup ports.
 The generated Jellyfin administrator credential remains only in `.env`. Retrieve it explicitly
 through an unredirected controlling terminal with `scripts/homeflix secrets reveal jellyfin`.
 The reveal command refuses JSON and pipes; do not transcribe the values into setup state or chat.
-There is no VPN-secret setup command in the current core slice.
+VPN provider credentials enter only through `scripts/homeflix secrets vpn` on a controlling
+terminal. Usenet news-server credentials enter only through `scripts/homeflix secrets usenet`.
+Neither command accepts secret values as arguments or JSON.
 
 ## Storage
 

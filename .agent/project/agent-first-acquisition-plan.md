@@ -1,7 +1,7 @@
 # Agent-first Acquisition Setup Implementation Plan
 
 Status: Superseded by [Deep Homeflix operations](../../docs/changes/deep-homeflix-operations/prd.md) / parent #3
-Updated: 2026-08-14
+Updated: 2026-08-17
 
 **Goal:** Resume a verified core deployment into a VPN-gated acquisition stack, with secure provider-secret entry, demonstrated tunnel/fail-closed behavior, and automated connections among download clients, Prowlarr, Radarr, and Sonarr.
 
@@ -9,7 +9,11 @@ Updated: 2026-08-14
 
 **Tech stack:** Python 3 standard library, `unittest`, Docker Compose v2, Gluetun, qBittorrent Web API, NZBGet JSON-RPC, Prowlarr/Radarr/Sonarr API v3.
 
-**Execution note:** Do not execute this page as a separate plan. Its accepted safety decisions and remaining work were absorbed into public issues #9–#13 so there is one dependency-ordered queue.
+**Execution note:** Do not execute this page as a separate plan. It is a historical record.
+Its accepted safety decisions were absorbed into public issues #9–#12 and the program
+fixture-acceptance handoff in #13. Items below that still describe work are
+**historical / absorbed**, not an executable queue. Live request-to-library,
+disposable-host, and private-production acceptance remain separate.
 
 ---
 
@@ -45,7 +49,7 @@ Updated: 2026-08-14
 - [x] Implement `read_from_tty(prompt, confirm=False)`, `set_vpn_secrets(provider, vpn_type)`, and `secrets vpn`. Never accept secret values as CLI arguments or JSON input.
 - [x] Extend acquisition preflight so missing keys fail acquisition but leave `status` and core operations usable.
 - [x] Run targeted tests and scan captured output for fixture secret values; expect no matches.
-- [ ] Commit with `git add .env.example scripts/homeflix_setup/secrets.py scripts/homeflix_setup/preflight.py scripts/homeflix_setup/cli.py tests/test_acquisition.py tests/test_envfile.py && git commit -m "Add secure VPN credential handoff"`.
+- Historical / absorbed — Commit with `git add .env.example scripts/homeflix_setup/secrets.py scripts/homeflix_setup/preflight.py scripts/homeflix_setup/cli.py tests/test_acquisition.py tests/test_envfile.py && git commit -m "Add secure VPN credential handoff"`.
 
 ## Task 2: Start and verify Gluetun before any client
 
@@ -55,50 +59,50 @@ Updated: 2026-08-14
 - [x] Implement `GluetunStatus`, `start_gluetun_only()`, `wait_gluetun_healthy()`, `resolve_in_namespace()`, and `compare_egress()` using bounded timeouts and redacted diagnostics.
 - [x] Pin the Gluetun-only allowlist in code; assert in tests that it excludes qBittorrent, NZBGet, and Prowlarr.
 - [x] Run VPN tests plus a dry-run JSON plan; expect only Gluetun mutation.
-- [ ] Commit with `git add scripts/homeflix_setup/vpn.py scripts/homeflix_setup/compose.py scripts/homeflix_setup/cli.py tests/test_vpn.py tests/fixtures/acquisition && git commit -m "Gate acquisition on verified VPN egress"`.
+- Historical / absorbed — Commit with `git add scripts/homeflix_setup/vpn.py scripts/homeflix_setup/compose.py scripts/homeflix_setup/cli.py tests/test_vpn.py tests/fixtures/acquisition && git commit -m "Gate acquisition on verified VPN egress"`.
 
 ## Task 3: Prove fail-closed behavior and recover the tunnel
 
-- [ ] Add failing fake-runner tests for discovering the active tunnel interface from Gluetun routes, bringing only that interface down, proving a bounded HTTPS request from the same namespace fails, restoring/restarting Gluetun, and repeating health/egress checks.
-- [ ] Add safety tests refusing the loopback, Ethernet/default Docker, or unknown interface; cleanup must execute after timeout, failed probe, or interruption.
-- [ ] Run `python3 -m unittest tests.test_vpn -v`; expect failures.
-- [ ] Implement `discover_tunnel_interface()`, `set_link_state()`, `probe_external_access()`, and `verify_fail_closed()` with `try/finally`. A passing result requires: tunnel-up egress succeeds, tunnel-down egress fails, recovery becomes healthy, and recovered egress succeeds through a non-host address.
-- [ ] Store only timestamp, Gluetun image identity, and boolean evidence in setup state; never store public IPs.
-- [ ] Make verification expire when Gluetun's image/configuration changes or after 24 hours, requiring re-verification before a fresh acquisition deploy.
-- [ ] Run tests and inspect dry-run command ordering; expect cleanup/recovery after every injected failure.
-- [ ] Commit with `git add scripts/homeflix_setup/vpn.py scripts/homeflix_setup/state.py tests/test_vpn.py && git commit -m "Verify VPN fail-closed behavior"`.
+- Historical / absorbed — Add failing fake-runner tests for discovering the active tunnel interface from Gluetun routes, bringing only that interface down, proving a bounded HTTPS request from the same namespace fails, restoring/restarting Gluetun, and repeating health/egress checks.
+- Historical / absorbed — Add safety tests refusing the loopback, Ethernet/default Docker, or unknown interface; cleanup must execute after timeout, failed probe, or interruption.
+- Historical / absorbed — Run `python3 -m unittest tests.test_vpn -v`; expect failures.
+- Historical / absorbed — Implement `discover_tunnel_interface()`, `set_link_state()`, `probe_external_access()`, and `verify_fail_closed()` with `try/finally`. A passing result requires: tunnel-up egress succeeds, tunnel-down egress fails, recovery becomes healthy, and recovered egress succeeds through a non-host address.
+- Historical / absorbed — Store only timestamp, Gluetun image identity, and boolean evidence in setup state; never store public IPs.
+- Historical / absorbed — Make verification expire when Gluetun's image/configuration changes or after 24 hours, requiring re-verification before a fresh acquisition deploy.
+- Historical / absorbed — Run tests and inspect dry-run command ordering; expect cleanup/recovery after every injected failure.
+- Historical / absorbed — Commit with `git add scripts/homeflix_setup/vpn.py scripts/homeflix_setup/state.py tests/test_vpn.py && git commit -m "Verify VPN fail-closed behavior"`.
 
 ## Task 4: Configure qBittorrent and optional NZBGet securely
 
-- [ ] Add qBittorrent fixture tests for extracting the temporary password from bounded container logs, authenticating, replacing it with a generated `.env` credential, setting `/data/torrents` paths, disabling alternate paths, creating movies/tv/music categories, and reconciling reruns.
-- [ ] Add NZBGet tests for generated UI credentials, `/data/usenet/{incomplete,complete}` paths, category destinations, and leaving provider servers disabled until securely supplied credentials are present.
-- [ ] Run `python3 -m unittest tests.test_api_qbittorrent tests.test_api_nzbget -v`; expect failures.
-- [ ] Implement `QBittorrentClient` and `NzbgetClient`; ensure temporary/default credentials are never returned in command output and generated values are written only to `.env`.
-- [ ] Start only the user-selected clients (`torrent`, `usenet`, or both) after a current VPN verification. Do not start NZBGet merely because it exists in Compose.
-- [ ] Run targeted API tests and the full secret-output scan.
-- [ ] Commit with `git add scripts/homeflix_setup/api/qbittorrent.py scripts/homeflix_setup/api/nzbget.py scripts/homeflix_setup/acquisition.py scripts/homeflix_setup/cli.py tests/test_api_qbittorrent.py tests/test_api_nzbget.py tests/fixtures/acquisition && git commit -m "Configure VPN-backed download clients"`.
+- Historical / absorbed — Add qBittorrent fixture tests for extracting the temporary password from bounded container logs, authenticating, replacing it with a generated `.env` credential, setting `/data/torrents` paths, disabling alternate paths, creating movies/tv/music categories, and reconciling reruns.
+- Historical / absorbed — Add NZBGet tests for generated UI credentials, `/data/usenet/{incomplete,complete}` paths, category destinations, and leaving provider servers disabled until securely supplied credentials are present.
+- Historical / absorbed — Run `python3 -m unittest tests.test_api_qbittorrent tests.test_api_nzbget -v`; expect failures.
+- Historical / absorbed — Implement `QBittorrentClient` and `NzbgetClient`; ensure temporary/default credentials are never returned in command output and generated values are written only to `.env`.
+- Historical / absorbed — Start only the user-selected clients (`torrent`, `usenet`, or both) after a current VPN verification. Do not start NZBGet merely because it exists in Compose.
+- Historical / absorbed — Run targeted API tests and the full secret-output scan.
+- Historical / absorbed — Commit with `git add scripts/homeflix_setup/api/qbittorrent.py scripts/homeflix_setup/api/nzbget.py scripts/homeflix_setup/acquisition.py scripts/homeflix_setup/cli.py tests/test_api_qbittorrent.py tests/test_api_nzbget.py tests/fixtures/acquisition && git commit -m "Configure VPN-backed download clients"`.
 
 ## Task 5: Connect Prowlarr, Radarr, and Sonarr
 
-- [ ] Add Prowlarr fixture tests for reading its config API key, adding Radarr/Sonarr applications with Docker service addresses, syncing only enabled indexers, and accepting equivalent existing apps.
-- [ ] Extend Arr tests for qBittorrent at `gluetun:${QBITTORRENT_PORT}` with movies/tv categories, optional NZBGet at `gluetun:${NZBGET_PORT}`, completed-download handling, and hardlink import settings.
-- [ ] Add tests proving `localhost`, host-published ports, and a direct non-Gluetun client address are rejected for these connections.
-- [ ] Run `python3 -m unittest tests.test_api_prowlarr tests.test_api_arr -v`; expect failures.
-- [ ] Implement `ProwlarrClient`, Arr download-client reconciliation, and `configure_acquisition()`. Start Prowlarr only after the VPN gate; provider-specific indexers remain disabled until the user supplies their credentials securely.
-- [ ] Return configured service names and booleans only; redact all API keys and provider URLs containing credentials.
-- [ ] Run targeted and full tests.
-- [ ] Commit with `git add scripts/homeflix_setup/api/prowlarr.py scripts/homeflix_setup/api/arr.py scripts/homeflix_setup/acquisition.py tests/test_api_prowlarr.py tests/test_api_arr.py tests/fixtures/acquisition && git commit -m "Connect acquisition services"`.
+- Historical / absorbed — Add Prowlarr fixture tests for reading its config API key, adding Radarr/Sonarr applications with Docker service addresses, syncing only enabled indexers, and accepting equivalent existing apps.
+- Historical / absorbed — Extend Arr tests for qBittorrent at `gluetun:${QBITTORRENT_PORT}` with movies/tv categories, optional NZBGet at `gluetun:${NZBGET_PORT}`, completed-download handling, and hardlink import settings.
+- Historical / absorbed — Add tests proving `localhost`, host-published ports, and a direct non-Gluetun client address are rejected for these connections.
+- Historical / absorbed — Run `python3 -m unittest tests.test_api_prowlarr tests.test_api_arr -v`; expect failures.
+- Historical / absorbed — Implement `ProwlarrClient`, Arr download-client reconciliation, and `configure_acquisition()`. Start Prowlarr only after the VPN gate; provider-specific indexers remain disabled until the user supplies their credentials securely.
+- Historical / absorbed — Return configured service names and booleans only; redact all API keys and provider URLs containing credentials.
+- Historical / absorbed — Run targeted and full tests.
+- Historical / absorbed — Commit with `git add scripts/homeflix_setup/api/prowlarr.py scripts/homeflix_setup/api/arr.py scripts/homeflix_setup/acquisition.py tests/test_api_prowlarr.py tests/test_api_arr.py tests/fixtures/acquisition && git commit -m "Connect acquisition services"`.
 
 ## Task 6: Verify resumable acquisition and document remaining provider gates
 
-- [ ] Add acceptance tests proving acquisition cannot deploy with missing credentials, stale VPN evidence, failed tunnel recovery, or an unselected client; reruns must not duplicate categories/apps/clients.
-- [ ] Add verification for Gluetun health, network namespace sharing, selected client APIs, paths/categories, Arr clients, Prowlarr apps, and absence of unselected services.
-- [ ] Add a fixture end-to-end handoff that stops at “indexer/provider credentials required” without calling the setup complete when no usable indexer exists.
-- [ ] Implement `deploy_acquisition()`, `verify_acquisition()`, and the convenience `setup acquisition` composition.
-- [ ] Update agent/manual docs with the single secure credential command, evidence required before starting clients, optional torrent/Usenet choice, and the provider-specific indexer boundary.
-- [ ] Run the full suite, Compose validation, Markdown links, and dry-run plans for torrent-only, Usenet-only, and both.
-- [ ] Update the design page, active cursor, and log; claim request-to-playback success only after an authorized real title traverses the complete path.
-- [ ] Commit with `git add docs .agent scripts tests && git commit -m "Complete agent-led acquisition setup"`.
+- Historical / absorbed — Add acceptance tests proving acquisition cannot deploy with missing credentials, stale VPN evidence, failed tunnel recovery, or an unselected client; reruns must not duplicate categories/apps/clients.
+- Historical / absorbed — Add verification for Gluetun health, network namespace sharing, selected client APIs, paths/categories, Arr clients, Prowlarr apps, and absence of unselected services.
+- Historical / absorbed — Add a fixture end-to-end handoff that stops at “indexer/provider credentials required” without calling the setup complete when no usable indexer exists.
+- Historical / absorbed — Implement `deploy_acquisition()`, `verify_acquisition()`, and the convenience `setup acquisition` composition.
+- Historical / absorbed — Update agent/manual docs with the single secure credential command, evidence required before starting clients, optional torrent/Usenet choice, and the provider-specific indexer boundary.
+- Historical / absorbed — Run the full suite, Compose validation, Markdown links, and dry-run plans for torrent-only, Usenet-only, and both.
+- Historical / absorbed — Update the design page, active cursor, and log; claim request-to-playback success only after an authorized real title traverses the complete path.
+- Historical / absorbed — Commit with `git add docs .agent scripts tests && git commit -m "Complete agent-led acquisition setup"`.
 
 ## Validation
 

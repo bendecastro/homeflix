@@ -7,15 +7,12 @@ running homeflix.
 > **Status:** the portable stack is Compose-valid, and the existing-storage
 > [agent-first core setup](project/agent-first-core-setup-plan.md) is fixture-accepted with
 > resumable verification. The [deep operations PRD](../docs/changes/deep-homeflix-operations/prd.md)
-> is queued as parent **#3**. Slices **#4** (stack contract), **#5** (truthful
-> `verify core`), **#6** (reliable Jellyfin discovery), **#7** (fail-closed local
-> backup/scratch restore), **#8** (SSH artifact-repository parity), **#9** (secure
-> acquisition VPN gate), **#10** (VPN fail-closed prove-and-restore), **#11**
-> (torrent acquisition tracer), and **#12** (optional Usenet and phase-level
-> acquisition acceptance) are implemented in this tree.
-> Remaining slices cover program-level fixture acceptance.
-> Disposable-host and private-production live acceptance remain separate.
-> **#6–#12 are fixture-accepted only; they are not live production verification.**
+> program (parent **#3**, slices **#4–#13**) is fixture-accepted in this tree:
+> stack contract, truthful `verify core`, reliable Jellyfin discovery, fail-closed
+> local backup and SSH artifact-repository parity, the VPN gate and fail-closed
+> prove-and-restore, torrent and optional Usenet acquisition, and program-level
+> spec handoff. Disposable-host and private-production live acceptance remain separate.
+> **#4–#13 are fixture-accepted only; they are not live production verification.**
 
 **Two doors.** This wiki explains *why* homeflix is built the way it is. If you just want
 to run it, you want [`docs/`](../docs/) instead —

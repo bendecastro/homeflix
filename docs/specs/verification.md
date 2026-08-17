@@ -2,7 +2,7 @@
 
 ## Requirements
 
-- The system SHALL expose explicit static, read-only runtime, and disruptive verification intents. `(pending #3; static+runtime #5; VPN gate #9; fail-closed #10)`
+- The system SHALL expose explicit static, read-only runtime, and disruptive verification intents. `(satisfied #4 for static; satisfied #5 for runtime; satisfied #9 for VPN gate; satisfied #10 for fail-closed)`
 - Static verification SHALL validate configuration and the stack contract without requiring running containers. `(satisfied #4)`
 - Runtime verification SHALL remain non-destructive and SHALL fail when any mandatory runtime domain is unavailable, unknown, or skipped. `(satisfied #5; VPN gate #9)`
 - Optional or intentionally unselected capabilities MAY report not applicable without weakening mandatory evidence. `(satisfied #5)`
@@ -12,7 +12,8 @@
 - A disruptive verification success SHALL require healthy post-restore egress through a non-host address. `(satisfied #10)`
 - Verification output SHALL distinguish pass, warning, failure, not-applicable, and unknown outcomes. `(satisfied #5 for runtime; #9 for VPN gate; #10 for fail-closed)`
 - Verification SHALL emit bounded boolean evidence without public IPs, private addresses, API keys, passwords, forwarded-port values, or secret-bearing URLs. `(satisfied #5 for runtime; #9 for VPN gate; #10 for fail-closed)`
-- Fixture acceptance and live acceptance SHALL be reported as different evidence levels. `(satisfied #12 for phase-level acquisition fixture journeys; live request-to-library remains pending #3)`
+- Fixture acceptance and live acceptance SHALL be reported as different evidence levels. `(satisfied #12 for phase-level acquisition fixture journeys)`
+- Live request-to-library, disposable-host, and private-production live acceptance remain separate. They are not part of this program's fixture acceptance.
 
 ## Key scenarios
 
@@ -20,5 +21,5 @@
 2. Static verification runs successfully on a machine with no running Homeflix stack.
 3. Fail-closed verification is interrupted after tunnel disruption; compensation still restores the prior running service set.
 4. One dependent service fails to restart; the transaction fails and reports bounded recovery guidance.
-5. Fixture tests pass, but no real host has been exercised; completion is reported only as fixture acceptance.
+5. Fixture tests pass, but no real host has been exercised; completion is reported only as fixture acceptance. Disposable-host and private-production live acceptance remain separate.
 6. After disruption, a hung blocked-egress probe exhausts the prove deadline; compensation still issues `compose restart` for Gluetun and the snapshot.

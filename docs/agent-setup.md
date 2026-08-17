@@ -134,6 +134,24 @@ Until this is performed on a disposable real Debian/Ubuntu host, report only fix
 not production verification. For a fully manual alternative, use the [manual quickstart](quickstart.md).
 Configuration and local-artifact details are in the [configuration reference](configuration.md).
 
+## Other capabilities (select, do not sequence blindly)
+
+These are independent CLI capabilities. Use the smallest one that matches the current
+host and operator intent; do not replay them as a universal script.
+
+- **Acquisition** — after current fail-closed evidence, `scripts/homeflix --json setup
+  acquisition --clients {torrent,usenet,both}` (or `deploy` / `initialize` /
+  `verify acquisition`). Default is `torrent`, then the last successful selection.
+- **Verification modes** — `verify contract` is static. `verify core` is read-only
+  runtime. `verify vpn` is the non-disruptive gate. `verify vpn --disrupt` is the
+  explicit fail-closed exception and is never part of routine `verify core`.
+- **Backup** — `scripts/homeflix --json backup create` (also `list`, `retrieve`,
+  `prune`, `restore --to SCRATCH`). Compatibility shells remain
+  `scripts/backup-config.sh` and `scripts/restore-config.sh`. Restore is scratch-only.
+
+Disposable-host and private-production live acceptance remain separate from these
+fixture-accepted capabilities.
+
 ## After core (subtitles)
 
 Bazarr is intentionally **non-core** (with Lidarr and the VPN acquisition services). Once
