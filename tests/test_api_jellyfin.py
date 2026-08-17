@@ -546,6 +546,18 @@ class JellyfinApiTests(unittest.TestCase):
             db.chmod(0o644)
             self.assertEqual(read_jellyfin_api_key(root, os.getuid()), "HOMEFLIX_ARR_KEY_NOT_REAL")
 
+    def test_inspect_allows_missing_music_and_extra_collections(self):
+        transport = FixtureTransport([
+            (200, fixture("jellyfin-startup-complete.json")),
+            (200, [
+                {"Name": "Movies", "CollectionType": "movies", "Locations": ["/data/media/movies/"]},
+                {"Name": "Shows", "CollectionType": "tvshows", "Locations": ["/data/media/tv"]},
+                {"Name": "Collections", "CollectionType": "boxsets", "Locations": ["/data/media/movies"]},
+            ]),
+        ])
+        result = JellyfinClient(transport=transport).inspect("", "", access_token="JELLYFIN_DEDICATED_KEY_NOT_REAL")
+        self.assertEqual(result, {"initialized": True, "libraries_exact": True})
+
     def test_inspect_with_access_token_skips_password_login(self):
         transport = FixtureTransport([
             (200, fixture("jellyfin-startup-complete.json")),

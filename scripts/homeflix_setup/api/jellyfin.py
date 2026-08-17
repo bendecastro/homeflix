@@ -223,10 +223,14 @@ class JellyfinClient:
             )
             if not isinstance(existing, list):
                 raise ApiError("jellyfin", "inspect libraries", None, "invalid_response")
-            exact = len(existing) == len(LIBRARIES) and all(
-                sum(1 for item in existing if self._library_equivalent(item, name, kind, path)) == 1
-                for name, (kind, path) in LIBRARIES.items()
+            required = ("Movies", "Shows")
+            exact = all(
+                sum(1 for item in existing if self._library_equivalent(item, name, *LIBRARIES[name])) == 1
+                for name in required
             )
+            music = [item for item in existing if isinstance(item, dict) and item.get("Name") == "Music"]
+            if music:
+                exact = exact and len(music) == 1 and self._library_equivalent(music[0], "Music", *LIBRARIES["Music"])
         except Exception:
             if session_login:
                 try:
