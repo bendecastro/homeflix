@@ -22,7 +22,8 @@ _TOKEN_HEADER = "X-Emby-Token"
 _MEDIA_BROWSER = "MediaBrowser"
 _WEBHOOK = "Webhook"
 _QBITTORRENT = "QBittorrent"
-_FORBIDDEN_DOWNLOAD_HOSTS = {"localhost", "127.0.0.1", "::1", "qbittorrent", "0.0.0.0"}
+_NZBGET = "Nzbget"
+_FORBIDDEN_DOWNLOAD_HOSTS = {"localhost", "127.0.0.1", "::1", "qbittorrent", "nzbget", "0.0.0.0"}
 
 _RADARR_EVENTS = {
     "onGrab": False,
@@ -336,10 +337,17 @@ class ArrClient:
         return "movies" if self.service == "radarr" else "tv"
 
     def _qbittorrent_matches(self, items: list[Mapping[str, Any]]) -> list[Mapping[str, Any]]:
-        return [item for item in items if item.get("implementation") == _QBITTORRENT]
+        return self._implementation_matches(items, _QBITTORRENT)
 
-    def inspect_download_client(self, *, host: str, port: int) -> dict[str, object]:
-        matches = self._qbittorrent_matches(self._download_clients("inspect download clients"))
+    def _implementation_matches(self, items: list[Mapping[str, Any]], implementation: str) -> list[Mapping[str, Any]]:
+        return [item for item in items if item.get("implementation") == implementation]
+
+    def inspect_download_client(
+        self, *, host: str, port: int, implementation: str = _QBITTORRENT
+    ) -> dict[str, object]:
+        matches = self._implementation_matches(
+            self._download_clients("inspect download clients"), implementation
+        )
         empty = {
             "present": False,
             "exact": False,
@@ -425,6 +433,74 @@ class ArrClient:
             "name": "qBittorrent",
             "implementation": _QBITTORRENT,
             "configContract": "QBittorrentSettings",
+            "removeCompletedDownloads": False,
+            "fields": owned_fields,
+        }
+        created = self.http.request("POST", "/api/v3/downloadclient", operation="create download client", payload=payload)
+        if not isinstance(created, dict) or type(created.get("id")) is not int:
+            raise ApiError(self.service, "create download client", None, "invalid_response")
+        return True
+
+    def ensure_nzbget_client(
+        self,
+        *,
+        host: str,
+        port: int,
+        username: str,
+        password: str,
+        force_password: bool = False,
+    ) -> bool:
+        if not isinstance(host, str) or host.strip().casefold() in _FORBIDDEN_DOWNLOAD_HOSTS:
+            raise ApiError(self.service, "reconcile download client", None, "invalid_download_client_host")
+        if type(port) is not int or not 1 <= port <= 65535:
+            raise ApiError(self.service, "reconcile download client", None, "invalid_download_client_port")
+        current = self._download_clients("list download clients")
+        matches = self._implementation_matches(current, _NZBGET)
+        if len(matches) > 1:
+            raise ApiError(self.service, "reconcile download client", None, "download_client_conflict")
+        category_field = self._category_field()
+        category = self._desired_category()
+        owned_fields = [
+            {"name": "host", "value": host},
+            {"name": "port", "value": port},
+            {"name": "useSsl", "value": False},
+            {"name": "username", "value": username},
+            {"name": "password", "value": password},
+            {"name": category_field, "value": category},
+        ]
+        if matches:
+            item = dict(matches[0])
+            inspected = self.inspect_download_client(host=host, port=port, implementation=_NZBGET)
+            if (
+                inspected.get("exact") is True
+                and _field_value(item, "username") == username
+                and not force_password
+            ):
+                return False
+            if type(item.get("id")) is not int:
+                raise ApiError(self.service, "reconcile download client", None, "invalid_response")
+            fields = item.get("fields")
+            field_list = [dict(field) for field in fields] if isinstance(fields, list) else []
+            values = {field["name"]: field for field in field_list if isinstance(field, dict) and "name" in field}
+            for field in owned_fields:
+                values[field["name"]] = {**values.get(field["name"], {}), **field}
+            item["fields"] = list(values.values())
+            item["enable"] = True
+            item["removeCompletedDownloads"] = False
+            item["implementation"] = _NZBGET
+            item["configContract"] = "NzbgetSettings"
+            self.http.request(
+                "PUT",
+                f"/api/v3/downloadclient/{item['id']}",
+                operation="update download client",
+                payload=item,
+            )
+            return True
+        payload = {
+            "enable": True,
+            "name": "NZBGet",
+            "implementation": _NZBGET,
+            "configContract": "NzbgetSettings",
             "removeCompletedDownloads": False,
             "fields": owned_fields,
         }

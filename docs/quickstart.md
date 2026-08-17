@@ -84,6 +84,13 @@ dashboard — *not* your login password.
 The VPN is not optional: qBittorrent, NZBGet and Prowlarr have no network path except
 through it, and the kill switch fails closed.
 
+The CLI acquisition path is optional and selected: `scripts/homeflix --json setup
+acquisition --clients {torrent,usenet,both}` (default `torrent`) starts only the selected
+clients plus Prowlarr after current fail-closed evidence. That path is **fixture-accepted
+only**. It is not live request-to-library proof, and it is not the same as
+`docker compose up -d`, which starts every service defined in Compose. News-server
+credentials, when Usenet is selected, enter only via `scripts/homeflix secrets usenet`.
+
 ## 5. Preflight
 
 ```bash

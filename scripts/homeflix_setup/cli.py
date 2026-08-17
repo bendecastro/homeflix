@@ -16,7 +16,16 @@ from .backup import BackupError, create_backup, list_backups, prune_backups, res
 from .command import CommandRunner
 from .compose import configure, render_compose_config
 from .contract import evaluate_stack_contract
-from .acquisition import configure_acquisition, deploy_acquisition, verify_acquisition
+from .acquisition import (
+    configure_acquisition,
+    deploy_acquisition,
+    resolve_clients,
+    selected_services,
+    selection_changed,
+    unselected_download_clients,
+    verify_acquisition,
+)
+from .state import ACQUISITION_CLIENT_SELECTIONS
 from .core import READINESS_TIMEOUT, _load_private_environment, configure_core, deploy_core, verify_core
 from .discover import HostFacts, discover_host
 from .envfile import EnvDocument
@@ -82,10 +91,18 @@ def build_parser() -> argparse.ArgumentParser:
         "preflight", help="validate configuration and storage without starting containers"
     )
     preflight_parser.add_argument("--phase", choices=("core", "acquisition"), default="core")
+    def add_clients_flag(parser: argparse.ArgumentParser) -> None:
+        parser.add_argument(
+            "--clients",
+            choices=ACQUISITION_CLIENT_SELECTIONS,
+            help="acquisition download clients (default: torrent, or last successful selection)",
+        )
+
     initialize_parser = subparsers.add_parser(
         "initialize", help="reconcile application APIs after core deployment"
     )
     initialize_parser.add_argument("phase", choices=("core", "acquisition"))
+    add_clients_flag(initialize_parser)
     deploy_parser = subparsers.add_parser(
         "deploy", help="reconcile an explicit deployment phase allowlist"
     )
@@ -93,6 +110,7 @@ def build_parser() -> argparse.ArgumentParser:
     deploy_parser.add_argument(
         "--dry-run", action="store_true", help="print exact planned commands without probing or changing the host"
     )
+    add_clients_flag(deploy_parser)
     verify_parser = subparsers.add_parser(
         "verify",
         help="inspect a deployment phase; vpn --disrupt is the explicit fail-closed exception",
@@ -103,6 +121,7 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="run explicit fail-closed VPN disruption (vpn phase only)",
     )
+    add_clients_flag(verify_parser)
     setup_parser = subparsers.add_parser("setup", help="run a resumable convenience setup composition")
     setup_parser.add_argument("phase", choices=("core", "acquisition"))
     setup_parser.add_argument("--dry-run", action="store_true")
@@ -111,11 +130,13 @@ def build_parser() -> argparse.ArgumentParser:
     setup_parser.add_argument("--cache-root")
     setup_parser.add_argument("--quality-profile")
     setup_parser.add_argument("--direct-setup-ports", action="store_true")
+    add_clients_flag(setup_parser)
     secrets_parser = subparsers.add_parser("secrets", help="explicitly retrieve local credentials")
     secrets_subparsers = secrets_parser.add_subparsers(dest="secrets_command", required=True)
     reveal_parser = secrets_subparsers.add_parser("reveal", help="reveal credentials on /dev/tty only")
     reveal_parser.add_argument("service", choices=("jellyfin",))
     secrets_subparsers.add_parser("vpn", help="enter VPN provider credentials on /dev/tty only")
+    secrets_subparsers.add_parser("usenet", help="enter Usenet news-server credentials on /dev/tty only")
     vpn_parser = subparsers.add_parser("vpn", help="acquisition VPN gate")
     vpn_subparsers = vpn_parser.add_subparsers(dest="vpn_command", required=True)
     vpn_verify_parser = vpn_subparsers.add_parser(
@@ -184,6 +205,14 @@ def _status(repository_root: Path) -> dict[str, object]:
 def main(argv: Sequence[str] | None = None, *, repository_root: Path | None = None) -> int:
     arguments = build_parser().parse_args(argv)
     root = repository_root or Path(__file__).resolve().parents[2]
+    requested_clients = getattr(arguments, "clients", None)
+    if requested_clients is not None and getattr(arguments, "phase", None) != "acquisition":
+        return _input_error(
+            json_output=arguments.json_output,
+            code="invalid_clients",
+            label="clients refused",
+            error=RuntimeError("--clients applies only to the acquisition phase"),
+        )
 
     discovered: HostFacts | None = None
     preparation: HostPreparationPlan | None = None
@@ -195,13 +224,19 @@ def main(argv: Sequence[str] | None = None, *, repository_root: Path | None = No
         if not all(stream.isatty() for stream in (sys.stdin, sys.stdout, sys.stderr)):
             print("homeflix: secret operations require an unredirected controlling terminal", file=sys.stderr)
             return 2
-        if arguments.secrets_command == "vpn":
+        if arguments.secrets_command in {"vpn", "usenet"}:
+            label = "VPN" if arguments.secrets_command == "vpn" else "Usenet"
             try:
-                from .secrets import set_vpn_secrets
+                if arguments.secrets_command == "vpn":
+                    from .secrets import set_vpn_secrets
 
-                result = set_vpn_secrets(root / ".env")
+                    result = set_vpn_secrets(root / ".env")
+                else:
+                    from .secrets import set_usenet_secrets
+
+                    result = set_usenet_secrets(root / ".env")
             except (OSError, ValueError, RuntimeError) as error:
-                print(f"homeflix: unable to store VPN credentials: {error}", file=sys.stderr)
+                print(f"homeflix: unable to store {label} credentials: {error}", file=sys.stderr)
                 return 1
             for item in result.get("keys", []):
                 print(f"{item['name']}: {item['status']}")
@@ -314,7 +349,7 @@ def main(argv: Sequence[str] | None = None, *, repository_root: Path | None = No
             )
     elif arguments.command == "initialize" and arguments.phase == "acquisition":
         try:
-            result = configure_acquisition(root)
+            result = configure_acquisition(root, clients=requested_clients)
         except ApiError as error:
             return _input_error(
                 json_output=arguments.json_output,
@@ -377,7 +412,7 @@ def main(argv: Sequence[str] | None = None, *, repository_root: Path | None = No
                 error=RuntimeError("disruptive verification applies only to verify vpn"),
             )
         try:
-            result = verify_acquisition(root)
+            result = verify_acquisition(root, clients=requested_clients)
         except (OSError, RuntimeError, ValueError, subprocess.SubprocessError):
             return _input_error(
                 json_output=arguments.json_output,
@@ -511,20 +546,36 @@ def main(argv: Sequence[str] | None = None, *, repository_root: Path | None = No
                                                 result = {"status": "verified", "phases": phases, "verify": verified}
     elif arguments.command == "setup" and arguments.phase == "acquisition":
         if arguments.dry_run:
+            selection = resolve_clients(root, requested_clients)
+            services = list(selected_services(selection))
+            gated = [service for service in services if service != "gluetun"]
+            human_inputs = ["provider/indexer credentials when no usable indexer exists"]
+            if selection in {"usenet", "both"}:
+                human_inputs.append("news-server credentials via secrets usenet")
+            compose_prefix = ["docker", "compose", "--project-name", "homeflix"]
+            commands = [
+                ["scripts/homeflix", "preflight", "--phase", "acquisition"],
+                [*compose_prefix, "up", "--detach", "--no-deps", "gluetun"],
+                [*compose_prefix, "up", "--detach", "--no-deps", *gated],
+            ]
+            unselected = unselected_download_clients(selection)
+            if selection_changed(root, requested_clients) and unselected:
+                commands.append([*compose_prefix, "stop", *unselected])
+            commands.extend(
+                [
+                    ["scripts/homeflix", "initialize", "acquisition", "--clients", selection],
+                    ["scripts/homeflix", "verify", "acquisition", "--clients", selection],
+                ]
+            )
             result = {
                 "status": "planned",
                 "state_written": False,
+                "clients": selection,
                 "phases": ["preflight:acquisition", "deploy:acquisition", "initialize:acquisition", "verify:acquisition"],
-                "services": ["gluetun", "qbittorrent", "prowlarr"],
-                "commands": [
-                    ["scripts/homeflix", "preflight", "--phase", "acquisition"],
-                    ["docker", "compose", "--project-name", "homeflix", "up", "--detach", "--no-deps", "gluetun"],
-                    ["docker", "compose", "--project-name", "homeflix", "up", "--detach", "--no-deps", "qbittorrent", "prowlarr"],
-                    ["scripts/homeflix", "initialize", "acquisition"],
-                    ["scripts/homeflix", "verify", "acquisition"],
-                ],
-                "required_human_inputs": ["provider/indexer credentials when no usable indexer exists"],
-                "acquisition_mutations": ["gluetun", "qbittorrent", "prowlarr"],
+                "services": services,
+                "commands": commands,
+                "required_human_inputs": human_inputs,
+                "acquisition_mutations": services,
             }
         else:
             operation_deadline = time.monotonic() + READINESS_TIMEOUT
@@ -553,7 +604,7 @@ def main(argv: Sequence[str] | None = None, *, repository_root: Path | None = No
                 else:
                     phases.append({"phase": "preflight:acquisition", "status": "pass"})
                     try:
-                        deployed = deploy_acquisition(root, deadline=operation_deadline)
+                        deployed = deploy_acquisition(root, deadline=operation_deadline, clients=requested_clients)
                     except TimeoutError:
                         result = stop_acquisition("timeout", "deploy:acquisition")
                     except (OSError, RuntimeError, ValueError, subprocess.SubprocessError):
@@ -564,7 +615,7 @@ def main(argv: Sequence[str] | None = None, *, repository_root: Path | None = No
                         else:
                             phases.append({"phase": "deploy:acquisition", "status": "complete"})
                             try:
-                                initialized = configure_acquisition(root, deadline=operation_deadline)
+                                initialized = configure_acquisition(root, deadline=operation_deadline, clients=requested_clients)
                             except TimeoutError:
                                 result = stop_acquisition("timeout", "initialize:acquisition")
                             except ApiError as error:
@@ -577,7 +628,7 @@ def main(argv: Sequence[str] | None = None, *, repository_root: Path | None = No
                             else:
                                 phases.append({"phase": "initialize:acquisition", "status": "complete"})
                                 try:
-                                    verified = verify_acquisition(root, deadline=operation_deadline)
+                                    verified = verify_acquisition(root, deadline=operation_deadline, clients=requested_clients)
                                 except (OSError, RuntimeError, ValueError, subprocess.SubprocessError):
                                     result = stop_acquisition("verification_failed", "verify:acquisition")
                                 else:
@@ -606,7 +657,7 @@ def main(argv: Sequence[str] | None = None, *, repository_root: Path | None = No
             )
     elif arguments.command == "deploy" and arguments.phase == "acquisition":
         try:
-            result = deploy_acquisition(root, dry_run=arguments.dry_run)
+            result = deploy_acquisition(root, dry_run=arguments.dry_run, clients=requested_clients)
         except (OSError, RuntimeError, ValueError, subprocess.SubprocessError):
             return _input_error(
                 json_output=arguments.json_output,

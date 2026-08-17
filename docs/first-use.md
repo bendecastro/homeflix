@@ -100,7 +100,12 @@ connections in the UI.
 
 ## 5. Make a useful first request
 
-For the first test, request a small title that is already released and that your
+Fixture-accepted acquisition setup only proves selected clients start behind Gluetun and
+stop at a provider gate (`credentials_required` until indexer and, for Usenet, news-server
+credentials exist). An authorized live request-to-library run is a separate acceptance
+level and is **not** implied by fixture-green `setup acquisition`.
+
+For the first live test, request a small title that is already released and that your
 configured indexers can find. An upcoming movie is still a valid request, but it will not
 start downloading merely because it was accepted.
 

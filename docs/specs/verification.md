@@ -12,7 +12,7 @@
 - A disruptive verification success SHALL require healthy post-restore egress through a non-host address. `(satisfied #10)`
 - Verification output SHALL distinguish pass, warning, failure, not-applicable, and unknown outcomes. `(satisfied #5 for runtime; #9 for VPN gate; #10 for fail-closed)`
 - Verification SHALL emit bounded boolean evidence without public IPs, private addresses, API keys, passwords, forwarded-port values, or secret-bearing URLs. `(satisfied #5 for runtime; #9 for VPN gate; #10 for fail-closed)`
-- Fixture acceptance and live acceptance SHALL be reported as different evidence levels. `(pending #3)`
+- Fixture acceptance and live acceptance SHALL be reported as different evidence levels. `(satisfied #12 for phase-level acquisition fixture journeys; live request-to-library remains pending #3)`
 
 ## Key scenarios
 

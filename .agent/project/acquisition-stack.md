@@ -1,6 +1,6 @@
 # homeflix — Acquisition Stack
 
-Updated: 2026-08-16
+Updated: 2026-08-17
 Decision: [ADR-0005](../decisions/adr-0005-arr-stack-gluetun-protonvpn.md). Source:
 the prior private design package (see `references/source-research.md`).
 
@@ -35,6 +35,14 @@ the prior private design package. Gluetun details live in
   qBittorrent `gluetun:6969`, NZBGet `gluetun:6789`, Prowlarr `gluetun:9696`.
 - Kill switch on: VPN down ⇒ those three lose network (fail safe) ⇒ **no downloads
   until VPN recovers**.
+- CLI selection is `--clients {torrent,usenet,both}` on the acquisition phase
+  (default `torrent`, then last successful selection). Prowlarr always starts.
+  Unselected download clients stay stopped and are not required by verify.
+  There is no `usenet` phase. NZBGet news servers stay disabled until
+  `secrets usenet` on a controlling terminal. Missing indexer or news-server
+  credentials is `credentials_required`, not `verified`.
+- This selection path is **fixture-accepted only**. It is not live production
+  verification and does not prove an authorized request-to-library run.
 
 ## The hardlink-import wiring (critical)
 

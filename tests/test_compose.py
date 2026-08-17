@@ -12,8 +12,9 @@ from unittest import mock
 from unittest.mock import patch
 
 from scripts.homeflix_setup.compose import (
-    CORE_SERVICES, GLUETUN_SERVICES, PROXY_SUBNET_CANDIDATES, _atomic_write, build_override,
-    compose_inventory, compose_ps, compose_up, compose_up_gluetun, configure,
+    ACQUISITION_SERVICES, CORE_SERVICES, GLUETUN_SERVICES, PROXY_SUBNET_CANDIDATES,
+    _atomic_write, build_override, compose_inventory, compose_ps, compose_stop_acquisition,
+    compose_up, compose_up_acquisition, compose_up_gluetun, configure,
 )
 from scripts.homeflix_setup.discover import (
     GraphicsDeviceFact, GraphicsFact, HostFacts, LanNetworkFact, MountFact,
@@ -288,6 +289,28 @@ class ComposeExecutionTests(unittest.TestCase):
                 compose_up_gluetun(root, (forbidden,), self.Runner())
         with self.assertRaises(ValueError):
             compose_up(root, GLUETUN_SERVICES, self.Runner())
+
+    def test_acquisition_allowlist_can_start_nzbget_and_rejects_unlisted_names(self) -> None:
+        temporary, root = self.make_root()
+        self.addCleanup(temporary.cleanup)
+        self.assertEqual(ACQUISITION_SERVICES, ("gluetun", "qbittorrent", "nzbget", "prowlarr"))
+        runner = self.Runner()
+        compose_up_acquisition(root, ("nzbget", "prowlarr"), runner)
+        rendered = " ".join(runner.commands[0])
+        self.assertIn("nzbget", rendered)
+        self.assertIn("prowlarr", rendered)
+        self.assertNotIn("lidarr", rendered)
+        with self.assertRaises(ValueError):
+            compose_up_acquisition(root, ("lidarr",), self.Runner())
+        with self.assertRaises(ValueError):
+            compose_up_acquisition(root, ("watchtower",), self.Runner())
+        with self.assertRaises(ValueError):
+            compose_stop_acquisition(root, ("prowlarr",), self.Runner())
+        stop_runner = self.Runner()
+        compose_stop_acquisition(root, ("nzbget",), stop_runner)
+        self.assertIn("stop", stop_runner.commands[0])
+        self.assertIn("nzbget", stop_runner.commands[0])
+        self.assertNotIn("rm", stop_runner.commands[0])
 
 
 class StorageBindTests(unittest.TestCase):

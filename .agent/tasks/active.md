@@ -1,6 +1,6 @@
 # Active Tasks — Live Cursor
 
-Updated: 2026-08-16
+Updated: 2026-08-17
 
 > First thing the next agent reads after `index.md`. Keep it true.
 
@@ -11,11 +11,19 @@ Updated: 2026-08-16
   executable stack contract, reliable first-use reconciliation, truthful verification
   modes, fail-closed backup recovery, and the absorbed acquisition phase. Issue map:
   [tasks.md](../../docs/changes/deep-homeflix-operations/tasks.md).
-- **In this worktree:** issue **#11** torrent acquisition tracer — after current
-  fail-closed evidence, `deploy`/`initialize`/`verify`/`setup acquisition` start
-  only qBittorrent and Prowlarr behind Gluetun, reconcile single-root qBittorrent
-  state and `gluetun` *arr/Prowlarr connections, and stop at a resumable
-  indexer-credential gate. NZBGet stays stopped. Fixture-accepted only.
+- **In this worktree:** issue **#12** optional Usenet and phase-level acquisition
+  acceptance — `--clients {torrent,usenet,both}` on `deploy`/`initialize`/`verify`/
+  `setup acquisition` (default `torrent`, then last successful selection). Prowlarr
+  starts for every selection; qBittorrent only for torrent; NZBGet only for usenet.
+  There is no `usenet` phase. NZBGet is an adapter (`/data/usenet/{incomplete,complete}`,
+  movies/tv/music categories, news servers `Active=no` until `secrets usenet`).
+  *arr download clients use host `gluetun`. Missing indexer or news-server credentials
+  is `credentials_required`, not `verified`. Fixture-accepted only; not live
+  request-to-library or production verification.
+- **Also in this worktree:** issue **#11** torrent acquisition tracer — after current
+  fail-closed evidence, torrent-only acquisition starts qBittorrent and Prowlarr
+  behind Gluetun and stops at a resumable indexer-credential gate. Fixture-accepted
+  only.
 - **Also in this worktree:** issue **#8** SSH artifact-repository parity — `BACKUP_DEST`
   `user@host:/abs/path` uses the same list/get/put/prune contract as the local
   adapter via `ssh`/`scp` (`-oBatchMode=yes`, argv lists, finite timeout, redacted
@@ -50,8 +58,7 @@ Updated: 2026-08-16
 
 ## Next up (priority order)
 
-1. Drain deep-operations issues #4–#13 in dependency order; #4, #6, #7, #8, #9, and #10
-   are in this tree.
+1. Drain deep-operations issues #4–#13 in dependency order; #4 and #6–#12 are in this tree.
 2. Verify core on a disposable Debian/Ubuntu target before claiming general host support.
 3. Execute the encrypted-storage slice with loop-device tests before any real-disk test.
 4. Resolve the independent Traefik dashboard, update policy, and remote-access decisions.

@@ -30,7 +30,8 @@ ALLOWED_PROXY_NETWORKS = tuple(
 )
 CORE_SERVICES = ("traefik", "jellyfin", "jellyseerr", "radarr", "sonarr")
 GLUETUN_SERVICES = ("gluetun",)
-ACQUISITION_SERVICES = ("gluetun", "qbittorrent", "prowlarr")
+ACQUISITION_SERVICES = ("gluetun", "qbittorrent", "nzbget", "prowlarr")
+ACQUISITION_CLIENT_SERVICES = ("qbittorrent", "nzbget")
 _COMPOSE_STATES = {"created", "dead", "exited", "paused", "removing", "restarting", "running"}
 _COMPOSE_HEALTH = {"", "healthy", "starting", "unhealthy"}
 _COMPOSE_SERVICE_NAME = re.compile(r"[a-z0-9][a-z0-9_.-]*\Z", re.ASCII)
@@ -397,7 +398,7 @@ def compose_up_acquisition(
     project_name: str | None = None,
     timeout: float = 300,
 ) -> subprocess.CompletedProcess[str]:
-    """Start the torrent acquisition allowlist. NZBGet stays off this path."""
+    """Start selected acquisition services from the widened allowlist."""
 
     return _compose_up_allowlist(
         repository_root,
@@ -408,6 +409,25 @@ def compose_up_acquisition(
         project_name=project_name,
         timeout=timeout,
     )
+
+
+def compose_stop_acquisition(
+    repository_root: str | os.PathLike[str],
+    services: Sequence[str],
+    runner: Runner,
+    *,
+    project_name: str | None = None,
+    timeout: float = 60,
+) -> subprocess.CompletedProcess[str]:
+    """Stop unselected download clients. Never deletes volumes or host data."""
+
+    selected = tuple(services)
+    if not selected or any(service not in ACQUISITION_CLIENT_SERVICES for service in selected):
+        raise ValueError("Compose acquisition stop services must come from the acquisition client allowlist")
+    argv = (*compose_command(repository_root, project_name=project_name), "stop", *selected)
+    if timeout <= 0:
+        raise TimeoutError("Compose stop deadline exhausted")
+    return runner.run(argv, check=False, timeout=min(60, timeout))
 
 
 def _json_records(text: str) -> list[object]:

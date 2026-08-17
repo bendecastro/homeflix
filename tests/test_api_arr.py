@@ -608,6 +608,61 @@ class ArrApiTests(unittest.TestCase):
         self.assertNotIn("secret-pass", json.dumps(inspected))
         self.assertNotIn("secret-pass", str(raised.exception))
 
+    def test_creates_one_nzbget_client_at_gluetun_and_rejects_direct_hosts(self) -> None:
+        transport = RouteTransport({
+            ("GET", "/api/v3/downloadclient"): [[]],
+            ("POST", "/api/v3/downloadclient"): [{"id": 9, "implementation": "Nzbget"}],
+        })
+        client = ArrClient("sonarr", "http://127.0.0.1", FIXTURE_KEY, transport=transport)
+        changed = client.ensure_nzbget_client(
+            host="gluetun", port=6789, username="nzbget", password="nzb-secret"
+        )
+        self.assertTrue(changed)
+        posted = json.loads(transport.requests[-1].data.decode())
+        fields = {item["name"]: item["value"] for item in posted["fields"]}
+        self.assertEqual(posted["implementation"], "Nzbget")
+        self.assertEqual(posted["configContract"], "NzbgetSettings")
+        self.assertEqual(fields["host"], "gluetun")
+        self.assertEqual(fields["port"], 6789)
+        self.assertEqual(fields["tvCategory"], "tv")
+        self.assertFalse(posted["removeCompletedDownloads"])
+
+        for host in ("localhost", "127.0.0.1", "::1", "nzbget", "0.0.0.0", "qbittorrent"):
+            with self.subTest(host=host):
+                with self.assertRaises(ApiError) as raised:
+                    ArrClient(
+                        "radarr",
+                        "http://127.0.0.1",
+                        FIXTURE_KEY,
+                        transport=RouteTransport({("GET", "/api/v3/downloadclient"): [[]]}),
+                    ).ensure_nzbget_client(host=host, port=6789, username="nzbget", password="nzb-secret")
+                self.assertEqual(raised.exception.code, "invalid_download_client_host")
+
+        already = [{
+            "id": 5,
+            "implementation": "Nzbget",
+            "fields": [
+                {"name": "host", "value": "gluetun"},
+                {"name": "port", "value": 6789},
+                {"name": "tvCategory", "value": "tv"},
+                {"name": "username", "value": "nzbget"},
+            ],
+        }]
+        noop = RouteTransport({("GET", "/api/v3/downloadclient"): [already, already]})
+        rewritten = ArrClient("sonarr", "http://127.0.0.1", FIXTURE_KEY, transport=noop).ensure_nzbget_client(
+            host="gluetun", port=6789, username="nzbget", password="nzb-secret"
+        )
+        self.assertFalse(rewritten)
+        self.assertFalse(any(request.method == "POST" for request in noop.requests))
+        inspected = ArrClient(
+            "sonarr",
+            "http://127.0.0.1",
+            FIXTURE_KEY,
+            transport=RouteTransport({("GET", "/api/v3/downloadclient"): [already]}),
+        ).inspect_download_client(host="gluetun", port=6789, implementation="Nzbget")
+        self.assertTrue(inspected["exact"])
+        self.assertNotIn("nzb-secret", json.dumps(inspected))
+
 
 if __name__ == "__main__":
     unittest.main()

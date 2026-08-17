@@ -579,3 +579,27 @@ without printing ports or secrets. Prowlarr owns one Radarr and one Sonarr app;
 read-only and reports `credentials_required` when no indexer is usable. NZBGet
 is not started. Fixture-accepted only; not live-host proof.
 
+## [2026-08-17] build | Optional Usenet and phase-level acquisition acceptance
+
+Issue #12: `deploy`/`initialize`/`verify`/`setup acquisition` accept
+`--clients {torrent,usenet,both}` (default torrent; last successful selection
+persists in non-secret setup state). Prowlarr starts for every selection.
+qBittorrent starts only when torrent is selected; NZBGet only when usenet is
+selected. Changing `--clients` stops unselected clients and does not delete
+`DATA_ROOT`/`CONFIG_ROOT` user data. NZBGet UI credentials are generated into
+`.env` (never printed); InterDir/DestDir are `/data/usenet/{incomplete,complete}`;
+category DestDirs are movies/tv/music; news servers stay `Active=no` until
+TTY-only `secrets usenet`. *arr Nzbget/QBittorrent clients use host `gluetun`.
+Missing indexer or news-server credentials is `credentials_required`, not
+`verified`. Fixture-accepted only; not live request-to-library or production
+verification.
+
+## [2026-08-17] fix | Acquisition dry-run clients and NZBGet saveconfig lifecycle
+
+Issue #12 rework: `setup acquisition --dry-run` now emits `initialize`/`verify`
+`--clients <selection>` and the same compose `stop` live deploy uses when a
+prior selection differs. NZBGet rotation writes `.env` after official
+`saveconfig` (file only) and retries login after `reload`; `save_options`
+merges into `loadconfig()` so `${MainDir}` file references are kept.
+Fixture-accepted only; not live production verification.
+

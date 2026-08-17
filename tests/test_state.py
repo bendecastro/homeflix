@@ -221,6 +221,25 @@ class SetupStateTests(TemporaryDirectoryTestCase, unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "must be boolean"):
             SetupState(evidence={**evidence, "fail_closed": "yes"}).save(path)
 
+    def test_acquisition_clients_round_trip_and_reject_unknown_values(self) -> None:
+        path = self.temp_path / "setup.json"
+        for selection in ("torrent", "usenet", "both"):
+            with self.subTest(selection=selection):
+                SetupState(acquisition_clients=selection).save(path)
+                self.assertEqual(SetupState.load(path).acquisition_clients, selection)
+        with self.assertRaisesRegex(ValueError, "acquisition_clients"):
+            SetupState(acquisition_clients="nzbget").save(path)
+        with self.assertRaisesRegex(ValueError, "unknown fields"):
+            payload = {
+                "schema_version": 1,
+                "checkpoints": {},
+                "host_facts": {},
+                "acquisition_clients": "torrent",
+                "usenet_password": "secret",
+            }
+            path.write_text(json.dumps(payload), encoding="utf-8")
+            SetupState.load(path)
+
     def test_secret_like_checkpoint_names_are_rejected(self) -> None:
         path = self.temp_path / "setup.json"
         for name in ("api_key", "password_saved", "jellyfin_token", "env_value", "credential"):

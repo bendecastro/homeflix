@@ -15,6 +15,7 @@ CURRENT_SCHEMA_VERSION = 1
 
 _CHECKPOINT_NAME = re.compile(r"^[a-z][a-z0-9]*(?:[_-][a-z0-9]+)*$")
 _CHECKPOINTS = {"configured", "core_containers_started", "core_api_configured", "core_verified"}
+ACQUISITION_CLIENT_SELECTIONS = ("torrent", "usenet", "both")
 _EVIDENCE_BOOLS = ("tunnel_healthy", "tunnel_device", "namespace_dns", "egress_distinct", "fail_closed")
 _EVIDENCE_STRING_LIMITS = {
     "recorded_at": 40,
@@ -87,10 +88,23 @@ def _validate_evidence(evidence: object) -> None:
             raise ValueError(f"evidence field {name!r} contains an unsafe string")
 
 
-def _validate_state_parts(checkpoints: object, host_facts: object, evidence: object) -> None:
+def _validate_acquisition_clients(value: object) -> None:
+    if value is None:
+        return
+    if not isinstance(value, str) or value not in ACQUISITION_CLIENT_SELECTIONS:
+        raise ValueError("acquisition_clients must be torrent, usenet, or both")
+
+
+def _validate_state_parts(
+    checkpoints: object,
+    host_facts: object,
+    evidence: object,
+    acquisition_clients: object = None,
+) -> None:
     _validate_checkpoints(checkpoints)
     _validate_host_facts(host_facts)
     _validate_evidence(evidence)
+    _validate_acquisition_clients(acquisition_clients)
 
 
 @dataclass(eq=True)
@@ -101,6 +115,7 @@ class SetupState:
     checkpoints: dict[str, Any] = field(default_factory=dict)
     host_facts: dict[str, Any] = field(default_factory=dict)
     evidence: dict[str, Any] = field(default_factory=dict)
+    acquisition_clients: str | None = None
 
     @classmethod
     def load(cls, path: str | os.PathLike[str]) -> "SetupState":
@@ -120,14 +135,15 @@ class SetupState:
             if type(version) is int and version > CURRENT_SCHEMA_VERSION:
                 raise ValueError(f"unsupported future setup state schema version {version}")
             raise ValueError(f"unsupported setup state schema version {version!r}")
-        allowed = {"schema_version", "checkpoints", "host_facts", "evidence"}
+        allowed = {"schema_version", "checkpoints", "host_facts", "evidence", "acquisition_clients"}
         if not set(payload) <= allowed or not {"schema_version", "checkpoints", "host_facts"} <= set(payload):
             raise ValueError("setup state contains unknown fields")
         checkpoints = payload["checkpoints"]
         host_facts = payload["host_facts"]
         evidence = payload.get("evidence", {})
-        _validate_state_parts(checkpoints, host_facts, evidence)
-        return cls(version, checkpoints, host_facts, evidence)
+        acquisition_clients = payload.get("acquisition_clients")
+        _validate_state_parts(checkpoints, host_facts, evidence, acquisition_clients)
+        return cls(version, checkpoints, host_facts, evidence, acquisition_clients)
 
     def save(self, path: str | os.PathLike[str]) -> None:
         if type(self.schema_version) is not int or self.schema_version != CURRENT_SCHEMA_VERSION:
@@ -139,7 +155,9 @@ class SetupState:
         }
         if self.evidence:
             payload["evidence"] = self.evidence
-        _validate_state_parts(self.checkpoints, self.host_facts, self.evidence)
+        if self.acquisition_clients:
+            payload["acquisition_clients"] = self.acquisition_clients
+        _validate_state_parts(self.checkpoints, self.host_facts, self.evidence, self.acquisition_clients)
         serialized = json.dumps(payload, indent=2, sort_keys=True) + "\n"
 
         state_path = Path(path)

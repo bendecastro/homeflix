@@ -134,3 +134,31 @@ def set_vpn_secrets(
             raise ValueError(f"{name} must not be empty")
         updates[name] = value
     return update_env(env_path, updates, updates.keys())
+
+
+USENET_SECRET_FIELDS = (
+    ("USENET_HOST", "News server host: "),
+    ("USENET_PORT", "News server port: "),
+    ("USENET_USER", "News server username: "),
+    ("USENET_PASSWORD", "News server password: "),
+)
+
+
+def set_usenet_secrets(
+    path: str | os.PathLike[str],
+    *,
+    reader: TtyReader = read_from_tty,
+) -> dict[str, object]:
+    """Collect generic news-server secrets from a tty and write only key status."""
+
+    env_path = Path(path)
+    updates: dict[str, str] = {}
+    for name, prompt in USENET_SECRET_FIELDS:
+        value = reader(prompt, confirm=name == "USENET_PASSWORD")
+        if not isinstance(value, str) or not value.strip():
+            raise ValueError(f"{name} must not be empty")
+        updates[name] = value.strip()
+    port = updates["USENET_PORT"]
+    if not port.isdigit() or not 1 <= int(port) <= 65535:
+        raise ValueError("USENET_PORT is invalid")
+    return update_env(env_path, updates, {"USENET_PASSWORD"})

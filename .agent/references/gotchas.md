@@ -1,6 +1,6 @@
 # References — Gotchas
 
-Updated: 2026-08-16
+Updated: 2026-08-17
 
 Traps specific to the homeflix design, plus the generic classics. Add real ones as they
 bite.
@@ -57,6 +57,12 @@ bite.
   hostnames won't resolve on family devices.
 - **Talk to `gluetun:<port>`, not localhost.** The VPN'd services share Gluetun's netns;
   the *arr apps must reference `gluetun:6969/6789/9696`.
+- **NZBGet `saveconfig` writes the file only.** Official JSON-RPC does not apply
+  ControlPassword or path changes in-memory; `config()` stays on the old values
+  until `reload()`. Rotation must persist `.env` after saveconfig succeeds, then
+  reload and retry login — a generated password must not live only in
+  `nzbget.conf`. Merge updates into `loadconfig()` file text so untouched
+  `${MainDir}` references are not expanded. Fixture-accepted only.
 - **Fail-closed verify restarts namespace dependents.** After Gluetun restarts, any
   previously running `qbittorrent` / `nzbget` / `prowlarr` must be restarted or they
   keep a stale netns. `verify vpn --disrupt` snapshots the running set and restores
