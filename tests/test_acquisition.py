@@ -14,6 +14,9 @@ from scripts.homeflix_setup.secrets import set_usenet_secrets, set_vpn_secrets
 from tests.test_preflight import MountRunner, configured
 
 
+GLUETUN_CONTAINER_ID = "6c70d0c930d92022b92c94346930a333cc3accf1b71a55a9301233f773a20e18"
+
+
 def run_main(*args: str, repository_root: Path) -> tuple[int, str, str]:
     stdout = io.StringIO()
     stderr = io.StringIO()
@@ -399,11 +402,15 @@ class FakeAcquisitionRunner(FakeVpnRunner):
             if self.forwarded_port is None:
                 return subprocess.CompletedProcess(command, 1, "", "unavailable")
             return subprocess.CompletedProcess(command, 0, f"{self.forwarded_port}\n", "")
+        if command[:2] == ("docker", "inspect") and "{{.Id}}" in command and "gluetun" in command:
+            self.commands.append(command)
+            return subprocess.CompletedProcess(command, 0, GLUETUN_CONTAINER_ID + "\n", "")
         if command[:2] == ("docker", "inspect") and any(
             name in command for name in ("qbittorrent", "prowlarr", "nzbget")
         ):
             self.commands.append(command)
-            return subprocess.CompletedProcess(command, 0, "container:gluetun\n", "")
+            # Compose resolves network_mode: service:gluetun to the container id.
+            return subprocess.CompletedProcess(command, 0, f"container:{GLUETUN_CONTAINER_ID}\n", "")
         if "ps" in command:
             self.commands.append(command)
             payload = list(self.inventory)

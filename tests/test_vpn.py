@@ -87,6 +87,11 @@ DEFAULT_ROUTE_ETH = "default via 172.30.0.1 dev eth0\n"
 DEFAULT_ROUTE_TUN = "default via 10.2.0.1 dev tun0\n"
 
 
+GLUETUN_CONTAINER_ID = "6c70d0c930d92022b92c94346930a333cc3accf1b71a55a9301233f773a20e18"
+# Compose renders network_mode: service:gluetun as the resolved container id.
+GLUETUN_NAMESPACE = f"container:{GLUETUN_CONTAINER_ID}"
+
+
 class FakeVpnRunner:
     def __init__(
         self,
@@ -98,7 +103,8 @@ class FakeVpnRunner:
         host_ip: str | None = HOST_EGRESS,
         tunnel_ip: str | None = TUNNEL_EGRESS,
         image_id: str = "sha256:fixturegluetunimage",
-        namespace_mode: str = "container:gluetun",
+        namespace_mode: str | None = GLUETUN_NAMESPACE,
+        gluetun_id: str | None = GLUETUN_CONTAINER_ID,
         up_returncode: int = 0,
         links: str = SAFE_LINKS,
         default_route: str = DEFAULT_ROUTE_ETH,
@@ -116,6 +122,7 @@ class FakeVpnRunner:
         self.tunnel_ip = tunnel_ip
         self.image_id = image_id
         self.namespace_mode = namespace_mode
+        self.gluetun_id = gluetun_id
         self.up_returncode = up_returncode
         self.links = links
         self.default_route = default_route
@@ -194,6 +201,10 @@ class FakeVpnRunner:
                 if self.namespace_mode is None:
                     return subprocess.CompletedProcess(command, 1, "", "no such container")
                 return subprocess.CompletedProcess(command, 0, self.namespace_mode + "\n", "")
+            if "{{.Id}}" in command:
+                if self.gluetun_id is None:
+                    return subprocess.CompletedProcess(command, 1, "", "no such container")
+                return subprocess.CompletedProcess(command, 0, self.gluetun_id + "\n", "")
             return subprocess.CompletedProcess(command, 0, self.image_id + "\n", "")
         if command[:3] == ("docker", "exec", "gluetun") and command[3:5] == ("ip", "-o"):
             if "route" in command:
@@ -489,7 +500,22 @@ class VpnVerifyGateTests(unittest.TestCase):
             config_digest=digest,
         ))
 
-    def test_gate_succeeds_on_running_stack_when_clients_share_the_gluetun_namespace(self) -> None:
+    def test_gate_succeeds_on_running_stack_for_named_and_resolved_namespaces(self) -> None:
+        inventory = [
+            {"Service": service, "State": "running", "Health": "healthy", "Project": "homeflix"}
+            for service in ("qbittorrent", "prowlarr")
+        ]
+        for mode in (GLUETUN_NAMESPACE, "container:gluetun", f"container:{GLUETUN_CONTAINER_ID[:12]}"):
+            with self.subTest(mode=mode), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                write_env(root)
+                runner = FakeVpnRunner(inventory=inventory, namespace_mode=mode)
+                result = _verify(root, runner)
+                checks = {item["domain"]: item for item in result["checks"]}
+                self.assertTrue(result["passed"], result)
+                self.assertEqual(checks["gated_services"]["status"], "pass")
+
+    def test_gate_stores_evidence_without_fail_closed_on_a_running_stack(self) -> None:
         inventory = [
             {"Service": service, "State": "running", "Health": "healthy", "Project": "homeflix"}
             for service in ("qbittorrent", "prowlarr")
@@ -571,6 +597,18 @@ class VpnVerifyGateTests(unittest.TestCase):
                     }
                 ],
                 "namespace_mode": "bridge",
+                "domain": "gated_services",
+            },
+            {
+                "inventory": [
+                    {
+                        "Service": "qbittorrent",
+                        "State": "running",
+                        "Health": "healthy",
+                        "Project": "homeflix",
+                    }
+                ],
+                "namespace_mode": "container:0000000000000000000000000000000000000000000000000000000000000000",
                 "domain": "gated_services",
             },
             {

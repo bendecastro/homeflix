@@ -186,6 +186,18 @@ def _gluetun_up_argv(root: Path, project_name: str | None) -> list[str]:
     return [*compose_command(root, project_name=project_name), "up", "--detach", "--no-deps", *GLUETUN_SERVICES]
 
 
+def _container_id(runner: CommandRunner, service: str, *, timeout: float) -> str | None:
+    result = runner.run(
+        ("docker", "inspect", "--format", "{{.Id}}", service),
+        check=False,
+        timeout=timeout,
+    )
+    value = (result.stdout or "").strip()
+    if result.returncode or not value:
+        return None
+    return value
+
+
 def namespace_shared(runner: CommandRunner, service: str, *, timeout: float) -> bool | None:
     result = runner.run(
         ("docker", "inspect", "--format", "{{.HostConfig.NetworkMode}}", service),
@@ -195,7 +207,16 @@ def namespace_shared(runner: CommandRunner, service: str, *, timeout: float) -> 
     mode = (result.stdout or "").strip()
     if result.returncode or not mode:
         return None
-    return mode == "container:gluetun"
+    if not mode.startswith("container:"):
+        return False
+    target = mode.split(":", 1)[1]
+    if target == "gluetun":
+        return True
+    # Compose renders `network_mode: service:gluetun` as the resolved container id.
+    gluetun_id = _container_id(runner, "gluetun", timeout=timeout)
+    if not gluetun_id or not target:
+        return None
+    return gluetun_id == target or (len(target) >= 12 and gluetun_id.startswith(target))
 
 
 def _running_gated(inventory: Sequence[Mapping[str, str]]) -> list[str]:
