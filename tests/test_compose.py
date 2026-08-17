@@ -377,8 +377,52 @@ class VpnFirewallTests(unittest.TestCase):
         compose = (Path(__file__).resolve().parents[1] / "docker-compose.yml").read_text(encoding="utf-8")
         self.assertNotIn("${LAN_SUBNET:-", compose)
         self.assertIn("${LAN_SUBNET:?", compose)
-        self.assertNotIn("${PROXY_SUBNET:-", compose)
-        self.assertIn("${PROXY_SUBNET:?", compose)
+        self.assertIn("${PROXY_SUBNET:-${PROXY_NETWORK_SUBNET:?", compose)
+        self.assertNotIn("${PROXY_NETWORK_SUBNET:-172.", compose)
+        self.assertNotIn("${PROXY_SUBNET:-172.", compose)
+
+    def test_compose_interpolates_proxy_network_subnet_when_proxy_subnet_absent(self) -> None:
+        repository_root = Path(__file__).resolve().parents[1]
+        with tempfile.TemporaryDirectory() as directory:
+            env_path = Path(directory) / "alias.env"
+            env_path.write_text(
+                "DATA_ROOT=/srv/homeflix/data\n"
+                "CONFIG_ROOT=/srv/homeflix/appdata\n"
+                "CACHE_ROOT=/srv/homeflix/cache\n"
+                "DOMAIN=homeflix\n"
+                "LAN_SUBNET=192.168.1.0/24\n"
+                "PROXY_NETWORK_SUBNET=172.30.90.0/24\n"
+                "VPN_SERVER_COUNTRIES=Netherlands\n",
+                encoding="utf-8",
+            )
+            result = subprocess.run(
+                ["docker", "compose", "--env-file", str(env_path), "config", "--format", "json"],
+                cwd=repository_root,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        rendered = json.loads(result.stdout)
+        pinned = rendered["networks"]["traefik-network"]["ipam"]["config"][0]["subnet"]
+        self.assertEqual(pinned, "172.30.90.0/24")
+        allowed = rendered["services"]["gluetun"]["environment"]["FIREWALL_OUTBOUND_SUBNETS"]
+        self.assertIn("172.30.90.0/24", allowed)
+
+    def test_compose_and_example_keep_wireguard_and_qbt_port_hook(self) -> None:
+        repository_root = Path(__file__).resolve().parents[1]
+        compose = (repository_root / "docker-compose.yml").read_text(encoding="utf-8")
+        example = (repository_root / ".env.example").read_text(encoding="utf-8")
+        self.assertIn("VPN_TYPE: ${VPN_TYPE:-wireguard}", compose)
+        self.assertIn("WIREGUARD_PRIVATE_KEY: ${VPN_WIREGUARD_PRIVATE_KEY:-}", compose)
+        self.assertIn("VPN_PORT_FORWARDING: ${VPN_PORT_FORWARDING:-on}", compose)
+        self.assertIn("VPN_PORT_FORWARDING_UP_COMMAND:", compose)
+        self.assertIn("./scripts/gluetun-qbt-port.sh:/scripts/qbt-port.sh:ro", compose)
+        self.assertIn("network_mode: container:gluetun", compose)
+        self.assertIn("VPN_TYPE=wireguard", example)
+        self.assertIn("VPN_PORT_FORWARDING=on", example)
+        self.assertIn("VPN_WIREGUARD_PRIVATE_KEY=", example)
+        self.assertTrue((repository_root / "scripts" / "gluetun-qbt-port.sh").is_file())
 
     def test_proxy_network_is_pinned_to_the_allowlisted_subnet(self) -> None:
         repository_root = Path(__file__).resolve().parents[1]

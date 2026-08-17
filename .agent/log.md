@@ -621,3 +621,11 @@ encrypted-storage with VPN/acquisition as unshipped follow-ups. Encrypted
 storage remains later; #4–#13 VPN/acquisition is fixture-accepted shipped CLI.
 Disposable-host and private-production live acceptance remain separate.
 
+## [2026-08-17] decision | WireGuard default, port-forward hook, proxy alias
+
+Generalized two production lessons without copying host state. Compose now
+interpolates `PROXY_SUBNET` or `PROXY_NETWORK_SUBNET`. ADR-0011 makes
+WireGuard + `VPN_PORT_FORWARDING` the default and mounts
+`scripts/gluetun-qbt-port.sh` so a reconnecting forwarded port reaches
+qBittorrent. OpenVPN remains a one-variable switch. Fixture-accepted only.
+

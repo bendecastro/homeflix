@@ -5,6 +5,9 @@ Date: 2026-06-14
 ## Status
 Accepted
 
+Amended by [ADR-0011](adr-0011-wireguard-vpn-transport.md) for the VPN transport
+and port-forwarding defaults. The service split and Gluetun topology stand.
+
 > Source: prior private design package (see `references/source-research.md`).
 
 ## Context
@@ -20,9 +23,11 @@ risk rather than blanket-VPN'ing everything.
   **qBittorrent, NZBGet, Prowlarr** via `network_mode: container:gluetun`. Everything
   else (Radarr/Sonarr/Lidarr/Bazarr/Jellyseerr/Jellyfin/monitoring) runs **direct** on
   the `traefik-network` — they only talk to internal services + legal metadata APIs.
-- **VPN:** Gluetun (`qmcgaw/gluetun`) → ProtonVPN, OpenVPN, `SERVER_COUNTRIES=Netherlands`,
-  `FIREWALL=on` (kill switch), `FIREWALL_OUTBOUND_SUBNETS` for LAN, `FIREWALL_INPUT_PORTS`
-  for the forwarded service ports, DNS 1.1.1.1/1.0.0.1. Gluetun owns the network
+- **VPN:** Gluetun (`qmcgaw/gluetun`) → ProtonVPN. Transport and port forwarding
+  are in [ADR-0011](adr-0011-wireguard-vpn-transport.md) (`VPN_TYPE=wireguard` by
+  default; OpenVPN remains a one-variable switch). `FIREWALL=on` (kill switch),
+  `FIREWALL_OUTBOUND_SUBNETS` for LAN and the pinned proxy network,
+  `FIREWALL_INPUT_PORTS` for the published service ports. Gluetun owns the network
   namespace for the three VPN services and publishes their ports.
 - The *arr apps reach the download/indexer services at `gluetun:<port>` (6969
   qBittorrent, 6789 NZBGet, 9696 Prowlarr).

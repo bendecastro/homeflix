@@ -62,6 +62,7 @@ def configured(root: Path) -> dict[str, object]:
         "PGID": str(os.getgid()),
         "VPN_USER": "",
         "VPN_PASSWORD": "",
+        "VPN_WIREGUARD_PRIVATE_KEY": "",
     }
 
 
@@ -73,10 +74,11 @@ class PreflightTests(unittest.TestCase):
             core = run_preflight(config, "core", runner)
             acquisition = run_preflight(config, "acquisition", runner)
         self.assertTrue(core.passed)
-        self.assertEqual(core.counts["warn"], 2)
+        self.assertEqual(core.counts["warn"], 1)
         self.assertFalse(acquisition.passed)
-        self.assertEqual(acquisition.counts["fail"], 2)
+        self.assertEqual(acquisition.counts["fail"], 1)
         self.assertNotIn("VPN_USER\":", repr(core.results))
+        self.assertNotIn("VPN_WIREGUARD_PRIVATE_KEY\":", repr(core.results))
 
     def test_compose_config_uses_exact_project_and_env_and_fails_closed(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -459,9 +461,9 @@ class PreflightTests(unittest.TestCase):
         self.assertEqual(code, 0, stderr.getvalue())
         self.assertEqual(acquisition_code, 1)
         self.assertEqual(set(result["counts"]), {"pass", "warn", "fail"})
-        self.assertEqual(result["counts"]["warn"], 2)
+        self.assertEqual(result["counts"]["warn"], 1)
         self.assertEqual(result["counts"]["fail"], 0)
-        self.assertEqual(acquisition["counts"]["fail"], 2)
+        self.assertEqual(acquisition["counts"]["fail"], 1)
 
 
 class PreflightCompatibilityTests(unittest.TestCase):

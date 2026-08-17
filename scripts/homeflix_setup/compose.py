@@ -251,6 +251,7 @@ def configure(
         "QUALITY_PROFILE": quality_profile,
         "LAN_SUBNET": str(lan_subnet),
         "PROXY_SUBNET": proxy_subnet,
+        "PROXY_NETWORK_SUBNET": proxy_subnet,
     }
     environment_result = update_env(env_path, updates)
     credentials_result = ensure_service_credentials(env_path)

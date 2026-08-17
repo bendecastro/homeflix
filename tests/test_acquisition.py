@@ -115,6 +115,31 @@ class VpnSecretHandoffTests(unittest.TestCase):
         self.assertEqual(names, ["VPN_USER", "VPN_PASSWORD"])
         self.assertTrue(all(item["status"] == "updated" and item["secret"] for item in result["keys"]))
 
+    def test_supported_wireguard_secret_confirms_and_updates_env_without_leaking_values(self) -> None:
+        from scripts.homeflix_setup.secrets import required_vpn_secret_keys
+
+        key = "wireguard-private-key-fixture"
+        prompts: list[tuple[str, bool]] = []
+
+        def reader(prompt: str, *, confirm: bool = False) -> str:
+            prompts.append((prompt, confirm))
+            return key
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / ".env"
+            path.write_text(
+                "VPN_SERVICE_PROVIDER=protonvpn\nVPN_TYPE=wireguard\nVPN_WIREGUARD_PRIVATE_KEY=\nOTHER=keep\n",
+                encoding="utf-8",
+            )
+            result = set_vpn_secrets(path, reader=reader)
+            document = EnvDocument.load(path)
+
+        self.assertEqual(required_vpn_secret_keys("protonvpn", "wireguard"), ("VPN_WIREGUARD_PRIVATE_KEY",))
+        self.assertEqual(document.get("VPN_WIREGUARD_PRIVATE_KEY"), key)
+        self.assertEqual(document.get("OTHER"), "keep")
+        self.assertEqual([confirm for _prompt, confirm in prompts], [True])
+        self.assertNotIn(key, repr(result))
+
     def test_unsupported_provider_refuses_guessed_keys_and_points_at_gluetun_docs(self) -> None:
         guessed = "guessed-nord-token"
 

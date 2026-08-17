@@ -109,8 +109,7 @@ class CoreFixtureAcceptanceTests(unittest.TestCase):
             preflight = run_preflight(environment, "core", runner)
             self.assertTrue(preflight.passed, preflight.to_dict())
             vpn = {item.name: item.status for item in preflight.results if item.name.startswith("vpn_")}
-            self.assertEqual(vpn["vpn_user"], "warn")
-            self.assertEqual(vpn["vpn_password"], "warn")
+            self.assertEqual(vpn["vpn_wireguard_private_key"], "warn")
             self.assertEqual(vpn.get("vpn_provider", "pass"), "pass")
 
             def http_waiter(url, *, headers=None, timeout=0):

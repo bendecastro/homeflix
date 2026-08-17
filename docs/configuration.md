@@ -60,7 +60,7 @@ media/{movies,tv,music}
 | `DOMAIN` | `homeflix` | Services answer at `<service>.${DOMAIN}`. Needs LAN DNS. Not a reserved TLD — serve it locally. `home.arpa` is the RFC 8375 alternative. |
 | `JELLYFIN_PUBLISHED_URL` | `http://jellyfin.homeflix` | What Jellyfin advertises to clients. |
 | `LAN_SUBNET` | — (required) | Your RFC1918 or CGNAT LAN CIDR, allowed to bypass the VPN tunnel. `homeflix setup` discovers it from the lowest-metric default route and preferred source (or gateway). Public prefixes are refused because allowing one would create a public VPN bypass. Must **not** cover your provider's VPN gateway (ProtonVPN uses `10.2.0.1`). |
-| `PROXY_SUBNET` | — (required) | Private CIDR selected away from existing host routes and the VPN provider gateway, then pinned to the Compose network so Traefik can reach services behind Gluetun. For ProtonVPN it must not contain `10.2.0.1`. Pinning prevents Docker from reallocating it on recreate; an existing Homeflix-owned network is preserved on setup reruns. |
+| `PROXY_SUBNET` | — (required, either name) | Private CIDR selected away from existing host routes and the VPN provider gateway, then pinned to the Compose network so Traefik can reach services behind Gluetun. For ProtonVPN it must not contain `10.2.0.1`. Pinning prevents Docker from reallocating it on recreate; an existing Homeflix-owned network is preserved on setup reruns. `PROXY_NETWORK_SUBNET` is an alias: Compose interpolates either name. |
 
 ## VPN
 
@@ -71,8 +71,11 @@ connectivity rather than leaking.
 | Variable | Default | Notes |
 |---|---|---|
 | `VPN_SERVICE_PROVIDER` | `protonvpn` | ~40 supported — see the [Gluetun wiki](https://github.com/qdm12/gluetun-wiki). |
-| `VPN_TYPE` | `openvpn` | `openvpn` or `wireguard`. |
-| `VPN_USER` / `VPN_PASSWORD` | — | Provider's *OpenVPN* credentials, not your account login. Enter them with `scripts/homeflix secrets vpn` on a controlling terminal; the command writes key names only. Unsupported providers are refused and point at the Gluetun wiki. |
+| `VPN_TYPE` | `wireguard` | `wireguard` (default) or `openvpn`. See [ADR-0011](../.agent/decisions/adr-0011-wireguard-vpn-transport.md). |
+| `VPN_WIREGUARD_PRIVATE_KEY` | — | Used when `VPN_TYPE=wireguard`. Enter with `scripts/homeflix secrets vpn`. For ProtonVPN, enable NAT-PMP when generating the config. |
+| `VPN_USER` / `VPN_PASSWORD` | — | Used when `VPN_TYPE=openvpn`. Provider *OpenVPN* credentials, not your account login. Enter with `scripts/homeflix secrets vpn`. Unsupported providers are refused and point at the Gluetun wiki. |
+| `VPN_PORT_FORWARDING` | `on` | Enables provider port forwarding. Without it, qBittorrent still downloads but inbound peers degrade. |
+| `VPN_PORT_FORWARD_ONLY` | `on` | Restricts server choice to P2P/port-forwarding servers. |
 | `VPN_SERVER_COUNTRIES` | `Netherlands` | Exit country. |
 | `VPN_DNS` | `1.1.1.1` | DNS inside the tunnel. |
 | `VPN_HEALTH_TARGET` | `cloudflare.com:443` | What Gluetun's built-in healthcheck probes. |

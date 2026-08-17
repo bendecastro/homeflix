@@ -1,7 +1,8 @@
 # homeflix — Networking, VPN & Remote Access
 
-Updated: 2026-08-10
+Updated: 2026-08-17
 Decisions: [ADR-0005](../decisions/adr-0005-arr-stack-gluetun-protonvpn.md) (VPN),
+[ADR-0011](../decisions/adr-0011-wireguard-vpn-transport.md) (WireGuard + forwarding),
 [ADR-0006](../decisions/adr-0006-traefik-local-remote-access-open.md) (proxy + the open
 remote-access gap). Source: prior private design package (see `references/source-research.md`).
 
@@ -17,12 +18,14 @@ remote-access gap). Source: prior private design package (see `references/source
 ## VPN — Gluetun + ProtonVPN (decided)
 
 - Image `qmcgaw/gluetun:latest`, `cap_add: NET_ADMIN`, `/dev/net/tun`.
-- ProtonVPN, OpenVPN, `SERVER_COUNTRIES=Netherlands`.
+- ProtonVPN, default `VPN_TYPE=wireguard` with port forwarding ([ADR-0011](../decisions/adr-0011-wireguard-vpn-transport.md)).
+  OpenVPN remains a one-variable switch. `SERVER_COUNTRIES` is operator-chosen.
 - `FIREWALL=on` (kill switch), `FIREWALL_OUTBOUND_SUBNETS` composed from two **required**
   variables — `LAN_SUBNET` (an RFC1918/CGNAT network discovered from the lowest-metric
   default route and its preferred source or gateway) and `PROXY_SUBNET` (selected away
   from existing host routes, then pinned onto the Compose network; an existing
-  Homeflix-owned network is preserved on reruns). Kept separate so neither must be widened to cover the
+  Homeflix-owned network is preserved on reruns). `PROXY_NETWORK_SUBNET` is an alias
+  for the same CIDR. Kept separate so neither must be widened to cover the
   other; a whole private block would cover the provider's VPN gateway and break NAT-PMP.
   See `references/gotchas.md`. Also `FIREWALL_INPUT_PORTS=6881,6969,6789,9696`,
   DNS 1.1.1.1 / 1.0.0.1.
@@ -30,7 +33,8 @@ remote-access gap). Source: prior private design package (see `references/source
 - Gluetun's built-in healthcheck probes tunnel health; the three VPN services
   `depends_on: gluetun: condition: service_healthy`. The inherited control-server probe
   was removed because its port, route and unauthenticated-access assumptions were stale.
-- Creds (`PROTONVPN_USERNAME/PASSWORD`) come from the host `.env` — never here.
+- Creds (`VPN_WIREGUARD_PRIVATE_KEY`, or `VPN_USER`/`VPN_PASSWORD` for OpenVPN)
+  come from the host `.env` — never here. Enter them with `scripts/homeflix secrets vpn`.
 
 ## Local DNS
 

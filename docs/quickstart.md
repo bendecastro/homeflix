@@ -69,17 +69,19 @@ cp .env.example .env
 Edit `.env`. Minimum to change:
 
 - `DATA_ROOT`, `CONFIG_ROOT`, `CACHE_ROOT` — from step 2
-- `VPN_USER`, `VPN_PASSWORD` — see below
+- `VPN_WIREGUARD_PRIVATE_KEY` (default) or `VPN_USER` / `VPN_PASSWORD` — see below
 - `TZ` — your timezone
 - `PUID` / `PGID` — run `id -u` and `id -g`
 - `LAN_SUBNET` — your narrow RFC1918/CGNAT LAN CIDR; never a whole private block
 - `PROXY_SUBNET` — a private `/24` that overlaps neither an existing host/Docker route nor
-  the VPN gateway (for ProtonVPN, it must not contain `10.2.0.1`)
+  the VPN gateway (for ProtonVPN, it must not contain `10.2.0.1`). `PROXY_NETWORK_SUBNET`
+  is an alias if an older checkout already uses that name.
 
 **VPN credentials.** Gluetun supports ~40 providers; set `VPN_SERVICE_PROVIDER`
 accordingly and check the [Gluetun wiki](https://github.com/qdm12/gluetun-wiki) for what
-each expects. For ProtonVPN with OpenVPN, use the OpenVPN credentials from your account
-dashboard — *not* your login password.
+each expects. The default `VPN_TYPE=wireguard` needs `VPN_WIREGUARD_PRIVATE_KEY` —
+for ProtonVPN, enable NAT-PMP when generating the config. With `VPN_TYPE=openvpn`,
+use the provider's OpenVPN credentials, not your account login.
 
 The VPN is not optional: qBittorrent, NZBGet and Prowlarr have no network path except
 through it, and the kill switch fails closed.

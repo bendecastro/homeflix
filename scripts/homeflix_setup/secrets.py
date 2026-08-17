@@ -19,6 +19,9 @@ SUPPORTED_VPN_SECRETS: dict[tuple[str, str], tuple[tuple[str, str], ...]] = {
         ("VPN_USER", "VPN username: "),
         ("VPN_PASSWORD", "VPN password: "),
     ),
+    ("protonvpn", "wireguard"): (
+        ("VPN_WIREGUARD_PRIVATE_KEY", "WireGuard private key: "),
+    ),
 }
 TtyReader = Callable[..., str]
 
@@ -118,7 +121,7 @@ def set_vpn_secrets(
     env_path = Path(path)
     document = EnvDocument.load(env_path) if env_path.exists() else EnvDocument([])
     resolved_provider = provider if provider is not None else document.get("VPN_SERVICE_PROVIDER") or "protonvpn"
-    resolved_type = vpn_type if vpn_type is not None else document.get("VPN_TYPE") or "openvpn"
+    resolved_type = vpn_type if vpn_type is not None else document.get("VPN_TYPE") or "wireguard"
     schema = SUPPORTED_VPN_SECRETS.get(
         (_normalize_vpn_choice(resolved_provider), _normalize_vpn_choice(resolved_type))
     )

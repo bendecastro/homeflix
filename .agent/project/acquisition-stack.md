@@ -1,7 +1,8 @@
 # homeflix — Acquisition Stack
 
 Updated: 2026-08-17
-Decision: [ADR-0005](../decisions/adr-0005-arr-stack-gluetun-protonvpn.md). Source:
+Decision: [ADR-0005](../decisions/adr-0005-arr-stack-gluetun-protonvpn.md), transport
+amended by [ADR-0011](../decisions/adr-0011-wireguard-vpn-transport.md). Source:
 the prior private design package (see `references/source-research.md`).
 
 The automated pipeline: family request → search → download → rename/move → appears in
@@ -26,7 +27,9 @@ Jellyfin. All `linuxserver/*` images except Jellyseerr.
 
 Only the three risky services route through **Gluetun → ProtonVPN** via
 `network_mode: container:gluetun`: **qBittorrent, NZBGet, Prowlarr**. Everything else
-is direct on `traefik-network`. Rationale + the per-service risk analysis:
+is direct on `traefik-network`. Default transport is WireGuard with port forwarding
+([ADR-0011](../decisions/adr-0011-wireguard-vpn-transport.md)); OpenVPN remains a
+one-variable switch. Rationale + the per-service risk analysis:
 [ADR-0005](../decisions/adr-0005-arr-stack-gluetun-protonvpn.md) and
 the prior private design package. Gluetun details live in
 `project/networking-remote-access.md`.

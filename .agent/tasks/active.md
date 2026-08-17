@@ -36,7 +36,7 @@ Updated: 2026-08-17
 ADR-0001 (wiki) · 0002 (host) · ~~0003 (storage)~~ superseded · 0004 (Jellyfin) ·
 0005 (*arr+VPN) · 0006 (Traefik; remote access open) · 0007 (remote access — Tailscale
 primary; Proposed, gated on device inventory) · **0008 (single `/data` root, hardlinks —
-Accepted)**.
+Accepted)** · **0011 (WireGuard + port forwarding — Accepted, amends 0005)**.
 
 ## Notes
 - Source-of-record for original artifacts: the prior private design package (see

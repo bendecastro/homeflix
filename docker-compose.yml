@@ -12,10 +12,11 @@ networks:
     driver: bridge
     # Pinned so the VPN firewall allowlist stays valid. An unpinned bridge is reallocated
     # from Docker's pool on recreate, which would silently drop Traefik's access to the
-    # services behind Gluetun.
+    # services behind Gluetun. PROXY_SUBNET and PROXY_NETWORK_SUBNET are aliases —
+    # either name interpolates. Keep them equal when both are set.
     ipam:
       config:
-        - subnet: ${PROXY_SUBNET:?set PROXY_SUBNET to the Compose network CIDR — see .env.example}
+        - subnet: ${PROXY_SUBNET:-${PROXY_NETWORK_SUBNET:?set PROXY_SUBNET or PROXY_NETWORK_SUBNET to the Compose network CIDR — see .env.example}}
 
 x-common-env: &common-env
   PUID: ${PUID:-1000}
@@ -104,20 +105,30 @@ services:
       - "${PROWLARR_PORT:-9696}:${PROWLARR_PORT:-9696}/tcp"
     environment:
       VPN_SERVICE_PROVIDER: ${VPN_SERVICE_PROVIDER:-protonvpn}
-      VPN_TYPE: ${VPN_TYPE:-openvpn}
-      OPENVPN_USER: ${VPN_USER}
-      OPENVPN_PASSWORD: ${VPN_PASSWORD}
+      VPN_TYPE: ${VPN_TYPE:-wireguard}
+      # Gluetun reads only the pair matching VPN_TYPE; the other stays empty.
+      WIREGUARD_PRIVATE_KEY: ${VPN_WIREGUARD_PRIVATE_KEY:-}
+      OPENVPN_USER: ${VPN_USER:-}
+      OPENVPN_PASSWORD: ${VPN_PASSWORD:-}
       SERVER_COUNTRIES: ${VPN_SERVER_COUNTRIES}
+      # Proton forwards a random port that changes on every reconnect, so qBittorrent's
+      # listen port is pushed in by the up-command below. The script needs qBittorrent's
+      # "bypass authentication for clients on localhost" enabled.
+      VPN_PORT_FORWARDING: ${VPN_PORT_FORWARDING:-on}
+      PORT_FORWARD_ONLY: ${VPN_PORT_FORWARD_ONLY:-on}
+      VPN_PORT_FORWARDING_UP_COMMAND: "/bin/sh /scripts/qbt-port.sh {{PORT}} ${QBITTORRENT_PORT:-6969}"
       FIREWALL: "on"
       # Deliberately has no fallback: a default wide enough to suit every LAN also covers
       # the VPN provider's own gateway, which silently breaks NAT-PMP port forwarding.
       # The LAN and the proxy network are separate variables so neither has to be widened
       # to cover the other. See .env.example.
-      FIREWALL_OUTBOUND_SUBNETS: ${LAN_SUBNET:?set LAN_SUBNET to your LAN CIDR — see .env.example},${PROXY_SUBNET:?set PROXY_SUBNET to the Compose network CIDR — see .env.example}
+      FIREWALL_OUTBOUND_SUBNETS: ${LAN_SUBNET:?set LAN_SUBNET to your LAN CIDR — see .env.example},${PROXY_SUBNET:-${PROXY_NETWORK_SUBNET:?set PROXY_SUBNET or PROXY_NETWORK_SUBNET to the Compose network CIDR — see .env.example}}
       FIREWALL_INPUT_PORTS: ${TORRENT_PORT:-6881},${QBITTORRENT_PORT:-6969},${NZBGET_PORT:-6789},${PROWLARR_PORT:-9696}
       DNS_ADDRESS: ${VPN_DNS:-1.1.1.1}
       LOG_LEVEL: ${LOG_LEVEL:-info}
       HEALTH_TARGET_ADDRESS: ${VPN_HEALTH_TARGET:-cloudflare.com:443}
+    volumes:
+      - ./scripts/gluetun-qbt-port.sh:/scripts/qbt-port.sh:ro
     networks:
       - traefik-network
     restart: unless-stopped

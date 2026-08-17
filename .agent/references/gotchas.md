@@ -57,6 +57,15 @@ bite.
   hostnames won't resolve on family devices.
 - **Talk to `gluetun:<port>`, not localhost.** The VPN'd services share Gluetun's netns;
   the *arr apps must reference `gluetun:6969/6789/9696`.
+- **`+pmp` in an OpenVPN username does not enable forwarding.** Gluetun also needs
+  `VPN_PORT_FORWARDING=on`. The default transport is WireGuard ([ADR-0011](../decisions/adr-0011-wireguard-vpn-transport.md));
+  ProtonVPN must have NAT-PMP selected when the key is generated. The forwarded
+  port changes on every reconnect — `scripts/gluetun-qbt-port.sh` pushes it into
+  qBittorrent, which requires localhost WebUI auth bypass inside the shared
+  namespace.
+- **`PROXY_SUBNET` and `PROXY_NETWORK_SUBNET` are aliases.** Compose interpolates
+  either. A checkout that only has the older name still renders; do not give
+  them different CIDRs.
 - **NZBGet `saveconfig` writes the file only.** Official JSON-RPC does not apply
   ControlPassword or path changes in-memory; `config()` stays on the old values
   until `reload()`. Rotation must persist `.env` after saveconfig succeeds, then

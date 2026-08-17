@@ -337,7 +337,7 @@ def run_preflight(
             _result(results, key.casefold(), "pass", f"{key} directory exists")
 
     provider = _value(config, "VPN_SERVICE_PROVIDER") or "protonvpn"
-    vpn_type = _value(config, "VPN_TYPE") or "openvpn"
+    vpn_type = _value(config, "VPN_TYPE") or "wireguard"
     provider_name = provider if isinstance(provider, str) else ""
     type_name = vpn_type if isinstance(vpn_type, str) else ""
     try:
