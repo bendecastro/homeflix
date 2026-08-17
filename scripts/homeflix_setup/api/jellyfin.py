@@ -46,16 +46,23 @@ def read_jellyfin_api_key(config_root: str | Path, expected_uid: int) -> str:
         raise ValueError("Jellyfin API key file is invalid") from None
     finally:
         Path(path).unlink(missing_ok=True)
-    matches: list[str] = []
+    exact: list[str] = []
+    similar: list[str] = []
     for row in rows:
         mapping = {key.casefold(): row[key] for key in row.keys()}
         name = mapping.get("name", mapping.get("appname"))
         token = mapping.get("accesstoken")
-        if name == APPLICATION_KEY_NAME and isinstance(token, str) and _KEY.fullmatch(token):
-            matches.append(token)
-    if len(matches) != 1:
-        raise ValueError("Jellyfin API key is invalid")
-    return matches[0]
+        if not isinstance(name, str) or not isinstance(token, str) or not _KEY.fullmatch(token):
+            continue
+        if name == APPLICATION_KEY_NAME:
+            exact.append(token)
+        elif re.search(r"radarr", name, re.I) and re.search(r"sonarr", name, re.I):
+            similar.append(token)
+    if len(exact) == 1:
+        return exact[0]
+    if not exact and len(similar) == 1:
+        return similar[0]
+    raise ValueError("Jellyfin API key is invalid")
 
 
 class JellyfinClient:

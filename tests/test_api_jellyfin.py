@@ -524,6 +524,28 @@ class JellyfinApiTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 read_jellyfin_api_key(root, uid + 100000)
 
+    def test_reads_existing_stack_radarr_sonarr_key_when_canonical_name_absent(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "config"
+            db_dir = root / "jellyfin" / "data" / "data"
+            db_dir.mkdir(parents=True)
+            db = db_dir / "jellyfin.db"
+            connection = sqlite3.connect(db)
+            connection.execute("CREATE TABLE ApiKeys (Id INTEGER PRIMARY KEY, AccessToken TEXT, Name TEXT)")
+            connection.execute(
+                "INSERT INTO ApiKeys (AccessToken, Name) VALUES (?, ?), (?, ?)",
+                (
+                    "JELLYSEERR_KEY_NOT_REAL01", "Jellyseerr",
+                    "HOMEFLIX_ARR_KEY_NOT_REAL", "Homeflix Radarr-Sonarr",
+                ),
+            )
+            connection.commit()
+            connection.close()
+            for path in (root, root / "jellyfin", root / "jellyfin" / "data", db_dir):
+                path.chmod(0o755)
+            db.chmod(0o644)
+            self.assertEqual(read_jellyfin_api_key(root, os.getuid()), "HOMEFLIX_ARR_KEY_NOT_REAL")
+
     def test_inspect_with_access_token_skips_password_login(self):
         transport = FixtureTransport([
             (200, fixture("jellyfin-startup-complete.json")),
