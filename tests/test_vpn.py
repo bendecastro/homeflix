@@ -113,6 +113,7 @@ class FakeVpnRunner:
         raise_at: str | None = None,
         clock: FakeClock | None = None,
         hang_blocked_egress: bool = False,
+        drop_firewall_overhead: float | None = None,
     ) -> None:
         self.inventory = inventory if inventory is not None else []
         self.health = health
@@ -131,6 +132,7 @@ class FakeVpnRunner:
         self.raise_at = raise_at
         self.clock = clock
         self.hang_blocked_egress = hang_blocked_egress
+        self.drop_firewall_overhead = drop_firewall_overhead
         self.disrupted = False
         self.egress_probes = 0
         self.commands: list[tuple[str, ...]] = []
@@ -183,6 +185,17 @@ class FakeVpnRunner:
                     if self.clock is not None:
                         self.clock.now += granted
                     raise subprocess.TimeoutExpired(command, granted or 1)
+                if self.drop_firewall_overhead is not None:
+                    # A DROP firewall makes wget wait for its own -T, then exit
+                    # non-zero. docker exec startup is charged on top.
+                    granted = float(timeout) if timeout is not None else 0.0
+                    tool_timeout = float(command[command.index("-T") + 1])
+                    elapsed = tool_timeout + self.drop_firewall_overhead
+                    if self.clock is not None:
+                        self.clock.now += min(elapsed, granted)
+                    if elapsed >= granted:
+                        raise subprocess.TimeoutExpired(command, granted or 1)
+                    return subprocess.CompletedProcess(command, 1, "", "download timed out")
                 if self.fail_at == "blocked_egress":
                     return subprocess.CompletedProcess(command, 0, (self.tunnel_ip or HOST_EGRESS) + "\n", "")
                 return subprocess.CompletedProcess(command, 1, "", "egress unavailable")
@@ -1119,6 +1132,38 @@ class VpnFailClosedTransactionTests(unittest.TestCase):
             self.assertTrue(any("restart" in text and "gluetun" in text for text in restarted), restarted)
             self.assertTrue(any("restart" in text and "qbittorrent" in text for text in restarted), restarted)
             _assert_bounded(result)
+
+    def test_drop_firewall_probe_proves_blocked_egress_within_budget(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            write_env(root)
+            write_current_evidence(root)
+            clock = FakeClock()
+            runner = FakeVpnRunner(
+                inventory=[_running("qbittorrent")],
+                clock=clock,
+                drop_firewall_overhead=0.6,
+            )
+            result = verify_vpn_fail_closed(
+                root,
+                runner=runner,
+                disrupt=True,
+                deadline=120.0,
+                clock=clock,
+                sleep=clock.sleep,
+                readiness_timeout=120.0,
+            )
+            evidence = SetupState.load(root / ".homeflix" / "setup.json").evidence
+
+        checks = {item["domain"]: item for item in result["checks"]}
+        self.assertIn("blocked_egress", checks)
+        self.assertEqual(checks["blocked_egress"]["status"], "pass")
+        self.assertNotIn("transaction", checks)
+        self.assertTrue(result["passed"], result)
+        self.assertIs(evidence.get("fail_closed"), True)
+        self.assertTrue(runner.blocked_egress_timeouts)
+        self.assertLessEqual(max(runner.blocked_egress_timeouts), VPN_BLOCKED_EGRESS_TIMEOUT)
+        _assert_bounded(result)
 
     def test_blocked_egress_probe_cannot_consume_restore_window(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

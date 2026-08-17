@@ -33,6 +33,7 @@ VPN_EVIDENCE_TTL_SECONDS = 24 * 60 * 60
 VPN_HEALTH_TIMEOUT = 120.0
 VPN_RESTORE_BUDGET = VPN_HEALTH_TIMEOUT + 30.0
 VPN_BLOCKED_EGRESS_TIMEOUT = 5.0
+VPN_BLOCKED_EGRESS_HEADROOM = 2.0
 EGRESS_URL = "https://api.ipify.org"
 _CHECK_STATUSES = ("pass", "warning", "failure", "not-applicable", "unknown")
 _EVIDENCE_BOOLS = ("tunnel_healthy", "tunnel_device", "namespace_dns", "egress_distinct")
@@ -78,7 +79,10 @@ def _blocked_egress_timeout(deadline: float, clock: Callable[[], float]) -> floa
 
 
 def _blocked_egress_argv(timeout: float) -> tuple[str, ...]:
-    seconds = max(1, int(timeout))
+    # A DROP firewall never refuses the connection, so wget only reports failure
+    # once its own -T elapses. Keep that inside the caller's budget, or the
+    # subprocess deadline fires first and blocked egress looks uninspectable.
+    seconds = max(1, int(timeout - VPN_BLOCKED_EGRESS_HEADROOM))
     return ("docker", "exec", "gluetun", "wget", "-qO-", "--tries=1", "-T", str(seconds), EGRESS_URL)
 
 
