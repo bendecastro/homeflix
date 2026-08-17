@@ -121,6 +121,11 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="run explicit fail-closed VPN disruption (vpn phase only)",
     )
+    verify_parser.add_argument(
+        "--discover-probe",
+        action="store_true",
+        help="explicit controlled Jellyfin discovery probe (core phase only)",
+    )
     add_clients_flag(verify_parser)
     setup_parser = subparsers.add_parser("setup", help="run a resumable convenience setup composition")
     setup_parser.add_argument("phase", choices=("core", "acquisition"))
@@ -365,6 +370,13 @@ def main(argv: Sequence[str] | None = None, *, repository_root: Path | None = No
                 error=RuntimeError("acquisition APIs could not be configured safely"),
             )
     elif arguments.command == "verify" and arguments.phase == "vpn":
+        if getattr(arguments, "discover_probe", False):
+            return _input_error(
+                json_output=arguments.json_output,
+                code="verification_refused",
+                label="verification refused",
+                error=RuntimeError("discovery probe applies only to verify core"),
+            )
         try:
             result = verify_vpn_fail_closed(root, disrupt=arguments.disrupt)
         except (OSError, RuntimeError, ValueError, subprocess.SubprocessError, TimeoutError):
@@ -381,6 +393,13 @@ def main(argv: Sequence[str] | None = None, *, repository_root: Path | None = No
                 code="verification_refused",
                 label="verification refused",
                 error=RuntimeError("disruptive verification applies only to verify vpn"),
+            )
+        if getattr(arguments, "discover_probe", False):
+            return _input_error(
+                json_output=arguments.json_output,
+                code="verification_refused",
+                label="verification refused",
+                error=RuntimeError("discovery probe applies only to verify core"),
             )
         try:
             result = evaluate_stack_contract(render_compose_config(root))
@@ -400,7 +419,7 @@ def main(argv: Sequence[str] | None = None, *, repository_root: Path | None = No
                 error=RuntimeError("disruptive verification applies only to verify vpn"),
             )
         try:
-            result = verify_core(root)
+            result = verify_core(root, discover_probe=arguments.discover_probe)
         except (OSError, RuntimeError, ValueError, subprocess.SubprocessError):
             return _input_error(json_output=arguments.json_output, code="verification_refused", label="verification refused", error=RuntimeError("core state could not be verified safely"))
     elif arguments.command == "verify" and arguments.phase == "acquisition":
@@ -410,6 +429,13 @@ def main(argv: Sequence[str] | None = None, *, repository_root: Path | None = No
                 code="verification_refused",
                 label="verification refused",
                 error=RuntimeError("disruptive verification applies only to verify vpn"),
+            )
+        if getattr(arguments, "discover_probe", False):
+            return _input_error(
+                json_output=arguments.json_output,
+                code="verification_refused",
+                label="verification refused",
+                error=RuntimeError("discovery probe applies only to verify core"),
             )
         try:
             result = verify_acquisition(root, clients=requested_clients)

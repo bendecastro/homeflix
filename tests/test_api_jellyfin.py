@@ -524,6 +524,30 @@ class JellyfinApiTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 read_jellyfin_api_key(root, uid + 100000)
 
+    def test_unconditional_discovery_uses_refresh_not_admin_or_targeted_update(self):
+        token = "HomeflixDiscoveryProbe-fixture"
+        transport = FixtureTransport([
+            (200, fixture("jellyfin-startup-complete.json")),
+            (200, fixture("jellyfin-auth.json")),
+            (204, {}),
+            (200, {"Items": []}),
+            (200, {"Items": [{"Name": token, "Id": "fixture-item"}]}),
+            (204, {}),
+        ])
+        sleeps: list[float] = []
+        client = JellyfinClient(transport=transport, clock=lambda: 0.0)
+        client.http.sleep = sleeps.append
+        visible = client.prove_unconditional_discovery("fixture-admin", "FIXTURE_PASSWORD_NOT_REAL", token)
+        self.assertTrue(visible)
+        paths = [request.full_url for request, _ in transport.requests]
+        self.assertTrue(any(path.endswith("/Library/Refresh") for path in paths))
+        self.assertFalse(any("/Notifications/Admin" in path for path in paths))
+        self.assertFalse(any("/Library/Media/Updated" in path for path in paths))
+        self.assertTrue(paths[-1].endswith("/Sessions/Logout"))
+        self.assertIsNone(client.token)
+        rendered = json.dumps([request.full_url for request, _ in transport.requests])
+        self.assertNotIn("FIXTURE_PASSWORD_NOT_REAL", rendered)
+
 
 if __name__ == "__main__":
     unittest.main()

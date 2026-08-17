@@ -220,6 +220,33 @@ class JellyfinClient:
         self.logout()
         return {"initialized": True, "libraries_exact": exact}
 
+    def prove_unconditional_discovery(self, username: str, password: str, token: str) -> bool:
+        """Refresh the whole library and observe whether *token* becomes an item."""
+        if not token or len(token) > 128 or any(ord(character) < 32 for character in token):
+            raise ValueError("discovery probe token is invalid")
+        if not self.startup_completed():
+            return False
+        self.authenticate(username, password)
+        try:
+            self.http.request("POST", "/Library/Refresh", operation="refresh libraries", payload={}, headers=self._headers())
+            query = urlencode({"Recursive": "true", "SearchTerm": token, "IncludeItemTypes": "Movie,Folder"})
+            deadline = self.outer_deadline if self.outer_deadline is not None else self.clock() + 15.0
+            while True:
+                result = self.http.request(
+                    "GET", f"/Items?{query}", operation="search discovery probe", headers=self._headers()
+                )
+                items = result.get("Items") if isinstance(result, dict) else result
+                if isinstance(items, list) and any(
+                    isinstance(item, dict) and token == item.get("Name") for item in items
+                ):
+                    return True
+                remaining = deadline - self.clock()
+                if remaining <= 0:
+                    return False
+                self.http.sleep(min(0.25, remaining))
+        finally:
+            self.logout()
+
     def ensure_library_options(self) -> list[str]:
         existing = self.http.request("GET", "/Library/VirtualFolders", operation="list library options", headers=self._headers())
         if not isinstance(existing, list):

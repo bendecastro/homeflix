@@ -240,7 +240,7 @@ class ConfigureCoreTests(unittest.TestCase):
             self.assertEqual(result["status"], "configured")
 
     def test_readiness_attestation_precedes_all_appdata_and_api_mutation(self):
-        for case in ("wrong_project", "noncore", "unready"):
+        for case in ("wrong_project", "unknown", "unready"):
             with self.subTest(case=case), tempfile.TemporaryDirectory() as directory:
                 root = Path(directory)
                 (root / ".env").write_text(
@@ -256,7 +256,7 @@ class ConfigureCoreTests(unittest.TestCase):
                         records = []
                         for service in ("traefik", "jellyfin", "jellyseerr", "radarr", "sonarr"):
                             records.append({"Service": service, "State": "exited" if case == "unready" and service == "radarr" else "running", "Health": "healthy", "Project": "other" if case == "wrong_project" else "homeflix"})
-                        if case == "noncore": records.append({"Service": "bazarr", "State": "running", "Health": "healthy", "Project": "homeflix"})
+                        if case == "unknown": records.append({"Service": "not-a-homeflix-service", "State": "running", "Health": "healthy", "Project": "homeflix"})
                         return type("Result", (), {"returncode": 0, "stdout": json.dumps(records)})()
                 with patch("scripts.homeflix_setup.core.JellyfinClient", side_effect=AssertionError("no API mutation")):
                     with self.assertRaises(ValueError):

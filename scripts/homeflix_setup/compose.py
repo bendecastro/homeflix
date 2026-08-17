@@ -29,6 +29,8 @@ ALLOWED_PROXY_NETWORKS = tuple(
     for cidr in ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16")
 )
 CORE_SERVICES = ("traefik", "jellyfin", "jellyseerr", "radarr", "sonarr")
+# Optional Compose helpers. Not started by core or acquisition; may already be running.
+SUPPORT_SERVICES = ("deunhealth", "glances", "watchtower")
 GLUETUN_SERVICES = ("gluetun",)
 ACQUISITION_SERVICES = ("gluetun", "qbittorrent", "nzbget", "prowlarr")
 ACQUISITION_CLIENT_SERVICES = ("qbittorrent", "nzbget")

@@ -13,6 +13,8 @@ running homeflix.
 > prove-and-restore, torrent and optional Usenet acquisition, and program-level
 > spec handoff. Disposable-host and private-production live acceptance remain separate.
 > **#4–#13 are fixture-accepted only; they are not live production verification.**
+> **#14** makes core initialize/`verify core` work on an already-complete stack
+> and adds explicit `verify core --discover-probe`.
 
 **Two doors.** This wiki explains *why* homeflix is built the way it is. If you just want
 to run it, you want [`docs/`](../docs/) instead —

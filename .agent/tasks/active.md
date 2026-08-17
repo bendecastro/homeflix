@@ -9,7 +9,8 @@ Updated: 2026-08-17
 - **Program fixture-accepted:** [Deep Homeflix operations](../../docs/changes/deep-homeflix-operations/prd.md),
   parent **#3**, slices **#4–#13**. The public CLI, living specs, compatibility adapters,
   and wiki cursor now describe one fixture-accepted program. The program is fixture-accepted
-  only. Disposable-host and private-production live acceptance remain separate.
+  only. **#14** adds existing-stack core initialize/verify and `verify core --discover-probe`.
+  Disposable-host and private-production live acceptance remain separate.
 - **Completed slice:** [Agent-first core setup](../project/agent-first-core-setup-plan.md),
   covering local Debian/Ubuntu discovery through API-initialized and verified core on existing
   mounted storage. All nine tasks passed fixture tests and independent spec plus

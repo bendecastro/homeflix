@@ -387,3 +387,35 @@ class VerifyCoreCliTests(unittest.TestCase):
                     combined = stdout + stderr
                     self.assertIn("disruptive verification applies only to verify vpn", combined)
 
+    def test_discover_probe_is_core_only(self) -> None:
+        from scripts.homeflix_setup.cli import build_parser
+
+        parsed = build_parser().parse_args(["verify", "core", "--discover-probe"])
+        self.assertTrue(parsed.discover_probe)
+        self.assertFalse(parsed.disrupt)
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for phase in ("contract", "acquisition", "vpn"):
+                with self.subTest(phase=phase):
+                    with patch("scripts.homeflix_setup.cli.verify_core", side_effect=AssertionError("must not verify core")):
+                        with patch("scripts.homeflix_setup.cli.evaluate_stack_contract", side_effect=AssertionError("must not evaluate")):
+                            with patch("scripts.homeflix_setup.cli.verify_acquisition", side_effect=AssertionError("must not verify acquisition")):
+                                with patch("scripts.homeflix_setup.cli.verify_vpn_fail_closed", side_effect=AssertionError("must not disrupt vpn")):
+                                    code, stdout, stderr = run_main("--json", "verify", phase, "--discover-probe", repository_root=root)
+                    self.assertEqual(code, 1)
+                    self.assertIn("discovery probe applies only to verify core", stdout + stderr)
+
+    def test_verify_core_forwards_discover_probe(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            seen: list[bool] = []
+
+            def capture(*args, **kwargs):
+                seen.append(kwargs.get("discover_probe") is True)
+                return {"status": "verified", "passed": True, "checks": []}
+
+            with patch("scripts.homeflix_setup.cli.verify_core", side_effect=capture):
+                code, _stdout, _stderr = run_main("--json", "verify", "core", "--discover-probe", repository_root=root)
+            self.assertEqual(code, 0)
+            self.assertEqual(seen, [True])
+

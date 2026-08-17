@@ -8,6 +8,7 @@ import json
 import os
 from pathlib import Path
 import re
+import shutil
 import stat
 import subprocess
 import time
@@ -18,7 +19,14 @@ import uuid
 from .api import ApiError, ArrClient, JellyfinClient, JellyseerrClient, read_api_key, read_settings_api_key
 from .api.client import Transport, urllib_transport
 from .command import CommandRunner
-from .compose import CORE_SERVICES, compose_command, compose_inventory, compose_ps, compose_up
+from .compose import (
+    CORE_SERVICES,
+    SUPPORT_SERVICES,
+    compose_command,
+    compose_inventory,
+    compose_ps,
+    compose_up,
+)
 from .envfile import EnvDocument
 from .preflight import PreflightReport, run_preflight
 from .state import SetupState
@@ -59,6 +67,7 @@ class DeploymentSnapshot:
 
 READINESS_TIMEOUT = 90.0
 NON_CORE_SERVICES = ("gluetun", "qbittorrent", "nzbget", "prowlarr", "lidarr", "bazarr")
+CLASSIFIED_PROJECT_SERVICES = CORE_SERVICES + NON_CORE_SERVICES + SUPPORT_SERVICES
 QUICKSYNC_DEVICE = "/dev/dri"
 
 HttpProbe = Callable[[str, Mapping[str, str], float], bool]
@@ -255,7 +264,10 @@ def _attest_core_readiness(
     inventory = compose_inventory(root, runner, project_name=project_name, timeout=remaining)
     if any(item["project"] != "homeflix" for item in inventory):
         raise ValueError("live Compose project identity did not match")
-    if tuple(sorted(item["service"] for item in inventory)) != tuple(sorted(CORE_SERVICES)):
+    observed = {item["service"] for item in inventory}
+    if not observed.issubset(set(CLASSIFIED_PROJECT_SERVICES)):
+        raise ValueError("live Compose inventory contained an unknown project service")
+    if not set(CORE_SERVICES).issubset(observed):
         raise ValueError("live Compose core inventory was not exact")
     states = {item["service"]: item for item in inventory}
     readiness = _initial_readiness(
@@ -700,6 +712,48 @@ def _inspect_data_mount(
     return True if observed == 2 else None
 
 
+def _run_discovery_probe(
+    config: EnvDocument | None,
+    values: Mapping[str, str | None],
+    transports: Mapping[str, Transport],
+    deadline: float,
+    clock: Callable[[], float],
+) -> dict[str, object]:
+    """Create a uniquely named library probe, refresh, observe, and delete it."""
+    token = "HomeflixDiscoveryProbe-" + uuid.uuid4().hex[:12]
+    data_root = config.get("DATA_ROOT") if config is not None else None
+    movies = Path(data_root) / "media" / "movies" if data_root else None
+    probe_dir = movies / token if movies is not None else None
+    appeared = False
+    try:
+        if movies is None or not movies.is_dir() or probe_dir is None:
+            raise ValueError("movies library path is unavailable")
+        probe_dir.mkdir(mode=0o755)
+        (probe_dir / f"{token}.mp4").write_bytes(b"\x00\x00\x00\x18ftypmp42")
+        client = JellyfinClient(
+            transport=transports.get("jellyfin", urllib_transport),
+            deadline=deadline,
+            clock=clock,
+        )
+        appeared = client.prove_unconditional_discovery(
+            values.get("JELLYFIN_ADMIN_USER") or "",
+            values.get("JELLYFIN_ADMIN_PASSWORD") or "",
+            token,
+        )
+    except (OSError, RuntimeError, ValueError, TypeError, ApiError, TimeoutError):
+        appeared = False
+    finally:
+        cleaned = True
+        if probe_dir is not None and probe_dir.exists():
+            shutil.rmtree(probe_dir)
+            cleaned = not probe_dir.exists()
+    if appeared and cleaned:
+        return _check("discovery_probe", True, "unconditional refresh surfaced the probe")
+    if appeared and not cleaned:
+        return _check("discovery_probe", False, "probe appeared but could not be removed")
+    return _check("discovery_probe", False, "unconditional refresh did not surface the probe")
+
+
 def _inspect_docker(runner: CommandRunner, *, timeout: float) -> bool | None:
     if timeout <= 0:
         raise TimeoutError("core operation deadline exhausted")
@@ -726,6 +780,7 @@ def verify_core(
     contract_evaluator: Callable[..., Mapping[str, object]] | None = None,
     mount_inspector: Callable[..., bool | None] = _inspect_data_mount,
     hardlink_prober: Callable[..., bool | None] = _probe_hardlink_outcome,
+    discover_probe: bool = False,
 ) -> dict[str, object]:
     """Inspect live core state. Checkpoints are never consulted or changed."""
     root = Path(repository_root).resolve()
@@ -788,7 +843,7 @@ def verify_core(
             raise TimeoutError("core operation deadline exhausted")
         inventory = compose_inventory(root, command_runner, project_name=project_name, timeout=remaining)
         observed_services = {item["service"] for item in inventory}
-        if not observed_services.issubset(set(CORE_SERVICES) | set(NON_CORE_SERVICES)):
+        if not observed_services.issubset(set(CLASSIFIED_PROJECT_SERVICES)):
             raise ValueError("Compose service inventory contained an unknown project service")
         projects_ok = bool(inventory) and all(item["project"] == "homeflix" for item in inventory)
         checks.append(_check("compose_project", project_ok and projects_ok, "expected project scope observed" if project_ok and projects_ok else "expected project scope was not observed"))
@@ -827,8 +882,17 @@ def verify_core(
             checks.append(_check(f"service:{service}", None, "service readiness could not be inspected"))
 
     present_non_core = sorted(name for name in NON_CORE_SERVICES if name in by_service)
-    absent = not present_non_core
-    checks.append(_check("acquisition_absent", absent, "acquisition services are absent" if absent else "Non-core project services present: " + ", ".join(present_non_core)))
+    if present_non_core:
+        checks.append(
+            _check(
+                "acquisition_absent",
+                True,
+                "classified non-core services present: " + ", ".join(present_non_core),
+                status="warning",
+            )
+        )
+    else:
+        checks.append(_check("acquisition_absent", True, "acquisition services are absent"))
 
     try:
         if mount_inspector is _inspect_data_mount:
@@ -903,6 +967,11 @@ def verify_core(
         for domain in ("jellyfin", "radarr", "sonarr", "jellyseerr"):
             if domain not in existing:
                 checks.append(_check(domain, None, f"{domain} {reason}"))
+
+    if discover_probe:
+        checks.append(_run_discovery_probe(
+            config, values, chosen, operation_deadline, clock,
+        ))
 
     try:
         if quicksync_inspector is _inspect_quicksync:

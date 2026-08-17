@@ -19,6 +19,7 @@ from scripts.homeflix_setup.core import (
     _inspect_quicksync,
     _readiness_targets,
     capture_deployment_snapshot,
+    configure_core,
     deploy_core,
     reconcile_core,
     verify_core,
@@ -731,7 +732,7 @@ class StatefulCoreFixture:
             include_project = operation[1] == "--all"
             records = [
                 {"Service": service, "State": "running", "Health": "healthy", **({"Project": "homeflix"} if include_project else {})}
-                for service in CORE_SERVICES if service in self.containers
+                for service in sorted(self.containers)
             ]
             return subprocess.CompletedProcess(command, 0, json.dumps(records), "")
         raise AssertionError(f"unexpected fixture Compose operation {operation}")
@@ -1250,19 +1251,41 @@ class CoreVerificationAndResumeTests(unittest.TestCase):
         self.assertEqual(next(item for item in empty["checks"] if item["domain"] == "acquisition_absent")["status"], "pass")
         self.assertEqual(next(item for item in empty["checks"] if item["domain"] == "compose_project")["status"], "failure")
 
-    def test_verify_fails_for_every_explicit_non_core_service(self):
-        for forbidden in ("gluetun", "qbittorrent", "nzbget", "prowlarr", "lidarr", "bazarr"):
-            with self.subTest(service=forbidden):
+    def test_verify_warns_for_classified_non_core_without_failing(self):
+        for extra in ("gluetun", "qbittorrent", "nzbget", "prowlarr", "lidarr", "bazarr"):
+            with self.subTest(service=extra):
                 temporary, root = self.make_root()
                 try:
                     class Runner:
                         def run(self, argv, **kwargs):
-                            records = [{"Service": service, "State": "running", "Health": "healthy", "Project": "homeflix"} for service in (*CORE_SERVICES, forbidden)]
+                            records = [{"Service": service, "State": "running", "Health": "healthy", "Project": "homeflix"} for service in (*CORE_SERVICES, extra)]
                             return subprocess.CompletedProcess(argv, 0, json.dumps(records), "")
-                    result = verify_core(root, runner=Runner(), http_waiter=lambda *args, **kwargs: ReadinessResult(True, "ready"), quicksync_inspector=lambda *args: None)
+                    class Jellyfin:
+                        def __init__(self, **kwargs): pass
+                        def inspect(self, *args): return {"initialized": True, "libraries_exact": True}
+                    class Arr:
+                        def __init__(self, service, *args, **kwargs): self.service = service
+                        def inspect(self, profile, path):
+                            return {"profile_exact": True, "root_exact": True, "media_settings": True, "completed_handling": True, "targeted_connection_exact": True, "refresh_connection_exact": True, "runtime_profile": {"id": 1, "name": profile}, "runtime_root": {"id": 2, "path": path}}
+                    class Seerr:
+                        def __init__(self, **kwargs): pass
+                        def authorize(self, key): pass
+                        def inspect(self, runtime): return {"initialized": True, "jellyfin": True, "radarr": True, "sonarr": True}
+                    with patch("scripts.homeflix_setup.core.JellyfinClient", Jellyfin), patch("scripts.homeflix_setup.core.ArrClient", Arr), patch("scripts.homeflix_setup.core.JellyseerrClient", Seerr):
+                        result = verify_core(
+                            root, runner=Runner(),
+                            api_key_reader=lambda *args: "FIXTURE_API_KEY_1234567890ABCDE",
+                            settings_key_reader=lambda *args: "FIXTURE_API_KEY_1234567890ABCDE",
+                            http_waiter=lambda *args, **kwargs: ReadinessResult(True, "ready"),
+                            quicksync_inspector=lambda *args: None,
+                            contract_evaluator=lambda _root: {"passed": True, "findings": []},
+                            mount_inspector=lambda *args, **kwargs: True,
+                            hardlink_prober=lambda *args, **kwargs: True,
+                        )
                     check = next(item for item in result["checks"] if item["domain"] == "acquisition_absent")
-                    self.assertEqual(check["status"], "failure")
-                    self.assertIn(forbidden, check["reason"])
+                    self.assertEqual(check["status"], "warning")
+                    self.assertIn(extra, check["reason"])
+                    self.assertTrue(result["passed"], result)
                 finally:
                     temporary.cleanup()
 
@@ -1345,7 +1368,7 @@ class CoreVerificationAndResumeTests(unittest.TestCase):
             ("sonarr_wrong", "sonarr", "unknown"),
             ("jellyseerr_false", "jellyseerr", "failure"),
             ("jellyseerr_wrong", "jellyseerr", "unknown"),
-            ("acquisition", "acquisition_absent", "failure"),
+            ("acquisition", "acquisition_absent", "warning"),
             ("acquisition_malformed", "acquisition_absent", "unknown"),
             ("quicksync_invalid", "quicksync", "failure"),
             ("quicksync_unknown", "quicksync", "unknown"),
@@ -1391,9 +1414,10 @@ class CoreVerificationAndResumeTests(unittest.TestCase):
                         return False if scenario == "quicksync_invalid" else None
                     with patch("scripts.homeflix_setup.core.JellyfinClient", Jellyfin), patch("scripts.homeflix_setup.core.ArrClient", Arr), patch("scripts.homeflix_setup.core.JellyseerrClient", Seerr):
                         result = verify_core(root, runner=Runner(), api_key_reader=lambda *args: StatefulCoreFixture.key, settings_key_reader=lambda *args: StatefulCoreFixture.key, http_waiter=lambda *args, **kwargs: ReadinessResult(True, "ready"), quicksync_inspector=quick)
-                    self.assertFalse(result["passed"])
                     check = next(item for item in result["checks"] if item["domain"] == domain)
                     self.assertEqual(check["status"], expected_status)
+                    if scenario != "acquisition":
+                        self.assertFalse(result["passed"])
                     rendered = json.dumps(result)
                     for private in ("/root", "10.0.0.1"):
                         self.assertNotIn(private, rendered)
@@ -1455,6 +1479,37 @@ class CoreVerificationAndResumeTests(unittest.TestCase):
                     self.assertEqual(up_calls, 1 if missing == "container" else 0)
                 finally:
                     temporary.cleanup()
+
+    def test_initialize_accepts_classified_extras_and_does_not_start_them(self):
+        temporary, root = self.make_root(); self.addCleanup(temporary.cleanup)
+        with (root / ".env").open("a", encoding="utf-8") as environment:
+            environment.write(f"DATA_ROOT={root}\n")
+        (root / "docker-compose.yml").write_text("services: {}\n", encoding="utf-8")
+        fixture = StatefulCoreFixture(None)
+        fixture.containers.update({"gluetun", "qbittorrent", "deunhealth"})
+        result = configure_core(
+            root,
+            runner=fixture,
+            transports={
+                "jellyfin": fixture.jellyfin,
+                "radarr": fixture.arr("radarr"),
+                "sonarr": fixture.arr("sonarr"),
+                "jellyseerr": fixture.jellyseerr,
+            },
+            api_key_reader=lambda *args: fixture.key,
+            settings_key_reader=lambda *args: fixture.key,
+            http_waiter=lambda *args, **kwargs: ReadinessResult(True, "ready"),
+        )
+        self.assertIn(result.get("status"), {"configured", "unchanged", None})
+        self.assertTrue(any(key.endswith("_changed") or key in {"jellyfin", "radarr", "sonarr"} for key in result))
+        rendered = json.dumps(result)
+        self.assertNotIn("gluetun", " ".join(" ".join(command) for command in fixture.commands if "up" in command))
+        for command in fixture.commands:
+            if "up" in command:
+                self.assertNotIn("gluetun", command)
+                self.assertNotIn("qbittorrent", command)
+                self.assertNotIn("deunhealth", command)
+        self.assertNotIn("NOT_REAL", rendered)
 
 
 class FakeRuntimeVerificationTests(unittest.TestCase):
@@ -1668,6 +1723,108 @@ class FakeRuntimeVerificationTests(unittest.TestCase):
         self.assertEqual(by_domain["quicksync"], "not-applicable")
         self.assertTrue(all(status in {"pass", "not-applicable"} for status in by_domain.values()))
         self.assert_secret_free(result, extra=(str(data),))
+
+    def test_existing_stack_with_classified_extras_verifies(self):
+        temporary, root, _data = self.make_root(); self.addCleanup(temporary.cleanup)
+        extras = ("gluetun", "qbittorrent", "prowlarr", "bazarr", "deunhealth", "glances", "watchtower")
+
+        class Existing:
+            def __init__(self): self.commands = []
+            def run(self, argv, **kwargs):
+                self.commands.append(tuple(argv))
+                command = tuple(argv)
+                if command[:2] == ("docker", "info"):
+                    return subprocess.CompletedProcess(argv, 0, "Server Version: fixture\n", "")
+                if "up" in command or "down" in command or "restart" in command:
+                    raise AssertionError(f"verify must not mutate compose: {command}")
+                records = [
+                    {"Service": service, "State": "running", "Health": "healthy", "Project": "homeflix"}
+                    for service in (*CORE_SERVICES, *extras)
+                ]
+                return subprocess.CompletedProcess(argv, 0, json.dumps(records), "")
+
+        result = self.verify(root, Existing())
+        self.assertTrue(result["passed"], result)
+        self.assertEqual(result["status"], "verified")
+        acquisition = next(item for item in result["checks"] if item["domain"] == "acquisition_absent")
+        self.assertEqual(acquisition["status"], "warning")
+        self.assertTrue(any(name in acquisition["reason"] for name in extras))
+        self.assert_secret_free(result)
+
+    def test_discover_probe_observes_refresh_and_removes_only_the_probe(self):
+        temporary, root, data = self.make_root(); self.addCleanup(temporary.cleanup)
+        movies = data / "media" / "movies"
+        movies.mkdir(parents=True)
+        sibling = movies / "keep-me"
+        sibling.mkdir()
+        seen: dict[str, object] = {"tokens": [], "paths": []}
+
+        class Healthy:
+            def run(self, argv, **kwargs):
+                command = tuple(argv)
+                if command[:2] == ("docker", "info"):
+                    return subprocess.CompletedProcess(argv, 0, "Server Version: fixture\n", "")
+                records = [
+                    {"Service": service, "State": "running", "Health": "healthy", "Project": "homeflix"}
+                    for service in CORE_SERVICES
+                ]
+                return subprocess.CompletedProcess(argv, 0, json.dumps(records), "")
+
+        class ProbeJellyfin:
+            def __init__(self, **kwargs): pass
+            def inspect(self, *args):
+                return {"initialized": True, "libraries_exact": True}
+            def prove_unconditional_discovery(self, username, password, token):
+                seen["tokens"].append(token)
+                matches = [path for path in movies.iterdir() if path.name == token]
+                seen["paths"].append([path.name for path in movies.iterdir()])
+                return bool(matches)
+
+        jellyfin, arr, seerr = self.clients()
+        kwargs = {
+            "runner": Healthy(),
+            "api_key_reader": lambda *args: "FIXTURE_API_KEY_1234567890ABCDE",
+            "settings_key_reader": lambda *args: "FIXTURE_API_KEY_1234567890ABCDE",
+            "http_waiter": lambda *args, **kwargs: ReadinessResult(True, "ready"),
+            "quicksync_inspector": lambda *args: None,
+            "contract_evaluator": lambda _root: {"passed": True, "findings": []},
+            "mount_inspector": lambda *args, **kwargs: True,
+            "hardlink_prober": lambda *args, **kwargs: True,
+            "discover_probe": True,
+        }
+        with patch("scripts.homeflix_setup.core.JellyfinClient", ProbeJellyfin), patch("scripts.homeflix_setup.core.ArrClient", arr), patch("scripts.homeflix_setup.core.JellyseerrClient", seerr):
+            result = verify_core(root, **kwargs)
+        self.assertTrue(result["passed"], result)
+        probe = next(item for item in result["checks"] if item["domain"] == "discovery_probe")
+        self.assertEqual(probe["status"], "pass")
+        self.assertEqual(seen["tokens"], [seen["tokens"][0]])
+        self.assertTrue(str(seen["tokens"][0]).startswith("HomeflixDiscoveryProbe-"))
+        self.assertTrue(sibling.exists())
+        leftover = [path.name for path in movies.iterdir()]
+        self.assertEqual(leftover, ["keep-me"])
+        rendered = json.dumps(result)
+        self.assertNotIn(seen["tokens"][0], rendered)
+        self.assertNotIn(str(data), rendered)
+        self.assertNotIn("keep-me", rendered)
+
+    def test_unknown_project_service_still_fails_verify(self):
+        temporary, root, _data = self.make_root(); self.addCleanup(temporary.cleanup)
+
+        class Unexpected:
+            def run(self, argv, **kwargs):
+                command = tuple(argv)
+                if command[:2] == ("docker", "info"):
+                    return subprocess.CompletedProcess(argv, 0, "Server Version: fixture\n", "")
+                records = [
+                    {"Service": service, "State": "running", "Health": "healthy", "Project": "homeflix"}
+                    for service in (*CORE_SERVICES, "not-a-homeflix-service")
+                ]
+                return subprocess.CompletedProcess(argv, 0, json.dumps(records), "")
+
+        result = self.verify(root, Unexpected())
+        self.assertFalse(result["passed"])
+        self.assertEqual(next(item for item in result["checks"] if item["domain"] == "compose_project")["status"], "unknown")
+        self.assert_secret_free(result)
 
     def test_running_healthy_but_waiter_not_ready_is_failure(self):
         temporary, root, _data = self.make_root(); self.addCleanup(temporary.cleanup)

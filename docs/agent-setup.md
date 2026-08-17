@@ -98,7 +98,12 @@ rerun is GET-only. Duplicates or conflicting owned settings fail without extra w
 `verify core` checks event selection, the internal Docker address, refresh behavior, and
 the required `X-Emby-Token` header, and never returns the dedicated Jellyfin key. Do not
 treat a passing built-in connection Test as proof that a new title will appear; that test
-only POSTs `/Notifications/Admin`. See [first use](first-use.md#4-make-imports-appear-promptly)
+only POSTs `/Notifications/Admin`. An already-running acquisition stack or optional helpers
+(`deunhealth`, `glances`, `watchtower`) do not fail core initialize or `verify core`;
+unknown project services still do. To prove unconditional refresh with a controlled
+equivalent rather than a household title, run `scripts/homeflix --json verify core
+--discover-probe`. That flag writes and deletes a uniquely named movies-library probe and
+is not part of routine verification. See [first use](first-use.md#4-make-imports-appear-promptly)
 for the operator-facing two-connection model.
 
 ## Recovery, status, and resume

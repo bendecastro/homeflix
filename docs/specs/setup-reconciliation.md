@@ -4,6 +4,7 @@
 
 - The system SHALL preserve separate core and acquisition phases. Acquisition credentials or capabilities SHALL NOT block core setup. `(satisfied #9 for credential isolation)`
 - Reconciliation SHALL inspect live state and make only the smallest safe changes to setup-owned state. `(satisfied #6 for core; satisfied #11/#12 for acquisition)`
+- Core initialize SHALL require every core service to be present and ready, SHALL allow classified non-core and optional helper services to already be running, and SHALL still refuse unknown project services. Core operations SHALL NOT start those extras. `(satisfied #14)`
 - A no-change rerun SHALL NOT duplicate accounts, libraries, roots, connections, categories, clients, applications, or indexers. `(satisfied #6 for core; satisfied #11/#12 for acquisition)`
 - Core reconciliation SHALL configure reliable Jellyfin discovery for both known and genuinely new imported titles. `(satisfied #6)`
 - Core reconciliation SHALL verify unconditional library refresh behavior rather than trusting only a targeted connection's built-in test. `(satisfied #6)`

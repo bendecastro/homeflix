@@ -629,3 +629,10 @@ WireGuard + `VPN_PORT_FORWARDING` the default and mounts
 `scripts/gluetun-qbt-port.sh` so a reconnecting forwarded port reaches
 qBittorrent. OpenVPN remains a one-variable switch. Fixture-accepted only.
 
+## [2026-08-17] build | Existing-stack core verify and discovery probe
+
+#14: `initialize core` and `verify core` accept classified non-core and optional
+helpers already running; unknown services still fail. `acquisition_absent` is a
+warning on an existing stack. `verify core --discover-probe` is the explicit
+controlled equivalent for unconditional Jellyfin refresh. Fixture-accepted only.
+
