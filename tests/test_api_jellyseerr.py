@@ -183,6 +183,12 @@ class JellyseerrApiTests(unittest.TestCase):
             root.chmod(0o755); service.chmod(0o755); path.chmod(0o644)
             uid = os.getuid()
             self.assertEqual(read_settings_api_key(root, uid), KEY)
+            padded = KEY + "=="
+            path.write_text(json.dumps({"main": {"apiKey": padded}}), encoding="utf-8")
+            path.chmod(0o644)
+            self.assertEqual(read_settings_api_key(root, uid), padded)
+            path.write_text(json.dumps({"main": {"apiKey": KEY}}), encoding="utf-8")
+            path.chmod(0o644)
             root.chmod(0o775)
             service.chmod(0o775)
             self.assertEqual(read_settings_api_key(root, uid), KEY)

@@ -12,7 +12,7 @@ from .client import ApiError, JsonClient, Transport, urllib_transport
 from .securepath import read_config_file
 
 
-_KEY = re.compile(r"^[A-Za-z0-9_-]{16,256}$")
+_KEY = re.compile(r"^[A-Za-z0-9_-]{16,256}={0,2}$")
 _INTERNAL = {"jellyfin": 8096, "radarr": 7878, "sonarr": 8989}
 
 
