@@ -27,7 +27,10 @@ LIBRARY_OPTIONS = {"SaveLocalMetadata": False, "MetadataSavers": [], "SaveTrickp
 
 def read_jellyfin_api_key(config_root: str | Path, expected_uid: int) -> str:
     """Read the dedicated *arr Jellyfin API key from the existing appdata store."""
-    raw = read_config_file(config_root, ("jellyfin", "data", "data", "jellyfin.db"), expected_uid)
+    raw = read_config_file(
+        config_root, ("jellyfin", "data", "data", "jellyfin.db"), expected_uid,
+        limit=64 * 1024 * 1024,
+    )
     with tempfile.NamedTemporaryFile(prefix="homeflix-jellyfin-", suffix=".db", delete=False) as copied:
         os.fchmod(copied.fileno(), 0o600)
         copied.write(raw)
