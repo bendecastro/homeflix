@@ -56,12 +56,13 @@ class JellyseerrClient:
         current = self.http.request("GET", "/api/v1/settings/jellyfin", operation="read Jellyfin settings")
         if not isinstance(current, dict):
             raise ApiError("jellyseerr", "reconcile Jellyfin settings", None, "jellyfin_connection_conflict")
+        host = current.get("hostname") or current.get("ip")
         equivalent = (
-            current.get("hostname") == "jellyfin"
+            host == "jellyfin"
             and current.get("port") == 8096
             and current.get("useSsl") is False
-            and current.get("urlBase") == ""
-            and ("serverType" not in current or current.get("serverType") == 2)
+            and current.get("urlBase") in {"", None}
+            and current.get("serverType") in {None, 2}
         )
         if not equivalent:
             raise ApiError("jellyseerr", "reconcile Jellyfin settings", None, "jellyfin_connection_conflict")

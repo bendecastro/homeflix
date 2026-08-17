@@ -82,6 +82,12 @@ class JellyseerrApiTests(unittest.TestCase):
                     client.verify_jellyfin()
                 self.assertEqual(raised.exception.code, "jellyfin_connection_conflict")
 
+    def test_jellyfin_connection_accepts_ip_field_used_by_existing_servers(self):
+        current = {"ip": "jellyfin", "port": 8096, "urlBase": "", "useSsl": False}
+        client = JellyseerrClient(transport=QueueTransport([(200, current)]))
+        client.authorize(KEY)
+        self.assertTrue(client.verify_jellyfin())
+
     def test_arr_tests_and_defaults_use_internal_services_and_required_flags(self):
         transport = QueueTransport([(200, {"success": True}), (200, []), (200, {}), (200, {"success": True}), (200, []), (200, {})])
         client = JellyseerrClient(transport=transport)
