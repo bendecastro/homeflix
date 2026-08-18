@@ -644,6 +644,8 @@ class GluetunForwardedPortWritableTests(unittest.TestCase):
             f"tmpfs needs an explicit writable mode: {entries}",
         )
 
-    def test_forwarded_port_fix_does_not_restore_dac_override(self) -> None:
+    def test_gluetun_can_chown_what_it_writes_without_dac_override(self) -> None:
         gluetun = self._render()["services"]["gluetun"]
-        self.assertEqual(sorted(gluetun.get("cap_add") or []), ["NET_ADMIN"])
+        granted = sorted(gluetun.get("cap_add") or [])
+        self.assertEqual(granted, ["CHOWN", "NET_ADMIN"])
+        self.assertNotIn("DAC_OVERRIDE", granted)

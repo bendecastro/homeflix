@@ -93,8 +93,12 @@ services:
     container_name: gluetun
     x-homeflix:
       phase: acquisition
+    # NET_ADMIN builds the tunnel. CHOWN is load-bearing too: Gluetun chowns the
+    # files it writes under /tmp/gluetun to PUID/PGID, and without it port
+    # forwarding fails after the port has already been obtained.
     cap_add:
       - NET_ADMIN
+      - CHOWN
     devices:
       - /dev/net/tun
     ports:
