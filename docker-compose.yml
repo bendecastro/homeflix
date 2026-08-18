@@ -129,6 +129,12 @@ services:
       HEALTH_TARGET_ADDRESS: ${VPN_HEALTH_TARGET:-cloudflare.com:443}
     volumes:
       - ./scripts/gluetun-qbt-port.sh:/scripts/qbt-port.sh:ro
+    # The image ships /tmp/gluetun without an execute bit, and cap_drop: ALL removes
+    # DAC_OVERRIDE, so even root cannot create the forwarded-port file there. NAT-PMP
+    # then succeeds, the write fails, and the up-command never reaches qBittorrent.
+    # A writable tmpfs at the documented path fixes it without restoring the capability.
+    tmpfs:
+      - /tmp/gluetun:mode=0755
     networks:
       - traefik-network
     restart: unless-stopped

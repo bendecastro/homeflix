@@ -606,3 +606,44 @@ class SubnetSelectionTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class GluetunForwardedPortWritableTests(unittest.TestCase):
+    """The forwarded-port file must be writable without restoring DAC_OVERRIDE."""
+
+    def _render(self) -> dict:
+        repository_root = Path(__file__).resolve().parents[1]
+        fixture = repository_root / ".env.example"
+        # Exported values must not leak into interpolation; see the env-isolation issue.
+        document = EnvDocument.load(fixture)
+        environment = {
+            key: value
+            for key, value in os.environ.items()
+            if document.get(key) is None
+        }
+        result = subprocess.run(
+            ["docker", "compose", "--env-file", str(fixture), "config", "--format", "json"],
+            cwd=repository_root,
+            text=True,
+            capture_output=True,
+            check=False,
+            env=environment,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        return json.loads(result.stdout)
+
+    def test_gluetun_gets_a_writable_tmpfs_for_the_forwarded_port_file(self) -> None:
+        gluetun = self._render()["services"]["gluetun"]
+        mounts = gluetun.get("tmpfs") or []
+        if isinstance(mounts, str):
+            mounts = [mounts]
+        entries = [entry for entry in mounts if str(entry).startswith("/tmp/gluetun")]
+        self.assertTrue(entries, f"no tmpfs for /tmp/gluetun: {mounts}")
+        self.assertTrue(
+            any("mode=" in str(entry) for entry in entries),
+            f"tmpfs needs an explicit writable mode: {entries}",
+        )
+
+    def test_forwarded_port_fix_does_not_restore_dac_override(self) -> None:
+        gluetun = self._render()["services"]["gluetun"]
+        self.assertEqual(sorted(gluetun.get("cap_add") or []), ["NET_ADMIN"])
