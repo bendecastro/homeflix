@@ -22,6 +22,7 @@ from scripts.homeflix_setup.discover import (
     ProxyNetworkFact,
 )
 from scripts.homeflix_setup.envfile import EnvDocument
+from tests.helpers import compose_test_environment
 
 
 def facts(
@@ -62,6 +63,7 @@ class ComposeOverrideTests(unittest.TestCase):
             result = subprocess.run(
                 ["docker", "compose", "-f", str(root / "compose.yml"), "-f", str(root / "override.yml"), "config", "--quiet"],
                 text=True, capture_output=True, check=False,
+                env=compose_test_environment(),
             )
             self.assertEqual(result.returncode, 0, result.stderr)
 
@@ -366,6 +368,7 @@ class StorageBindTests(unittest.TestCase):
             text=True,
             capture_output=True,
             check=False,
+            env=compose_test_environment(),
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         rendered = json.loads(result.stdout)
@@ -403,6 +406,7 @@ class VpnFirewallTests(unittest.TestCase):
             text=True,
             capture_output=True,
             check=False,
+            env=compose_test_environment(),
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         rendered = json.loads(result.stdout)
@@ -445,6 +449,7 @@ class VpnFirewallTests(unittest.TestCase):
                 text=True,
                 capture_output=True,
                 check=False,
+                env=compose_test_environment(env_path),
             )
         self.assertEqual(result.returncode, 0, result.stderr)
         rendered = json.loads(result.stdout)
@@ -476,6 +481,7 @@ class VpnFirewallTests(unittest.TestCase):
             text=True,
             capture_output=True,
             check=False,
+            env=compose_test_environment(),
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         rendered = json.loads(result.stdout)
@@ -615,19 +621,13 @@ class GluetunForwardedPortWritableTests(unittest.TestCase):
         repository_root = Path(__file__).resolve().parents[1]
         fixture = repository_root / ".env.example"
         # Exported values must not leak into interpolation; see the env-isolation issue.
-        document = EnvDocument.load(fixture)
-        environment = {
-            key: value
-            for key, value in os.environ.items()
-            if document.get(key) is None
-        }
         result = subprocess.run(
             ["docker", "compose", "--env-file", str(fixture), "config", "--format", "json"],
             cwd=repository_root,
             text=True,
             capture_output=True,
             check=False,
-            env=environment,
+            env=compose_test_environment(fixture),
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         return json.loads(result.stdout)

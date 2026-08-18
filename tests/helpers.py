@@ -3,13 +3,30 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 import subprocess
 import tempfile
 
+from scripts.homeflix_setup.envfile import EnvDocument
+
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 LAUNCHER = REPOSITORY_ROOT / "scripts" / "homeflix"
+
+
+def compose_test_environment(fixture: Path | None = None) -> dict[str, str]:
+    """Keep exported variables from overriding Compose fixture interpolation."""
+    fixture = fixture or REPOSITORY_ROOT / ".env.example"
+    documents = [EnvDocument.load(fixture)]
+    default_fixture = REPOSITORY_ROOT / ".env.example"
+    if fixture.resolve() != default_fixture.resolve():
+        documents.append(EnvDocument.load(default_fixture))
+    return {
+        key: value
+        for key, value in os.environ.items()
+        if all(document.get(key) is None for document in documents)
+    }
 
 
 def run_cli(*args: str, cwd: Path | None = None) -> subprocess.CompletedProcess[str]:

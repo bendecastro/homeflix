@@ -10,6 +10,7 @@ from unittest.mock import patch
 
 from scripts.homeflix_setup.envfile import EnvDocument, update_env
 from scripts.homeflix_setup.secrets import ensure_service_credentials, reveal_jellyfin
+from tests.helpers import compose_test_environment
 
 
 class EnvDocumentTests(unittest.TestCase):
@@ -72,6 +73,7 @@ class EnvDocumentTests(unittest.TestCase):
                     composed = subprocess.run(
                         ["docker", "compose", "--env-file", str(env_path), "-f", str(compose_path), "config", "--environment"],
                         text=True, capture_output=True, check=False,
+                        env=compose_test_environment(env_path),
                     )
                     self.assertEqual(composed.returncode, 0, composed.stderr)
                     environment = dict(line.split("=", 1) for line in composed.stdout.splitlines() if "=" in line)
@@ -102,6 +104,7 @@ class EnvDocumentTests(unittest.TestCase):
             composed = subprocess.run(
                 ["docker", "compose", "--env-file", str(env_path), "-f", str(compose_path), "config", "--environment"],
                 text=True, capture_output=True, check=False,
+                env=compose_test_environment(env_path),
             )
             self.assertEqual(composed.returncode, 0, composed.stderr)
             self.assertIn("VALUE=value # data\n", composed.stdout)
