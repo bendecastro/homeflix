@@ -132,7 +132,11 @@ class QBittorrentClient:
             expect_json=False,
         )
         text = body.decode("utf-8", errors="replace").strip() if isinstance(body, (bytes, bytearray)) else ""
-        return text in {"Ok.", "Ok"} and bool(self._sid)
+        if text in {"Fails.", "Fails"}:
+            return False
+        # qBittorrent 5.x answers a successful login with 204 and no body;
+        # older builds answer "Ok.". Both set the session cookie.
+        return bool(self._sid) and (not text or text in {"Ok.", "Ok"})
 
     def preferences(self) -> dict[str, Any]:
         current = self._request("GET", "/api/v2/app/preferences", operation="read preferences")

@@ -23,9 +23,10 @@ STOCK_PATH = "/downloads"
 
 
 class QbitTransport:
-    def __init__(self) -> None:
+    def __init__(self, *, login_no_content: bool = False) -> None:
         self.sid = "fixture-sid"
         self.password = TEMP
+        self.login_no_content = login_no_content
         self.prefs = {
             "save_path": STOCK_PATH,
             "temp_path_enabled": True,
@@ -44,6 +45,8 @@ class QbitTransport:
             form = {key: values[0] for key, values in parse_qs(outgoing.data.decode()).items()}
         if outgoing.method == "POST" and path.startswith("/api/v2/auth/login"):
             if form.get("username") == "admin" and form.get("password") == self.password:
+                if self.login_no_content:
+                    return HttpResponse(204, b"", {"Set-Cookie": f"SID={self.sid}"})
                 return HttpResponse(200, b"Ok.", {"Set-Cookie": f"SID={self.sid}"})
             return HttpResponse(200, b"Fails.")
         cookie = outgoing.headers.get("Cookie") or outgoing.headers.get("cookie") or ""
@@ -167,3 +170,25 @@ class QBittorrentApiTests(unittest.TestCase):
         self.assertTrue(agreed["port_agrees"])
         self.assertFalse(missing["port_agrees"])
         self.assertNotIn("5914", json.dumps(agreed) + json.dumps(missing))
+
+
+class LoginDialectTests(unittest.TestCase):
+    def test_login_accepts_legacy_ok_body_and_5x_no_content(self) -> None:
+        for no_content in (False, True):
+            with self.subTest(no_content=no_content):
+                transport = QbitTransport(login_no_content=no_content)
+                client = QBittorrentClient("http://127.0.0.1:6969", transport=transport)
+                self.assertTrue(client.login("admin", TEMP))
+
+    def test_login_rejects_wrong_credentials_in_both_dialects(self) -> None:
+        for no_content in (False, True):
+            with self.subTest(no_content=no_content):
+                transport = QbitTransport(login_no_content=no_content)
+                client = QBittorrentClient("http://127.0.0.1:6969", transport=transport)
+                self.assertFalse(client.login("admin", "wrong-password"))
+
+    def test_stale_session_cookie_cannot_mask_a_rejected_login(self) -> None:
+        transport = QbitTransport(login_no_content=True)
+        client = QBittorrentClient("http://127.0.0.1:6969", transport=transport)
+        self.assertTrue(client.login("admin", TEMP))
+        self.assertFalse(client.login("admin", "wrong-password"))
