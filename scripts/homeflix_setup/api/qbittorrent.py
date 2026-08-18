@@ -27,7 +27,8 @@ CATEGORIES = {
     "music": "/data/torrents/music",
 }
 _TEMP_PASSWORD = re.compile(r"session:\s*(\S+)")
-_SID = re.compile(r"(?:^|;\s*)SID=([^;]+)", re.I)
+# qBittorrent 5.x issues QBT_SID_<port>; older builds issue SID.
+_SID = re.compile(r"(?:^|;\s*)(QBT_SID_\d+|SID)=([^;]+)", re.I)
 
 
 def _loopback_base(service: str, base_url: str) -> str:
@@ -70,6 +71,7 @@ class QBittorrentClient:
         self.clock = clock
         self.timeout = min(max(float(timeout), 0.1), 15.0)
         self._sid: str | None = None
+        self._sid_name = "SID"
 
     def _request(
         self,
@@ -86,7 +88,7 @@ class QBittorrentClient:
             "Origin": self.base_url.rstrip("/"),
         }
         if self._sid:
-            headers["Cookie"] = f"SID={self._sid}"
+            headers["Cookie"] = f"{self._sid_name}={self._sid}"
         encoded = None if form is None else urlencode(form).encode()
         if encoded is not None:
             headers["Content-Type"] = "application/x-www-form-urlencoded"
@@ -110,7 +112,8 @@ class QBittorrentClient:
             cookie = str(response.headers.get("Set-Cookie") or response.headers.get("set-cookie") or "")
         match = _SID.search(cookie)
         if match:
-            self._sid = match.group(1)
+            self._sid_name = match.group(1)
+            self._sid = match.group(2)
         if not expect_json:
             return response.body
         if not response.body:

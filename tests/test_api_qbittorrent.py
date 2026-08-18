@@ -23,10 +23,11 @@ STOCK_PATH = "/downloads"
 
 
 class QbitTransport:
-    def __init__(self, *, login_no_content: bool = False) -> None:
+    def __init__(self, *, login_no_content: bool = False, cookie_name: str = "SID") -> None:
         self.sid = "fixture-sid"
         self.password = TEMP
         self.login_no_content = login_no_content
+        self.cookie_name = cookie_name
         self.prefs = {
             "save_path": STOCK_PATH,
             "temp_path_enabled": True,
@@ -45,12 +46,13 @@ class QbitTransport:
             form = {key: values[0] for key, values in parse_qs(outgoing.data.decode()).items()}
         if outgoing.method == "POST" and path.startswith("/api/v2/auth/login"):
             if form.get("username") == "admin" and form.get("password") == self.password:
+                issued = {"set-cookie": f"{self.cookie_name}={self.sid}; HttpOnly; SameSite=Lax; path=/"}
                 if self.login_no_content:
-                    return HttpResponse(204, b"", {"Set-Cookie": f"SID={self.sid}"})
-                return HttpResponse(200, b"Ok.", {"Set-Cookie": f"SID={self.sid}"})
+                    return HttpResponse(204, b"", issued)
+                return HttpResponse(200, b"Ok.", issued)
             return HttpResponse(200, b"Fails.")
         cookie = outgoing.headers.get("Cookie") or outgoing.headers.get("cookie") or ""
-        if f"SID={self.sid}" not in cookie:
+        if f"{self.cookie_name}={self.sid}" not in cookie:
             return HttpResponse(403, b"Forbidden")
         if outgoing.method == "GET" and path.startswith("/api/v2/app/preferences"):
             return HttpResponse(200, json.dumps(self.prefs).encode())
@@ -172,23 +174,44 @@ class QBittorrentApiTests(unittest.TestCase):
         self.assertNotIn("5914", json.dumps(agreed) + json.dumps(missing))
 
 
+DIALECTS = (
+    {"login_no_content": False, "cookie_name": "SID"},
+    {"login_no_content": True, "cookie_name": "QBT_SID_6969"},
+)
+
+
 class LoginDialectTests(unittest.TestCase):
-    def test_login_accepts_legacy_ok_body_and_5x_no_content(self) -> None:
-        for no_content in (False, True):
-            with self.subTest(no_content=no_content):
-                transport = QbitTransport(login_no_content=no_content)
+    def test_login_succeeds_in_legacy_and_5x_dialects(self) -> None:
+        for dialect in DIALECTS:
+            with self.subTest(**dialect):
+                transport = QbitTransport(**dialect)
                 client = QBittorrentClient("http://127.0.0.1:6969", transport=transport)
                 self.assertTrue(client.login("admin", TEMP))
 
     def test_login_rejects_wrong_credentials_in_both_dialects(self) -> None:
-        for no_content in (False, True):
-            with self.subTest(no_content=no_content):
-                transport = QbitTransport(login_no_content=no_content)
+        for dialect in DIALECTS:
+            with self.subTest(**dialect):
+                transport = QbitTransport(**dialect)
                 client = QBittorrentClient("http://127.0.0.1:6969", transport=transport)
                 self.assertFalse(client.login("admin", "wrong-password"))
 
     def test_stale_session_cookie_cannot_mask_a_rejected_login(self) -> None:
-        transport = QbitTransport(login_no_content=True)
+        transport = QbitTransport(**DIALECTS[1])
         client = QBittorrentClient("http://127.0.0.1:6969", transport=transport)
         self.assertTrue(client.login("admin", TEMP))
         self.assertFalse(client.login("admin", "wrong-password"))
+
+    def test_authenticated_request_echoes_the_issued_cookie_name(self) -> None:
+        for dialect in DIALECTS:
+            with self.subTest(**dialect):
+                transport = QbitTransport(**dialect)
+                client = QBittorrentClient("http://127.0.0.1:6969", transport=transport)
+                self.assertTrue(client.login("admin", TEMP))
+                client.preferences()
+                sent = [
+                    request.headers.get("Cookie") or request.headers.get("cookie") or ""
+                    for request in transport.requests
+                ]
+                self.assertTrue(
+                    any(value.startswith(dialect["cookie_name"] + "=") for value in sent), sent
+                )
