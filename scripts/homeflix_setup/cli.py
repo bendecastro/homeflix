@@ -880,6 +880,8 @@ def main(argv: Sequence[str] | None = None, *, repository_root: Path | None = No
     if arguments.command == "deploy":
         return 0 if result["status"] in {"planned", "ready", "already_ready"} else 1
     if arguments.command == "initialize":
+        if arguments.phase == "acquisition":
+            return 0 if result.get("passed") is True else 1
         return 0 if result.get("status") in {"configured", "credentials_required"} else 1
     if arguments.command == "verify":
         return 0 if result.get("passed") is True else 1

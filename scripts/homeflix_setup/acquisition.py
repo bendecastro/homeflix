@@ -654,11 +654,45 @@ def configure_acquisition(
         return _failed(checks + [_check("acquisition", None, "acquisition APIs could not be configured")])
 
     indexer_ok = prowlarr_state.get("indexer_credentials") is True
-    news_ok = (not wants_usenet) or nzb_state.get("news_servers") is True
-    ready = indexer_ok and news_ok
+    mandatory_results: dict[str, bool] = {
+        "connections": (
+            prowlarr_state.get("radarr_application") is True
+            and prowlarr_state.get("sonarr_application") is True
+            and all(state.get("client_exact") is True for state in arr_state.values())
+        ),
+        "jellyfin_discovery": all(
+            state.get("targeted_connection_exact") is True
+            and state.get("refresh_connection_exact") is True
+            for state in arr_state.values()
+        ),
+        "indexers": indexer_ok,
+    }
+    if wants_torrent:
+        mandatory_results.update(
+            {
+                "paths": qbit_state.get("save_path") is True and qbit_state.get("incomplete") is True,
+                "categories": qbit_state.get("categories") is True,
+                "port_agrees": qbit_state.get("port_agrees") is True,
+            }
+        )
+    if wants_usenet:
+        mandatory_results.update(
+            {
+                "paths": mandatory_results.get("paths", True) and nzb_state.get("paths") is True,
+                "categories": mandatory_results.get("categories", True) and nzb_state.get("categories") is True,
+                "news_servers": nzb_state.get("news_servers") is True,
+            }
+        )
+    failures = {domain for domain, passed in mandatory_results.items() if not passed}
+    credential_domains = {"indexers"}
+    if wants_usenet:
+        credential_domains.add("news_servers")
+    credential_only = failures and failures.issubset(credential_domains)
+    ready = not failures
+    status = "configured" if ready else "credentials_required" if credential_only else "failed"
     persist_clients(root, selection)
     payload: dict[str, object] = {
-        "status": "configured" if ready else "credentials_required",
+        "status": status,
         "passed": ready,
         "clients": selection,
         "credential_updated": credential_updated,

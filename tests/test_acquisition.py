@@ -950,6 +950,26 @@ class AcquisitionReconcileTests(unittest.TestCase):
             3,
         )
 
+    def test_configure_fails_when_qbittorrent_port_does_not_agree(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            _prepare_acquisition_root(root)
+            runner = FakeAcquisitionRunner()
+            transports = CombinedAcquisitionTransport()
+            transports.qbit.ignore_listen_port_updates = True
+            transports.prowlarr.indexers = [{"id": 1, "enable": True, "name": "fixture"}]
+            result = configure_acquisition(
+                root,
+                runner=runner,
+                transports=transports.as_map(),
+                clock=FakeClock(),
+                readiness_timeout=5.0,
+            )
+
+        self.assertFalse(result["passed"])
+        self.assertEqual(result["status"], "failed")
+        self.assertFalse(result["qbittorrent"]["port_agrees"])
+
     def test_configure_and_rerun_are_idempotent_and_secret_free(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -1181,6 +1201,20 @@ class AcquisitionCliTests(unittest.TestCase):
                     code, stdout, stderr = run_main("--json", *command, repository_root=root)
                     self.assertEqual(code, 2)
                     self.assertNotIn(QBIT_DURABLE, stdout + stderr)
+
+    def test_initialize_requires_a_passing_acquisition_result(self) -> None:
+        failed = {
+            "status": "configured",
+            "passed": False,
+            "qbittorrent": {"port_agrees": False},
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            with patch("scripts.homeflix_setup.cli.configure_acquisition", return_value=failed):
+                code, stdout, stderr = run_main(
+                    "--json", "initialize", "acquisition", repository_root=Path(directory)
+                )
+        self.assertEqual(code, 1)
+        self.assertEqual(parse_single_json(stdout), failed)
 
     def test_setup_acquisition_dry_run_plans_torrent_clients_only(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

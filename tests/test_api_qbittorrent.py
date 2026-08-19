@@ -28,6 +28,7 @@ class QbitTransport:
         self.password = TEMP
         self.login_no_content = login_no_content
         self.cookie_name = cookie_name
+        self.ignore_listen_port_updates = False
         self.prefs = {
             "save_path": STOCK_PATH,
             "temp_path_enabled": True,
@@ -60,7 +61,14 @@ class QbitTransport:
             updates = json.loads(form["json"])
             if "web_ui_password" in updates:
                 self.password = updates["web_ui_password"]
-            self.prefs.update({key: value for key, value in updates.items() if key != "web_ui_password"})
+            self.prefs.update(
+                {
+                    key: value
+                    for key, value in updates.items()
+                    if key != "web_ui_password"
+                    and not (key == "listen_port" and self.ignore_listen_port_updates)
+                }
+            )
             return HttpResponse(200, b"")
         if outgoing.method == "GET" and path.startswith("/api/v2/torrents/categories"):
             return HttpResponse(200, json.dumps(self.cats).encode())
