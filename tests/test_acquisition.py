@@ -325,7 +325,7 @@ from scripts.homeflix_setup.acquisition import (
     verify_acquisition,
 )
 from scripts.homeflix_setup.api import HttpResponse
-from scripts.homeflix_setup.envfile import EnvDocument
+from scripts.homeflix_setup.envfile import EnvDocument, update_env
 from scripts.homeflix_setup.state import SetupState
 from scripts.homeflix_setup.vpn import vpn_config_digest
 from tests.helpers import parse_single_json
@@ -1063,6 +1063,66 @@ class AcquisitionReconcileTests(unittest.TestCase):
         self.assertEqual(domains["port_agrees"]["status"], "pass")
         self.assertFalse(any("up" in command for command in commands))
         self.assertFalse(any("nzbget" in command for command in commands))
+        rendered = json.dumps(result)
+        for leaked in FORBIDDEN_LEAKS:
+            self.assertNotIn(leaked, rendered)
+
+    def test_verify_reports_configured_forwarded_port_as_unavailable(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            _prepare_acquisition_root(root)
+            runner = FakeAcquisitionRunner()
+            transports = CombinedAcquisitionTransport()
+            configure_acquisition(
+                root,
+                runner=runner,
+                transports=transports.as_map(),
+                clock=FakeClock(),
+                readiness_timeout=5.0,
+            )
+            runner.forwarded_port = None
+            result = verify_acquisition(
+                root,
+                runner=runner,
+                transports=transports.as_map(),
+                clock=FakeClock(),
+                readiness_timeout=5.0,
+            )
+        domains = {item["domain"]: item for item in result["checks"]}
+        self.assertEqual(result["status"], "failed")
+        self.assertFalse(result["passed"])
+        self.assertEqual(domains["port_agrees"]["status"], "failure")
+        self.assertEqual(domains["port_agrees"]["reason"], "forwarded port is configured but unavailable")
+        rendered = json.dumps(result)
+        for leaked in FORBIDDEN_LEAKS:
+            self.assertNotIn(leaked, rendered)
+
+    def test_verify_reports_disabled_port_forwarding_as_not_configured(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            _prepare_acquisition_root(root)
+            runner = FakeAcquisitionRunner()
+            transports = CombinedAcquisitionTransport()
+            configure_acquisition(
+                root,
+                runner=runner,
+                transports=transports.as_map(),
+                clock=FakeClock(),
+                readiness_timeout=5.0,
+            )
+            update_env(root / ".env", {"VPN_PORT_FORWARDING": "off"})
+            runner.forwarded_port = None
+            result = verify_acquisition(
+                root,
+                runner=runner,
+                transports=transports.as_map(),
+                clock=FakeClock(),
+                readiness_timeout=5.0,
+            )
+        domains = {item["domain"]: item for item in result["checks"]}
+        self.assertNotEqual(result["status"], "failed")
+        self.assertEqual(domains["port_agrees"]["status"], "not-applicable")
+        self.assertEqual(domains["port_agrees"]["reason"], "port forwarding is not configured")
         rendered = json.dumps(result)
         for leaked in FORBIDDEN_LEAKS:
             self.assertNotIn(leaked, rendered)

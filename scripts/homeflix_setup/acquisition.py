@@ -379,6 +379,11 @@ def _env_port(config: EnvDocument, name: str, default: int) -> int:
     return value
 
 
+def _port_forwarding_configured(config: EnvDocument) -> bool:
+    raw = (config.get("VPN_PORT_FORWARDING") or "on").strip().casefold()
+    return raw not in {"off", "false", "0", "no"}
+
+
 def read_forwarded_port(runner: CommandRunner, *, timeout: float = 10.0) -> int | None:
     """Read Gluetun's documented forwarded-port file. Never guess a number."""
 
@@ -807,7 +812,14 @@ def verify_acquisition(
             qbit = qbittorrent.inspect(forwarded_port=forwarded)
             paths_ok = paths_ok and qbit["save_path"] is True and qbit["incomplete"] is True
             categories_ok = categories_ok and qbit["categories"] is True
-            checks.append(_check("port_agrees", qbit["port_agrees"] is True, "listen port agrees with the forwarded port"))
+            if not _port_forwarding_configured(config):
+                checks.append(
+                    _check("port_agrees", True, "port forwarding is not configured", status="not-applicable")
+                )
+            elif forwarded is None:
+                checks.append(_check("port_agrees", False, "forwarded port is configured but unavailable"))
+            else:
+                checks.append(_check("port_agrees", qbit["port_agrees"] is True, "listen port agrees with the forwarded port"))
             checks.append(_check("localhost_auth", qbit["bypass_local_auth"] is True, "localhost authentication bypass is enabled"))
         else:
             qbit_port = 0

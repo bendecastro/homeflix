@@ -657,3 +657,11 @@ implemented, fixture-accepted, and re-adopted. An unmet accepted row still
 blocks after the original symptom is fixed. A separately scoped enhancement
 does not. Recorded in the deep-operations PRD Implementation Decisions.
 
+## [2026-08-19] fix | Distinguish unavailable vs unconfigured forwarded port
+
+#23: `verify acquisition` reports `port forwarding is not configured`
+(not-applicable) when `VPN_PORT_FORWARDING` is off, and `forwarded port is
+configured but unavailable` when forwarding is on but the Gluetun status file
+cannot be read. Listen-port mismatch stays a separate `port_agrees` failure.
+No port values are printed. Fixture-accepted only.
+

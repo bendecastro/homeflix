@@ -20,6 +20,7 @@
 - A disruptive verification success SHALL require healthy post-restore egress through a non-host address. `(satisfied #10)`
 - Verification output SHALL distinguish pass, warning, failure, not-applicable, and unknown outcomes. `(satisfied #5 for runtime; #9 for VPN gate; #10 for fail-closed)`
 - Verification SHALL emit bounded boolean evidence without public IPs, private addresses, API keys, passwords, forwarded-port values, or secret-bearing URLs. `(satisfied #5 for runtime; #9 for VPN gate; #10 for fail-closed)`
+- Acquisition verification SHALL distinguish port forwarding that is not configured from a configured forwarded port that is unavailable. Both SHALL NOT be reported as a bare listen-port agreement failure. `(satisfied #23)`
 - Fixture acceptance and live acceptance SHALL be reported as different evidence levels. `(satisfied #12 for phase-level acquisition fixture journeys)`
 - Live request-to-library, disposable-host, and private-production live acceptance remain separate. They are not part of this program's fixture acceptance.
 
@@ -33,3 +34,4 @@
 6. After disruption, a hung blocked-egress probe exhausts the prove deadline; compensation still issues `compose restart` for Gluetun and the snapshot.
 7. Core verification on a host that already runs classified acquisition or optional helpers passes; an unknown project service still fails.
 8. `verify core --discover-probe` surfaces a uniquely named probe through `/Library/Refresh` and removes only that probe.
+9. `verify acquisition` reports not-applicable when port forwarding is disabled, and a configured-but-unavailable failure when forwarding is on but the status file cannot be read.
