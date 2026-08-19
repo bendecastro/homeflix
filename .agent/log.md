@@ -649,3 +649,11 @@ selected quality profile when `.env` has no admin password or QUALITY_PROFILE.
 LinuxServer 0775 config dirs owned by PUID are readable; secret files stay
 fail-closed on group/other write. Fixture-accepted only.
 
+## [2026-08-19] decision | Reusable-defect closeout gate
+
+A reusable defect found while proving a live deployment blocks that
+deployment's adoption closeout until every accepted acceptance row is
+implemented, fixture-accepted, and re-adopted. An unmet accepted row still
+blocks after the original symptom is fixed. A separately scoped enhancement
+does not. Recorded in the deep-operations PRD Implementation Decisions.
+

@@ -75,6 +75,7 @@ Existing shell command paths remain compatibility adapters. The proposed acquisi
 - Restore remains scratch-only, rejects the live configuration root, validates archive members before extraction, and requires at least one valid SQLite database for successful recovery evidence.
 - Structured output remains bounded, schema-versioned, and secret-free. Existing setup state continues to store only non-secret checkpoints and evidence.
 - The architecture uses Python 3’s standard library and the existing command-runner, environment-document, API-client, state, fixture, and deadline patterns.
+- A reusable defect found while proving a live deployment blocks that deployment's adoption closeout until every accepted acceptance row is implemented, fixture-accepted in public, and re-adopted. Fixing the original symptom while leaving an accepted row unmet does not clear the defect: otherwise a green live verify can close the loop while operators still get an undifferentiated failure for the same class. An enhancement or newly scoped follow-up that was not an accepted row of that defect may stay open as remaining public work and does not block closeout. Informal wiki or comment notes cannot waive this; change the planning contract if the gate should move.
 
 ## Testing Decisions
 
@@ -106,4 +107,4 @@ The highest public seam is the structured `scripts/homeflix --json` interface. F
 - Planning evidence is recorded in `docs/changes/deep-homeflix-operations/architecture-review.md`.
 - This PRD supersedes the proposed agent-first acquisition implementation plan while preserving its safety decisions and intended behavior.
 - Production-specific paths, addresses, credentials, household facts, and live state must never be copied into this public repository.
-- The private production queue adopts public commits, gathers redacted live evidence, and returns generalized defects to public before it closes.
+- The private production queue adopts public commits, gathers redacted live evidence, and returns generalized defects to public before it closes. Closeout uses the reusable-defect rule in Implementation Decisions.

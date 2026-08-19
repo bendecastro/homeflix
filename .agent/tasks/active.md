@@ -1,6 +1,6 @@
 # Active Tasks — Live Cursor
 
-Updated: 2026-08-17
+Updated: 2026-08-19
 
 > First thing the next agent reads after `index.md`. Keep it true.
 
@@ -20,7 +20,10 @@ Updated: 2026-08-17
 - **Follow-ups:** guarded [encrypted storage](../project/agent-first-storage-plan.md) remains
   separate. The former acquisition plan is superseded and is not an executable queue.
   Backup SSH transport is the artifact-repository adapter only; host setup SSH
-  remains agent-provided orchestration rather than a CLI transport.
+  remains agent-provided orchestration rather than a CLI transport. Live-deployment
+  closeout follows the reusable-defect rule in the [deep operations PRD](../../docs/changes/deep-homeflix-operations/prd.md)
+  Implementation Decisions: unmet accepted rows still block; separately scoped
+  enhancements do not.
 - **Approved defaults:** Debian/Ubuntu local or SSH target; secure terminal secret handoff;
   resumable core-first deployment; API-driven application setup; agent-led composable tools.
 - **Blockers:** none for fixture-accepted core or the operations program; real-host
