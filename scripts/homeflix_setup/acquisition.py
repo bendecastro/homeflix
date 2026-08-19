@@ -425,6 +425,65 @@ def _require_gate(
     return checks, True
 
 
+def _live_namespace_checks(
+    root: Path,
+    runner: CommandRunner,
+    config: EnvDocument,
+    selection: str,
+    *,
+    deadline: float,
+    clock: Callable[[], float],
+) -> tuple[list[dict[str, object]], bool]:
+    """Confirm running selected clients still use Gluetun's live namespace."""
+
+    try:
+        inventory = compose_inventory(
+            root,
+            runner,
+            project_name=config.get("COMPOSE_PROJECT_NAME"),
+            timeout=_remaining(deadline, clock, 30),
+        )
+        selected = set(selected_services(selection)) - {"gluetun"}
+        running = [
+            item["service"]
+            for item in inventory
+            if item["service"] in selected and item["state"] in {"running", "restarting"}
+        ]
+    except (OSError, RuntimeError, ValueError, subprocess.SubprocessError, TimeoutError):
+        return [_check("namespace", None, "live acquisition namespace could not be inspected")], False
+
+    checks: list[dict[str, object]] = []
+    for service in running:
+        try:
+            shared = namespace_shared(runner, service, timeout=_remaining(deadline, clock, 10))
+        except (OSError, RuntimeError, ValueError, subprocess.SubprocessError, TimeoutError):
+            shared = None
+        if shared is True:
+            checks.append(_check(f"namespace:{service}", True, f"{service} shares the Gluetun namespace"))
+        elif shared is False:
+            checks.append(_check(
+                f"namespace:{service}",
+                False,
+                f"{service} is outside the Gluetun namespace",
+            ))
+        else:
+            checks.append(_check(
+                f"namespace:{service}",
+                None,
+                f"{service} namespace could not be inspected",
+            ))
+
+    if any(item["status"] == "failure" for item in checks):
+        checks.append(_check("namespace", False, "one or more selected clients are outside the Gluetun namespace"))
+        return checks, False
+    if any(item["status"] == "unknown" for item in checks):
+        checks.append(_check("namespace", None, "one or more selected client namespaces could not be inspected"))
+        return checks, False
+    if checks:
+        checks.append(_check("namespace", True, "selected running clients share the Gluetun namespace"))
+    return checks, True
+
+
 def configure_acquisition(
     repository_root: str | os.PathLike[str],
     *,
@@ -449,6 +508,17 @@ def configure_acquisition(
         return _failed([_check("fail_closed", None, "fail-closed evidence could not be inspected")])
     checks, gated = _require_gate(root, command_runner, config, deadline=operation_deadline, clock=clock)
     if not gated:
+        return _failed(checks)
+    namespace_checks, namespace_ok = _live_namespace_checks(
+        root,
+        command_runner,
+        config,
+        selection,
+        deadline=operation_deadline,
+        clock=clock,
+    )
+    checks.extend(namespace_checks)
+    if not namespace_ok:
         return _failed(checks)
 
     wants_torrent = _wants_torrent(selection)

@@ -377,8 +377,21 @@ def write_arr_key(root: Path, service: str, key: str) -> None:
 
 
 class FakeAcquisitionRunner(FakeVpnRunner):
-    def __init__(self, *args, forwarded_port: int | None = FORWARD_PORT, qbit_logs: str = "", started=None, **kwargs):
+    def __init__(
+        self,
+        *args,
+        forwarded_port: int | None = FORWARD_PORT,
+        qbit_logs: str = "",
+        started=None,
+        client_namespace_mode: str | None = None,
+        client_namespace_failure: bool = False,
+        client_namespace_empty: bool = False,
+        **kwargs,
+    ):
         super().__init__(*args, **kwargs)
+        self.client_namespace_mode = client_namespace_mode
+        self.client_namespace_failure = client_namespace_failure
+        self.client_namespace_empty = client_namespace_empty
         self.forwarded_port = forwarded_port
         self.qbit_logs = qbit_logs or (
             "The WebUI administrator username is: admin\n"
@@ -404,13 +417,20 @@ class FakeAcquisitionRunner(FakeVpnRunner):
             return subprocess.CompletedProcess(command, 0, f"{self.forwarded_port}\n", "")
         if command[:2] == ("docker", "inspect") and "{{.Id}}" in command and "gluetun" in command:
             self.commands.append(command)
-            return subprocess.CompletedProcess(command, 0, GLUETUN_CONTAINER_ID + "\n", "")
+            if self.gluetun_id is None:
+                return subprocess.CompletedProcess(command, 1, "", "no such container")
+            return subprocess.CompletedProcess(command, 0, self.gluetun_id + "\n", "")
         if command[:2] == ("docker", "inspect") and any(
             name in command for name in ("qbittorrent", "prowlarr", "nzbget")
         ):
             self.commands.append(command)
             # Compose resolves network_mode: service:gluetun to the container id.
-            return subprocess.CompletedProcess(command, 0, f"container:{GLUETUN_CONTAINER_ID}\n", "")
+            if self.client_namespace_failure:
+                return subprocess.CompletedProcess(command, 1, "", "inspect failed")
+            if self.client_namespace_empty:
+                return subprocess.CompletedProcess(command, 0, "", "")
+            mode = self.client_namespace_mode or f"container:{GLUETUN_CONTAINER_ID}"
+            return subprocess.CompletedProcess(command, 0, mode + "\n", "")
         if "ps" in command:
             self.commands.append(command)
             payload = list(self.inventory)
@@ -769,6 +789,167 @@ def _prepare_acquisition_root(root: Path) -> None:
 
 
 class AcquisitionReconcileTests(unittest.TestCase):
+    def test_configure_rejects_outside_client_before_any_mutation(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            _prepare_acquisition_root(root)
+            setup_before = (root / ".homeflix" / "setup.json").read_bytes()
+            env_before = (root / ".env").read_bytes()
+            runner = FakeAcquisitionRunner(client_namespace_mode="bridge")
+            transports = CombinedAcquisitionTransport()
+            result = configure_acquisition(
+                root,
+                runner=runner,
+                transports=transports.as_map(),
+                clock=FakeClock(),
+                readiness_timeout=5.0,
+            )
+            setup_after = (root / ".homeflix" / "setup.json").read_bytes()
+            env_after = (root / ".env").read_bytes()
+            mutating_requests = [
+                request
+                for transport in transports.as_map().values()
+                for request in getattr(transport, "requests", [])
+                if request.method in {"POST", "PUT", "DELETE", "PATCH"}
+            ]
+
+        self.assertEqual(result["status"], "failed")
+        checks = {item["domain"]: item for item in result["checks"]}
+        self.assertEqual(checks["namespace:qbittorrent"]["status"], "failure")
+        self.assertIn("outside", checks["namespace:qbittorrent"]["reason"])
+        self.assertEqual(mutating_requests, [])
+        self.assertEqual(setup_before, setup_after)
+        self.assertEqual(env_before, env_after)
+
+    def test_configure_rejects_uninspectable_client_before_any_mutation(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            _prepare_acquisition_root(root)
+            setup_before = (root / ".homeflix" / "setup.json").read_bytes()
+            env_before = (root / ".env").read_bytes()
+            runner = FakeAcquisitionRunner(client_namespace_failure=True)
+            transports = CombinedAcquisitionTransport()
+            result = configure_acquisition(
+                root,
+                runner=runner,
+                transports=transports.as_map(),
+                clock=FakeClock(),
+                readiness_timeout=5.0,
+            )
+            setup_after = (root / ".homeflix" / "setup.json").read_bytes()
+            env_after = (root / ".env").read_bytes()
+            mutating_requests = [
+                request
+                for transport in transports.as_map().values()
+                for request in getattr(transport, "requests", [])
+                if request.method in {"POST", "PUT", "DELETE", "PATCH"}
+            ]
+
+        self.assertEqual(result["status"], "failed")
+        checks = {item["domain"]: item for item in result["checks"]}
+        self.assertEqual(checks["namespace:qbittorrent"]["status"], "unknown")
+        self.assertIn("could not be inspected", checks["namespace:qbittorrent"]["reason"])
+        self.assertEqual(mutating_requests, [])
+        self.assertEqual(setup_before, setup_after)
+        self.assertEqual(env_before, env_after)
+
+    def test_configure_rejects_empty_namespace_inspection_before_any_mutation(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            _prepare_acquisition_root(root)
+            setup_before = (root / ".homeflix" / "setup.json").read_bytes()
+            env_before = (root / ".env").read_bytes()
+            runner = FakeAcquisitionRunner(client_namespace_empty=True)
+            transports = CombinedAcquisitionTransport()
+            result = configure_acquisition(
+                root,
+                runner=runner,
+                transports=transports.as_map(),
+                clock=FakeClock(),
+                readiness_timeout=5.0,
+            )
+            setup_after = (root / ".homeflix" / "setup.json").read_bytes()
+            env_after = (root / ".env").read_bytes()
+            mutating_requests = [
+                request
+                for transport in transports.as_map().values()
+                for request in getattr(transport, "requests", [])
+                if request.method in {"POST", "PUT", "DELETE", "PATCH"}
+            ]
+
+        self.assertEqual(result["status"], "failed")
+        checks = {item["domain"]: item for item in result["checks"]}
+        self.assertEqual(checks["namespace:qbittorrent"]["status"], "unknown")
+        self.assertIn("could not be inspected", checks["namespace:qbittorrent"]["reason"])
+        self.assertEqual(mutating_requests, [])
+        self.assertEqual(setup_before, setup_after)
+        self.assertEqual(env_before, env_after)
+
+    def test_configure_rejects_missing_gluetun_id_before_any_mutation(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            _prepare_acquisition_root(root)
+            setup_before = (root / ".homeflix" / "setup.json").read_bytes()
+            env_before = (root / ".env").read_bytes()
+            runner = FakeAcquisitionRunner(client_namespace_mode="container:stale", gluetun_id=None)
+            transports = CombinedAcquisitionTransport()
+            result = configure_acquisition(
+                root,
+                runner=runner,
+                transports=transports.as_map(),
+                clock=FakeClock(),
+                readiness_timeout=5.0,
+            )
+            setup_after = (root / ".homeflix" / "setup.json").read_bytes()
+            env_after = (root / ".env").read_bytes()
+            mutating_requests = [
+                request
+                for transport in transports.as_map().values()
+                for request in getattr(transport, "requests", [])
+                if request.method in {"POST", "PUT", "DELETE", "PATCH"}
+            ]
+
+        self.assertEqual(result["status"], "failed")
+        checks = {item["domain"]: item for item in result["checks"]}
+        self.assertEqual(checks["namespace:qbittorrent"]["status"], "unknown")
+        self.assertIn("could not be inspected", checks["namespace:qbittorrent"]["reason"])
+        self.assertEqual(mutating_requests, [])
+        self.assertEqual(setup_before, setup_after)
+        self.assertEqual(env_before, env_after)
+
+    def test_configure_checks_all_running_clients_for_both_selection(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            _prepare_acquisition_root(root)
+            runner = FakeAcquisitionRunner(
+                started={"gluetun", "qbittorrent", "nzbget", "prowlarr"},
+            )
+            transports = CombinedAcquisitionTransport()
+            result = configure_acquisition(
+                root,
+                runner=runner,
+                transports=transports.as_map(),
+                clients="both",
+                clock=FakeClock(),
+                readiness_timeout=5.0,
+            )
+            inspect_commands = [
+                command
+                for command in runner.commands
+                if command[:2] == ("docker", "inspect") and "{{.HostConfig.NetworkMode}}" in command
+            ]
+
+        self.assertEqual(result["status"], "credentials_required")
+        self.assertCountEqual(
+            [command[-1] for command in inspect_commands],
+            ["qbittorrent", "nzbget", "prowlarr"],
+        )
+        self.assertTrue(all("gluetun" not in command[-1:] for command in inspect_commands))
+        self.assertGreaterEqual(
+            len([command for command in runner.commands if "{{.Id}}" in command and command[-1] == "gluetun"]),
+            3,
+        )
+
     def test_configure_and_rerun_are_idempotent_and_secret_free(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
