@@ -665,3 +665,9 @@ configured but unavailable` when forwarding is on but the Gluetun status file
 cannot be read. Listen-port mismatch stays a separate `port_agrees` failure.
 No port values are printed. Fixture-accepted only.
 
+## [2026-08-19] park | Post-restore port_agrees settle
+
+Parked a follow-up: after fail-closed restore, `verify acquisition` can see a
+listen-port mismatch for a short window while the forwarded-port file is already
+present. Distinct from configured-but-unavailable. Not filed as an issue.
+
