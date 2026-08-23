@@ -54,6 +54,7 @@ to run it, you want [`docs/`](../docs/) instead —
 - [paths.md](references/paths.md) — drives, mounts, URLs, ports
 - [gotchas.md](references/gotchas.md) — traps and their fixes
 - [external-links.md](references/external-links.md) — TRaSH guides, service docs
+- [agent-skills.md](references/agent-skills.md) — which bc skills to invoke, and the `.agent` vault-root note
 
 ### Conventions
 - [media-naming.md](conventions/media-naming.md) — library file/folder naming scheme
