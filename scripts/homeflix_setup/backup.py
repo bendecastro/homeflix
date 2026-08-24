@@ -164,10 +164,10 @@ class SshArtifactRepository:
             require_success=require_success,
         )
 
-    def list_archives(self) -> list[str]:
+    def list_archives(self, *, require_reachable: bool = False) -> list[str]:
         result = self._ssh(["ls", "-1t", "--", self.destination.path], require_success=False)
-        if result.returncode == 255:
-            raise BackupError("SSH transfer failed")
+        if result.returncode == 255 or (require_reachable and result.returncode != 0):
+            raise BackupError("SSH backup repository is unreachable")
         if result.returncode != 0:
             return []
         names = []
@@ -176,6 +176,16 @@ class SshArtifactRepository:
             if ARCHIVE_RE.fullmatch(name):
                 names.append(name)
         return names
+
+    def archive_mtime(self, name: str) -> float:
+        safe = _safe_archive_name(name)
+        result = self._ssh(
+            ["stat", "-c", "%Y", "--", self.destination.remote_path(safe)]
+        )
+        try:
+            return float(result.stdout.strip())
+        except ValueError as error:
+            raise BackupError("SSH backup artifact metadata is invalid") from error
 
     def get(self, name: str, destination: Path) -> None:
         safe = _safe_archive_name(name)
@@ -358,6 +368,162 @@ def _repository_from_env(
 ) -> tuple[ArtifactRepository, int]:
     _config_root, backup_dest, keep, data_root = _load_backup_settings(repository_root)
     return open_repository(backup_dest, data_root=data_root, runner=runner), keep
+
+
+def _load_backup_max_age(repository_root: Path) -> int:
+    env_path = repository_root / ".env"
+    if not env_path.is_file():
+        raise BackupError("no .env at repository root")
+    document = EnvDocument.load(env_path)
+    value = document.get("BACKUP_MAX_AGE_DAYS") or "2"
+    if not value.isdigit():
+        raise BackupError("BACKUP_MAX_AGE_DAYS must be a non-negative integer")
+    return int(value)
+
+
+def _backup_report(
+    *,
+    status: str,
+    passed: bool,
+    reachable: bool,
+    artifact_count: int,
+    newest_artifact: str | None,
+    newest_age_days: float | None,
+    max_age_days: int,
+    failure: str | None = None,
+    checks: list[dict[str, object]],
+) -> dict[str, object]:
+    report: dict[str, object] = {
+        "schema_version": SCHEMA_VERSION,
+        "status": status,
+        "passed": passed,
+        "reachable": reachable,
+        "artifact_count": artifact_count,
+        "newest_artifact": newest_artifact,
+        "newest_age_days": newest_age_days,
+        "max_age_days": max_age_days,
+        "checks": checks,
+    }
+    if failure is not None:
+        report["failure"] = failure
+    return report
+
+
+def _clock_timestamp(clock: Callable[[], datetime | float] | None) -> float:
+    observed = (clock or (lambda: datetime.now(timezone.utc)))()
+    if isinstance(observed, datetime):
+        if observed.tzinfo is None:
+            observed = observed.replace(tzinfo=timezone.utc)
+        return observed.timestamp()
+    return float(observed)
+
+
+def verify_backup(
+    repository_root: Path,
+    *,
+    runner: CommandRunner | None = None,
+    clock: Callable[[], datetime | float] | None = None,
+) -> dict[str, object]:
+    """Read backup repository metadata without changing any artifact."""
+
+    root = Path(repository_root).resolve()
+    max_age_days = _load_backup_max_age(root)
+    try:
+        repository, _keep = _repository_from_env(root, runner=runner)
+        if isinstance(repository, LocalArtifactRepository) and not repository.root.is_dir():
+            raise BackupError("backup repository is unreachable")
+        if isinstance(repository, SshArtifactRepository):
+            names = repository.list_archives(require_reachable=True)
+        else:
+            names = repository.list_archives()
+    except (BackupError, OSError, RuntimeError, ValueError, subprocess.SubprocessError):
+        return _backup_report(
+            status="failed",
+            passed=False,
+            reachable=False,
+            artifact_count=0,
+            newest_artifact=None,
+            newest_age_days=None,
+            max_age_days=max_age_days,
+            failure="unreachable",
+            checks=[
+                {
+                    "domain": "repository",
+                    "status": "failure",
+                    "reason": "backup repository could not be inspected; check BACKUP_DEST and access",
+                }
+            ],
+        )
+
+    if not names:
+        return _backup_report(
+            status="failed",
+            passed=False,
+            reachable=True,
+            artifact_count=0,
+            newest_artifact=None,
+            newest_age_days=None,
+            max_age_days=max_age_days,
+            failure="empty",
+            checks=[
+                {"domain": "repository", "status": "pass", "reason": "backup repository is reachable"},
+                {"domain": "artifacts", "status": "failure", "reason": "backup repository contains no artifacts"},
+            ],
+        )
+
+    newest = names[0]
+    try:
+        if isinstance(repository, LocalArtifactRepository):
+            modified = (repository.root / newest).stat().st_mtime
+        elif isinstance(repository, SshArtifactRepository):
+            modified = repository.archive_mtime(newest)
+        else:
+            raise BackupError("backup artifact metadata is unavailable")
+        age_days = max(0.0, (_clock_timestamp(clock) - modified) / 86400.0)
+    except (BackupError, OSError, RuntimeError, ValueError, subprocess.SubprocessError):
+        return _backup_report(
+            status="failed",
+            passed=False,
+            reachable=True,
+            artifact_count=len(names),
+            newest_artifact=newest,
+            newest_age_days=None,
+            max_age_days=max_age_days,
+            failure="inspection",
+            checks=[
+                {"domain": "repository", "status": "pass", "reason": "backup repository is reachable"},
+                {"domain": "artifacts", "status": "unknown", "reason": "newest artifact age could not be inspected"},
+            ],
+        )
+
+    if age_days > max_age_days:
+        return _backup_report(
+            status="failed",
+            passed=False,
+            reachable=True,
+            artifact_count=len(names),
+            newest_artifact=newest,
+            newest_age_days=age_days,
+            max_age_days=max_age_days,
+            failure="stale",
+            checks=[
+                {"domain": "repository", "status": "pass", "reason": "backup repository is reachable"},
+                {"domain": "artifacts", "status": "failure", "reason": "newest backup artifact is older than BACKUP_MAX_AGE_DAYS"},
+            ],
+        )
+    return _backup_report(
+        status="verified",
+        passed=True,
+        reachable=True,
+        artifact_count=len(names),
+        newest_artifact=newest,
+        newest_age_days=age_days,
+        max_age_days=max_age_days,
+        checks=[
+            {"domain": "repository", "status": "pass", "reason": "backup repository is reachable"},
+            {"domain": "artifacts", "status": "pass", "reason": "newest backup artifact is within BACKUP_MAX_AGE_DAYS"},
+        ],
+    )
 
 
 def list_backups(repository_root: Path, *, runner: CommandRunner | None = None) -> dict[str, object]:

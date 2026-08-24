@@ -151,8 +151,9 @@ host and operator intent; do not replay them as a universal script.
   acquisition --clients {torrent,usenet,both}` (or `deploy` / `initialize` /
   `verify acquisition`). Default is `torrent`, then the last successful selection.
 - **Verification modes** — `verify contract` is static. `verify core` is read-only
-  runtime. `verify vpn` is the non-disruptive gate. `verify vpn --disrupt` is the
-  explicit fail-closed exception and is never part of routine `verify core`.
+  runtime. `verify backup` checks the configured artifact repository without changing it.
+  `verify vpn` is the non-disruptive gate. `verify vpn --disrupt` is the explicit
+  fail-closed exception and is never part of routine `verify core`.
 - **Backup** — `scripts/homeflix --json backup create` (also `list`, `retrieve`,
   `prune`, `restore --to SCRATCH`). Compatibility shells remain
   `scripts/backup-config.sh` and `scripts/restore-config.sh`. Restore is scratch-only.

@@ -11,6 +11,7 @@
 - Restore SHALL refuse the live `CONFIG_ROOT`, require an empty scratch destination, and verify every restored SQLite database. `(satisfied #7)`
 - Successful restore evidence SHALL require at least one valid SQLite database. `(satisfied #7)`
 - Retention SHALL prune only matching Homeflix backup artifacts after a new artifact has been stored successfully. `(satisfied #8)`
+- Non-destructive backup verification SHALL report repository reachability, artifact count, newest artifact name, and newest artifact age; it SHALL fail for an empty repository or when the newest artifact exceeds `BACKUP_MAX_AGE_DAYS`, and SHALL distinguish an unreachable repository from a stale one. `(satisfied #17)`
 - Existing backup and restore shell commands SHALL remain compatibility adapters to the canonical Homeflix interface. `(satisfied #8)`
 
 ## Key scenarios
@@ -20,3 +21,4 @@
 3. A crafted archive attempts path traversal or a symlink escape; restore refuses it before extraction.
 4. A scratch restore contains one corrupt database; recovery verification fails.
 5. Existing cron invokes the compatibility command after migration and reaches the canonical backup behavior.
+6. Verification reports a current newest artifact, fails for a stale or empty repository, and distinguishes an unreachable repository without changing repository contents.

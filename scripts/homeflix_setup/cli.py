@@ -12,7 +12,7 @@ import time
 from typing import Sequence
 
 from .api import ApiError
-from .backup import BackupError, create_backup, list_backups, prune_backups, restore_backup, retrieve_backup
+from .backup import BackupError, create_backup, list_backups, prune_backups, restore_backup, retrieve_backup, verify_backup
 from .command import CommandRunner
 from .compose import configure, render_compose_config
 from .contract import evaluate_stack_contract
@@ -115,7 +115,7 @@ def build_parser() -> argparse.ArgumentParser:
         "verify",
         help="inspect a deployment phase; vpn --disrupt is the explicit fail-closed exception",
     )
-    verify_parser.add_argument("phase", choices=("core", "contract", "vpn", "acquisition"))
+    verify_parser.add_argument("phase", choices=("core", "contract", "vpn", "acquisition", "backup"))
     verify_parser.add_argument(
         "--disrupt",
         action="store_true",
@@ -409,6 +409,30 @@ def main(argv: Sequence[str] | None = None, *, repository_root: Path | None = No
                 code="verification_refused",
                 label="verification refused",
                 error=RuntimeError("stack contract could not be verified safely"),
+            )
+    elif arguments.command == "verify" and arguments.phase == "backup":
+        if arguments.disrupt:
+            return _input_error(
+                json_output=arguments.json_output,
+                code="verification_refused",
+                label="verification refused",
+                error=RuntimeError("disruptive verification applies only to verify vpn"),
+            )
+        if getattr(arguments, "discover_probe", False):
+            return _input_error(
+                json_output=arguments.json_output,
+                code="verification_refused",
+                label="verification refused",
+                error=RuntimeError("discovery probe applies only to verify core"),
+            )
+        try:
+            result = verify_backup(root)
+        except (BackupError, OSError, RuntimeError, ValueError, subprocess.SubprocessError):
+            return _input_error(
+                json_output=arguments.json_output,
+                code="verification_refused",
+                label="verification refused",
+                error=RuntimeError("backup repository could not be verified safely"),
             )
     elif arguments.command == "verify" and arguments.phase == "core":
         if arguments.disrupt:
@@ -790,6 +814,17 @@ def main(argv: Sequence[str] | None = None, *, repository_root: Path | None = No
             service = item.get("service")
             target = f"{item['code']}: {service}" if service else str(item["code"])
             print(f"FAIL: {target}: {item['message']}")
+    elif arguments.command == "verify" and arguments.phase == "backup":
+        print(f"Backup verify: {result['status']}")
+        print(f"Repository: {'reachable' if result['reachable'] else 'unreachable'}")
+        print(f"Artifacts: {result['artifact_count']}")
+        newest = result.get("newest_artifact") or "none"
+        age = result.get("newest_age_days")
+        age_text = "unknown" if age is None else f"{float(age):.2f} days"
+        print(f"Newest: {newest}")
+        print(f"Newest age: {age_text}")
+        for item in result.get("checks", []):
+            print(f"{str(item['status']).upper()}: {item['domain']}: {item['reason']}")
     elif arguments.command == "vpn" or (arguments.command == "verify" and arguments.phase == "vpn"):
         print(f"VPN verify: {result['status']}")
         for item in result.get("checks", []):

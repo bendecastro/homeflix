@@ -35,6 +35,7 @@ Neither command accepts secret values as arguments or JSON.
 | `CACHE_ROOT` | — | Jellyfin transcode scratch. Ephemeral. |
 | `BACKUP_DEST` | — | Off-box destination for `scripts/backup-config.sh` (`user@host:/path`, `host:/path` where the user comes from your SSH config, or a directory on another filesystem). Remote paths must be absolute. Required for backups; empty means the script refuses to run. Does not include the checkout `.env`. |
 | `BACKUP_KEEP` | `7` | Dated archives retained at `BACKUP_DEST`. Oldest are deleted first. |
+| `BACKUP_MAX_AGE_DAYS` | `2` | Maximum age of the newest artifact accepted by `scripts/homeflix verify backup`. |
 
 Expected structure under `DATA_ROOT`:
 
@@ -158,9 +159,11 @@ it up with equivalent 0600 protection; these archives do not include it.
 # .env
 BACKUP_DEST=user@other-host:/path/to/homeflix-config
 BACKUP_KEEP=7
+BACKUP_MAX_AGE_DAYS=2
 
 ./scripts/backup-config.sh                 # one run
 ./scripts/backup-config.sh --install-cron  # daily 03:15
+scripts/homeflix --json verify backup       # fail if empty, unreachable, or stale
 
 # Prove the archive before you rely on it (scratch dir only — will not clobber CONFIG_ROOT)
 ./scripts/restore-config.sh --list

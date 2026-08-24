@@ -2,12 +2,14 @@ from __future__ import annotations
 
 from contextlib import redirect_stderr, redirect_stdout
 import io
+import json
 import os
 from pathlib import Path
 import shutil
 import sqlite3
 import tarfile
 import tempfile
+import time
 import unittest
 from unittest.mock import patch
 
@@ -40,6 +42,7 @@ def write_env(
     backup_dest: Path | str,
     keep: int = 7,
     data_root: Path | None = None,
+    max_age_days: int | None = None,
 ) -> None:
     lines = [
         f"CONFIG_ROOT={config_root}",
@@ -48,6 +51,8 @@ def write_env(
     ]
     if data_root is not None:
         lines.append(f"DATA_ROOT={data_root}")
+    if max_age_days is not None:
+        lines.append(f"BACKUP_MAX_AGE_DAYS={max_age_days}")
     (root / ".env").write_text("\n".join(lines) + "\n", encoding="utf-8")
     (root / ".env").chmod(0o600)
 
@@ -415,6 +420,163 @@ class BackupRepositoryCliTests(unittest.TestCase):
             self.assertTrue((backup_dest / "notes.txt").is_file())
 
 
+class BackupVerificationCliTests(unittest.TestCase):
+    def test_current_artifact_passes_with_secret_free_report(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            config_root = root / "config"
+            backup_dest = root / "offbox"
+            config_root.mkdir()
+            backup_dest.mkdir()
+            archive = backup_dest / "homeflix-config-20260823T000000Z.tar.gz"
+            archive.write_bytes(b"artifact")
+            current = time.time() - 24 * 60 * 60
+            os.utime(archive, (current, current))
+            write_env(root, config_root=config_root, backup_dest=backup_dest)
+            before = {path.name: path.read_bytes() for path in backup_dest.iterdir()}
+
+            code, stdout, stderr = run_main("--json", "verify", "backup", repository_root=root)
+
+            self.assertEqual(code, 0, stderr + stdout)
+            self.assertEqual(stderr, "")
+            payload = parse_single_json(stdout)
+            self.assertEqual(payload["schema_version"], 1)
+            self.assertEqual(payload["status"], "verified")
+            self.assertTrue(payload["passed"])
+            self.assertTrue(payload["reachable"])
+            self.assertEqual(payload["artifact_count"], 1)
+            self.assertEqual(payload["newest_artifact"], archive.name)
+            self.assertLessEqual(payload["newest_age_days"], 2)
+            self.assertEqual(payload["max_age_days"], 2)
+            self.assertNotIn(str(backup_dest), stdout + stderr)
+            self.assertEqual(
+                {path.name: path.read_bytes() for path in backup_dest.iterdir()},
+                before,
+            )
+
+    def test_stale_artifact_fails_with_stale_reason(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            config_root = root / "config"
+            backup_dest = root / "offbox"
+            config_root.mkdir()
+            backup_dest.mkdir()
+            archive = backup_dest / "homeflix-config-20260820T000000Z.tar.gz"
+            archive.write_bytes(b"artifact")
+            stale = time.time() - 3 * 24 * 60 * 60
+            os.utime(archive, (stale, stale))
+            write_env(root, config_root=config_root, backup_dest=backup_dest, max_age_days=2)
+
+            code, stdout, stderr = run_main("--json", "verify", "backup", repository_root=root)
+
+            self.assertEqual(code, 1, stderr + stdout)
+            payload = parse_single_json(stdout)
+            self.assertEqual(payload["status"], "failed")
+            self.assertFalse(payload["passed"])
+            self.assertEqual(payload["failure"], "stale")
+            self.assertTrue(payload["reachable"])
+            self.assertEqual(payload["artifact_count"], 1)
+            self.assertEqual(payload["newest_artifact"], archive.name)
+            self.assertGreater(payload["newest_age_days"], 2)
+            self.assertEqual(payload["max_age_days"], 2)
+            self.assertNotIn(str(backup_dest), stdout + stderr)
+
+    def test_empty_reachable_repository_fails_distinctly(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            config_root = root / "config"
+            backup_dest = root / "offbox"
+            config_root.mkdir()
+            backup_dest.mkdir()
+            write_env(root, config_root=config_root, backup_dest=backup_dest)
+
+            code, stdout, stderr = run_main("--json", "verify", "backup", repository_root=root)
+
+            self.assertEqual(code, 1, stderr + stdout)
+            payload = parse_single_json(stdout)
+            self.assertEqual(payload["status"], "failed")
+            self.assertFalse(payload["passed"])
+            self.assertEqual(payload["failure"], "empty")
+            self.assertTrue(payload["reachable"])
+            self.assertEqual(payload["artifact_count"], 0)
+            self.assertIsNone(payload["newest_artifact"])
+            self.assertIsNone(payload["newest_age_days"])
+            self.assertIn("no artifacts", json.dumps(payload).casefold())
+            self.assertNotIn(str(backup_dest), stdout + stderr)
+
+    def test_unreachable_repository_fails_without_being_reported_stale(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            config_root = root / "config"
+            backup_dest = root / "missing-offbox"
+            config_root.mkdir()
+            write_env(root, config_root=config_root, backup_dest=backup_dest)
+
+            code, stdout, stderr = run_main("--json", "verify", "backup", repository_root=root)
+
+            self.assertEqual(code, 1, stderr + stdout)
+            payload = parse_single_json(stdout)
+            self.assertEqual(payload["status"], "failed")
+            self.assertFalse(payload["passed"])
+            self.assertEqual(payload["failure"], "unreachable")
+            self.assertFalse(payload["reachable"])
+            self.assertEqual(payload["artifact_count"], 0)
+            self.assertIsNone(payload["newest_artifact"])
+            self.assertIsNone(payload["newest_age_days"])
+            self.assertNotEqual(payload["failure"], "stale")
+            self.assertIn("BACKUP_DEST", json.dumps(payload))
+            self.assertNotIn(str(backup_dest), stdout + stderr)
+
+    def test_remote_verify_only_lists_and_inspects_newest_artifact(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            config_root = root / "config"
+            config_root.mkdir()
+            store = root / "remote-store"
+            store.mkdir()
+            archive = store / "homeflix-config-20260823T000000Z.tar.gz"
+            archive.write_bytes(b"artifact")
+            current = time.time() - 24 * 60 * 60
+            os.utime(archive, (current, current))
+            write_env(root, config_root=config_root, backup_dest=VALID_SSH_DEST)
+            runner = FakeSshRunner(store)
+
+            with patch("scripts.homeflix_setup.backup.CommandRunner", return_value=runner):
+                code, stdout, stderr = run_main("--json", "verify", "backup", repository_root=root)
+
+            self.assertEqual(code, 0, stderr + stdout)
+            payload = parse_single_json(stdout)
+            self.assertTrue(payload["passed"])
+            self.assertEqual(payload["newest_artifact"], archive.name)
+            self.assertEqual(runner.operations(), ["list", "stat"])
+            self.assertNotIn("put", runner.operations())
+            self.assertNotIn("get", runner.operations())
+            self.assertNotIn("prune", runner.operations())
+            self.assertNotIn(VALID_SSH_DEST, stdout + stderr)
+
+    def test_human_verify_reports_fields_without_destination(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            config_root = root / "config"
+            backup_dest = root / "offbox"
+            config_root.mkdir()
+            backup_dest.mkdir()
+            archive = backup_dest / "homeflix-config-20260823T000000Z.tar.gz"
+            archive.write_bytes(b"artifact")
+            current = time.time() - 24 * 60 * 60
+            os.utime(archive, (current, current))
+            write_env(root, config_root=config_root, backup_dest=backup_dest)
+
+            code, stdout, stderr = run_main("verify", "backup", repository_root=root)
+
+            self.assertEqual(code, 0, stderr + stdout)
+            self.assertIn("Backup verify: verified", stdout)
+            self.assertIn("Repository: reachable", stdout)
+            self.assertIn("Artifacts: 1", stdout)
+            self.assertIn(f"Newest: {archive.name}", stdout)
+            self.assertNotIn(str(backup_dest), stdout + stderr)
+
+
 class BackupRestoreCliTests(unittest.TestCase):
     def test_json_restore_verifies_every_sqlite_and_requires_one(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -703,6 +865,24 @@ class CompatibilityScriptTests(unittest.TestCase):
             self.assertIn(f"OK archive={archive_name} sqlite_ok=1 sqlite_fail=0 dest={scratch}", restored.stdout)
             self.assertEqual(sqlite_values(scratch / "radarr" / "radarr.db"), [9, 10])
 
+    def test_backup_adapter_propagates_canonical_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            config_root = root / "config"
+            config_root.mkdir()
+            (root / ".env").write_text(
+                f"CONFIG_ROOT={config_root}\nBACKUP_DEST=\n",
+                encoding="utf-8",
+            )
+            backup_cmd, _restore_cmd = _install_compatibility_tree(root)
+
+            created = subprocess.run(
+                [str(backup_cmd)], check=False, capture_output=True, text=True, cwd=root,
+            )
+
+            self.assertNotEqual(created.returncode, 0)
+            self.assertIn("BACKUP_DEST", created.stdout + created.stderr)
+
     def test_compatibility_scripts_do_not_mkdir_remote_dest_locally(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -876,6 +1056,8 @@ class FakeSshRunner:
             return "put"
         if "ls" in argv:
             return "list"
+        if "stat" in argv:
+            return "stat"
         if "rm" in argv:
             return "prune"
         return "unknown"
@@ -913,6 +1095,15 @@ class FakeSshRunner:
             entries = sorted(self.store.iterdir(), key=lambda path: path.stat().st_mtime, reverse=True)
             names = "\n".join(path.name for path in entries if path.is_file())
             return subprocess.CompletedProcess(argv, 0, names + ("\n" if names else ""), "")
+        if remote[:3] == ["stat", "-c", "%Y"] and len(remote) == 5 and remote[3] == "--":
+            remote_file = remote[4]
+            prefix = self.remote_path.rstrip("/") + "/"
+            if not remote_file.startswith(prefix):
+                return subprocess.CompletedProcess(argv, 2, "", "bad stat path")
+            target = self.store / remote_file[len(prefix) :]
+            if not target.is_file():
+                return subprocess.CompletedProcess(argv, 1, "", "missing")
+            return subprocess.CompletedProcess(argv, 0, f"{target.stat().st_mtime}\n", "")
         if remote[:3] == ["rm", "-f", "--"] and len(remote) == 4:
             remote_file = remote[3]
             prefix = self.remote_path.rstrip("/") + "/"

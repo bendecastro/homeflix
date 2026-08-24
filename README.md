@@ -24,7 +24,7 @@ The current CLI supports **local Debian/Ubuntu with existing mounted storage**. 
 target checkout and does not provide SSH transport; an agent may use its own SSH capability.
 Core includes Traefik, Jellyfin, Jellyseerr, Radarr, and Sonarr. Acquisition
 (`setup acquisition --clients`), verification modes (`verify contract`, `verify core`,
-`verify vpn`, `verify vpn --disrupt`), and CONFIG_ROOT backup are shipped CLI
+`verify backup`, `verify vpn`, `verify vpn --disrupt`), and CONFIG_ROOT backup are shipped CLI
 capabilities. Encrypted-storage provisioning remains a later slice. Automation is
 fixture-accepted only; disposable-host and private-production live acceptance remain
 separate.

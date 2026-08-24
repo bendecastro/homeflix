@@ -51,6 +51,7 @@ docker compose pull && docker compose up -d   # update
 ## CONFIG_ROOT backup (off-box)
 
 ```bash
+scripts/homeflix --json verify backup
 scripts/homeflix --json backup create
 scripts/homeflix --json backup list
 scripts/homeflix --json backup retrieve --archive NAME --to FILE
@@ -63,9 +64,11 @@ scripts/homeflix --json backup restore --to SCRATCH [--archive NAME]
 ```
 
 Requires `BACKUP_DEST` in `.env` (local off-filesystem path or
-`user@host:/abs/path`). Media and the checkout `.env` are not included.
-JSON shows `dest=set`, never the destination path, username, or host. Restore
-refuses to write over live `CONFIG_ROOT`. Fixture-accepted only; not live-host
+`user@host:/abs/path`). `BACKUP_MAX_AGE_DAYS` defaults to `2`; verification
+reports reachability, artifact count, newest name, and age, and fails for an
+empty, unreachable, or stale repository. Media and the checkout `.env` are not
+included. JSON shows `dest=set`, never the destination path, username, or host.
+Restore refuses to write over live `CONFIG_ROOT`. Fixture-accepted only; not live-host
 proof.
 
 ## Acquisition VPN gate (non-disruptive)

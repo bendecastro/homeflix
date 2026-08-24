@@ -108,7 +108,7 @@ between `torrents/` and `media/` and confirms both names share one inode.
 Other CLI capabilities, used when needed rather than as one required sequence:
 
 - Acquisition: `scripts/homeflix --json setup acquisition --clients {torrent,usenet,both}`
-- Verification: `scripts/homeflix --json verify {contract,core,vpn,acquisition}`
+- Verification: `scripts/homeflix --json verify {contract,core,backup,vpn,acquisition}`
   and the explicit `verify vpn --disrupt` fail-closed exception
 - Backup: `scripts/homeflix --json backup create` (also `list` / `retrieve` / `prune` /
   scratch `restore`)

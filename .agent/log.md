@@ -671,3 +671,11 @@ Parked a follow-up: after fail-closed restore, `verify acquisition` can see a
 listen-port mismatch for a short window while the forwarded-port file is already
 present. Distinct from configured-but-unavailable. Not filed as an issue.
 
+## [2026-08-23] build | Backup staleness verification
+
+`verify backup` performs a read-only repository listing and newest-artifact metadata
+inspection. It reports reachability, count, newest name, and age without destination
+values, and fails for empty, unreachable, or older-than-`BACKUP_MAX_AGE_DAYS`
+repositories. The setting defaults to two days and the compatibility backup adapter
+continues to propagate canonical command failures. Fixture-accepted only.
+
