@@ -102,3 +102,8 @@ keys. See `conventions/secrets.md`.
 - [Bazarr setup (docs)](../../docs/bazarr.md) · [Bazarr wiki](https://wiki.bazarr.media/)
 - [Storage](storage.md) · [Media naming](../conventions/media-naming.md) · [Secrets](../conventions/secrets.md)
 - [Networking / VPN](networking-remote-access.md) · [Media server](media-server.md) · [Paths](../references/paths.md)
+
+## [2026-08-24] Promoted operational details
+
+- **[2026-08-04] Set seed goals when a torrent is grabbed.** Changing ratio or time defaults does not alter in-flight torrents. Enable the *arr Remove Completed Downloads behavior so jobs are cleaned up after the goal is met; private trackers may enforce minimum seed time independently of ratio. The reference guidance is ratio `1.0` plus roughly three days, subject to tracker rules. Hardlinks keep the torrent path without a second copy.
+- **[2026-08-11] Treat title additions as an explicit acquisition operation.** Core setup never adds movies or series. Requests are pinned to a TMDB/TVDB id and are idempotent when the item already exists. A requested season that the series does not have fails before any add, and Sonarr searches only after monitoring remains settled across two reads.
