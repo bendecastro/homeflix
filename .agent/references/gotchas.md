@@ -211,3 +211,11 @@ bite.
 - **[2026-08-10] Network discovery must fail closed on ambiguous Docker or routing state.** Preserve an existing proxy subnet only after exact network-name presence, Compose ownership labels, and valid IPAM are confirmed; unknown daemon inspection is not absence. Exclude kernel local/broadcast routes, reject equal-metric default routes, and reject foreign more-specific overlaps; only an identical connected route for the Homeflix-owned network is exempt.
 - **[2026-08-04] Device checks must dereference symlinks.** GNU `stat -c %d` reports the symlink's device; use `stat -Lc` and a real hardlink smoke test or a symlinked media path can make a cross-filesystem layout pass device inspection.
 - **[2026-08-16] Scratch restore has hard safety rails.** Restore validates archive names and members, refuses the live `CONFIG_ROOT` and non-empty scratch directories, and requires every restored SQLite database to pass `PRAGMA integrity_check` with at least one database present. A local `BACKUP_DEST` on the same device as `DATA_ROOT` is refused even when the destination does not exist yet.
+
+## Unquoted dotenv values execute on source
+
+- **[2026-08-04] Quote cron-like `.env` values.** `WATCHTOWER_SCHEDULE=0 0 2 * * *` unquoted ran as a command when `.env.example` was sourced. The same class of bug applies to `LAN_SUBNET`. Quote those assignments.
+
+## Older Compose JSON omits bind create_host_path
+
+- **[2026-08-17] Restore `create_host_path: false` after `docker compose config --format json`.** Older Compose JSON drops that flag from source. The contract render must put it back or data binds lose fail-closed host-path creation. Fixture-accepted only.

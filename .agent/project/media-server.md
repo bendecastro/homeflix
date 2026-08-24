@@ -50,3 +50,11 @@ limits for kids. Ties into remote access — `project/networking-remote-access.m
 ## Links
 - [Overview](overview.md) · [Storage](storage.md) · [Acquisition](acquisition-stack.md)
 - [Networking](networking-remote-access.md) · [Media naming](../conventions/media-naming.md)
+
+## [2026-08-04] Overseerr dropped from the shipped compose
+
+The 2026-08-04 compose rebuild dropped Overseerr (ADR-0004 chose Jellyseerr). The blockquote and open checkbox above that still treat Overseerr as a live alternative are the earlier snapshot.
+
+## [2026-08-13] Default DOMAIN is homeflix
+
+Ship `DOMAIN=homeflix` ([ADR-0010](../decisions/adr-0010-lan-dns-naming.md)). The `jellyfin.local` / `jellyseerr.local` URLs above are the pre-ADR-0010 snapshot. `.local` is mDNS-only; operators must serve `*.homeflix` locally.

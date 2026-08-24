@@ -107,3 +107,12 @@ keys. See `conventions/secrets.md`.
 
 - **[2026-08-04] Set seed goals when a torrent is grabbed.** Changing ratio or time defaults does not alter in-flight torrents. Enable the *arr Remove Completed Downloads behavior so jobs are cleaned up after the goal is met; private trackers may enforce minimum seed time independently of ratio. The reference guidance is ratio `1.0` plus roughly three days, subject to tracker rules. Hardlinks keep the torrent path without a second copy.
 - **[2026-08-11] Treat title additions as an explicit acquisition operation.** Core setup never adds movies or series. Requests are pinned to a TMDB/TVDB id and are idempotent when the item already exists. A requested season that the series does not have fails before any add, and Sonarr searches only after monitoring remains settled across two reads.
+
+## [2026-08-13] Default DOMAIN is homeflix
+
+The component URL column above still uses `.local`. [ADR-0010](../decisions/adr-0010-lan-dns-naming.md) ships `DOMAIN=homeflix`; `.local` is mDNS-only.
+
+## [2026-08-16] qBittorrent password rotation and Prowlarr app ownership
+
+- **qBittorrent temp/default credentials are consumed internally** and replaced by a generated `.env` password. Paths, categories, localhost-auth bypass, and listen-port agreement are reconciled without printing ports or secrets. Fixture-accepted only.
+- **Prowlarr owns one Radarr and one Sonarr app.** *arr download clients use host `gluetun`. NZBGet is not started on the torrent-only path. Fixture-accepted only.

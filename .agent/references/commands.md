@@ -145,3 +145,23 @@ ls -li ${DATA_ROOT}/media/movies/*/*.mkv   # column 1 = inode, column 3 = link c
 ```bash
 grep "^## \[" log.md | tail -5   # last 5 log entries (run from .agent/)
 ```
+
+## Existing-stack core verify and discovery probe
+
+```bash
+scripts/homeflix --json verify core --discover-probe
+```
+
+`initialize core` and `verify core` accept classified non-core and optional helpers already running; unknown services still fail. `acquisition_absent` is a warning on an existing stack. `--discover-probe` is the explicit controlled equivalent of the unconditional Jellyfin `Library/Refresh`. Fixture-accepted only.
+
+## Acquisition dry-run client selection
+
+```bash
+scripts/homeflix --json setup acquisition --dry-run
+```
+
+Emits `initialize`/`verify` `--clients <selection>` and the same compose `stop` live deploy uses when a prior selection differs. Fixture-accepted only.
+
+## Compatibility adapters
+
+`scripts/preflight.sh` is exec-only: it passes argv to `scripts/homeflix preflight` and does not source `.env`. There is no `verify.sh`.
