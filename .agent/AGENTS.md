@@ -32,7 +32,7 @@ which subdomain, why you picked Jellyfin over Plex — all of it goes on a page.
 
 | When you… | Do this |
 |---|---|
-| Start non-trivial work | Read `index.md` → this file → `map.md` (pick the smallest context set) → `tasks/active.md` and any in-flight plan. |
+| Start non-trivial work | Search first: `python3 "$AGENT_CONCEPTS/concepts/bc-wiki-maintain/body/wiki_search.py" --limit 15 "$PWD" <2–4 keywords>`. Open and verify the returned pages; then this file and `tasks/active.md`. Use `index.md` only for broad orientation, never to look a fact up. |
 | Verify/learn a durable project fact (a path, a working config, a hardware spec) | Update the smallest relevant `project/` or `references/` page (with the date); append a line to `log.md`. |
 | Stand up or change a service | Update that service's `project/` page (image tag, ports, volumes, depends-on, healthcheck status); log it. Use `templates/service.md` for a new one. |
 | Find a recurring command / path / gotcha | Put it in `references/commands.md` / `paths.md` / `gotchas.md`. |
@@ -55,17 +55,25 @@ which subdomain, why you picked Jellyfin over Plex — all of it goes on a page.
   `project/media-server-plan.md`) built from `templates/plan.md`: a `Status:` line,
   staged **checkbox steps**, and links to the ADRs / references it rests on.
 - **`tasks/active.md` is the live cursor** — which plan is in flight, which step
-  you're on, and any blocker. Keep it true every session; it's the first thing the
-  next agent reads after `index.md`.
+  you're on, and any blocker. Keep it true every session; consult it after the
+  ranked search and this file.
 - `tasks/parking-lot.md` = deferred / future ideas (the "v2 wishlist"). `tasks/completed.md` = the dated durable done-log.
 - Plan status lifecycle: `Proposed → Approved → In progress → Blocked → Done /
   Abandoned`.
 
 ## Session protocol
 
-**START** — `index.md` → this file → `map.md` → `tasks/active.md` and the relevant
-plan. Trust the wiki, then re-verify anything load-bearing that looks stale (a
-container can have been updated, a drive remounted, an IP changed since last write).
+**START** — search before reading. Distill the task to **2–4 keywords** and run
+`python3 "$AGENT_CONCEPTS/concepts/bc-wiki-maintain/body/wiki_search.py" --limit 15 "$PWD" <keywords>`,
+then open the relevant returned pages and verify the answer in their text — paths are leads, not
+answers — followed by this file, `tasks/active.md`, and the relevant plan. Never paste a whole
+question as the query; BM25 needs every term to match, so a sentence only finds documents big
+enough to contain all of it. Empty output means reformulate once with a different 2–4-keyword
+set, not that the vault lacks the answer. If `index.md`, `map.md`, or `log.md` top the results,
+the query was too generic — add a distinguishing term rather than opening a hub as the answer.
+Use `index.md` only for broad project orientation; never use it or grep its rows to look a fact
+up. Trust the wiki, then re-verify anything load-bearing that looks stale (a container can have
+been updated, a drive remounted, an IP changed since last write).
 
 **DURING** — apply the trigger table as you go. Many small, linked edits beat one
 big rewrite at the end.
