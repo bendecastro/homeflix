@@ -8,8 +8,8 @@ decisions, current work, and operational gotchas.
 
 Before non-trivial work, read in this order:
 
-1. [`.agent/index.md`](.agent/index.md) — project status and catalog
-2. [`.agent/AGENTS.md`](.agent/AGENTS.md) — wiki maintenance rules and session protocol
+1. [`.agent/AGENTS.md`](.agent/AGENTS.md) — wiki maintenance rules and session protocol
+2. [`.agent/index.md`](.agent/index.md) — broad project orientation
 3. [`.agent/map.md`](.agent/map.md) — choose the smallest task-specific context set
 4. [`.agent/tasks/active.md`](.agent/tasks/active.md) and any linked plan
 
