@@ -679,3 +679,12 @@ values, and fails for empty, unreachable, or older-than-`BACKUP_MAX_AGE_DAYS`
 repositories. The setting defaults to two days and the compatibility backup adapter
 continues to propagate canonical command failures. Fixture-accepted only.
 
+
+## [2026-10-07] build | Optional WireGuard MTU override
+
+Compose passes `WIREGUARD_MTU: ${VPN_WIREGUARD_MTU:-}` to Gluetun, and `.env.example`
+documents it as empty. An empty value keeps Gluetun's default: a `--network none`
+container run with `WIREGUARD_MTU=` passed settings parsing, and `abc` failed it. The
+symptom it addresses is a Gluetun reconnect loop with `running TLS handshake: context
+deadline exceeded`/`EOF` while plain HTTP through the tunnel works. One operator
+deployment cleared that loop with 1200. Not a default, because the right value depends on the path.

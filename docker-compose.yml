@@ -131,6 +131,8 @@ services:
       DNS_ADDRESS: ${VPN_DNS:-1.1.1.1}
       LOG_LEVEL: ${LOG_LEVEL:-info}
       HEALTH_TARGET_ADDRESS: ${VPN_HEALTH_TARGET:-cloudflare.com:443}
+      # Empty keeps Gluetun's default; see VPN_WIREGUARD_MTU in .env.example.
+      WIREGUARD_MTU: ${VPN_WIREGUARD_MTU:-}
     volumes:
       - ./scripts/gluetun-qbt-port.sh:/scripts/qbt-port.sh:ro
     # The image ships /tmp/gluetun without an execute bit, and cap_drop: ALL removes
