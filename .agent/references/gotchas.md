@@ -219,3 +219,7 @@ bite.
 ## Older Compose JSON omits bind create_host_path
 
 - **[2026-08-17] Restore `create_host_path: false` after `docker compose config --format json`.** Older Compose JSON drops that flag from source. The contract render must put it back or data binds lose fail-closed host-path creation. Fixture-accepted only.
+
+## [2026-10-07] Optional WireGuard MTU override
+
+- If Gluetun repeatedly reports `running TLS handshake: context deadline exceeded` or `EOF` while plain HTTP through the tunnel works, an optional `VPN_WIREGUARD_MTU` override may help. Compose passes it as `WIREGUARD_MTU`; leave it empty to retain Gluetun's default. One operator deployment cleared the loop with `1200`; that value is path-dependent, not a new default. An isolated `--network none` run accepted `WIREGUARD_MTU=` during settings parsing and rejected `abc`; that check does not prove tunnel health. See [VPN architecture](../project/networking-remote-access.md).
