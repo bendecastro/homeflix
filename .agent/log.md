@@ -695,3 +695,5 @@ Jellyseerr 2.7.3 is end-of-life (Hub image archived, frozen at 2.7.3; unpatched 
 avatarproxy advisory). Proposed ADR-0012 and `project/seerr-migration-plan.md`: swap to
 `ghcr.io/seerr-team/seerr:latest`, full `jellyseerr` -> `seerr` rename, CLI accepts UID 1000
 for the Seerr config only. Owner deployment facts verified over SSH; nothing changed yet.
+Revised after independent review: sudo backup with archive check, config move before compose pull,
+override `jellyseerr:` block rename, UID 1000 accepted only on `seerr/`, complete rollback.
