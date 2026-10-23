@@ -16,7 +16,7 @@ from .envfile import EnvDocument, update_env
 from .secrets import ensure_service_credentials
 
 
-DIRECT_PORTS = (("jellyseerr", 5055), ("radarr", 7878), ("sonarr", 8989))
+DIRECT_PORTS = (("seerr", 5055), ("radarr", 7878), ("sonarr", 8989))
 # VPN providers terminate the tunnel on a gateway inside private address space. Allowing a
 # subnet that contains one makes Gluetun route the provider's own gateway to the LAN, which
 # breaks NAT-PMP port forwarding while the tunnel still reports healthy.
@@ -28,7 +28,7 @@ ALLOWED_PROXY_NETWORKS = tuple(
     ipaddress.ip_network(cidr)
     for cidr in ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16")
 )
-CORE_SERVICES = ("traefik", "jellyfin", "jellyseerr", "radarr", "sonarr")
+CORE_SERVICES = ("traefik", "jellyfin", "seerr", "radarr", "sonarr")
 # Optional Compose helpers. Not started by core or acquisition; may already be running.
 SUPPORT_SERVICES = ("deunhealth", "glances", "watchtower")
 GLUETUN_SERVICES = ("gluetun",)

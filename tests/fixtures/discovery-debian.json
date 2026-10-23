@@ -21,7 +21,7 @@
     "cat /sys/class/drm/renderD128/device/vendor": [0, "0x8086\n", ""],
     "test -r /dev/dri/renderD128": [0, "", ""],
     "test -w /dev/dri/renderD128": [0, "", ""],
-    "getent ahosts jellyseerr.homeflix": [0, "192.0.2.21 STREAM jellyseerr.homeflix\n", ""],
+    "getent ahosts seerr.homeflix": [0, "192.0.2.21 STREAM seerr.homeflix\n", ""],
     "getent ahosts radarr.homeflix": [0, "192.0.2.22 STREAM radarr.homeflix\n", ""],
     "getent ahosts sonarr.homeflix": [0, "192.0.2.23 STREAM sonarr.homeflix\n", ""],
     "ss -H -lntu": [0, "tcp LISTEN 0 4096 0.0.0.0:80 0.0.0.0:*\ntcp LISTEN 0 4096 [::]:8096 [::]:*\n", ""],

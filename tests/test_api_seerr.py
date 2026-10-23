@@ -9,7 +9,7 @@ from unittest.mock import patch
 
 from scripts.homeflix_setup.core import ReadinessResult, configure_core
 
-from scripts.homeflix_setup.api import ApiError, HttpResponse, JellyseerrClient, read_settings_api_key
+from scripts.homeflix_setup.api import ApiError, HttpResponse, SeerrClient, read_settings_api_key
 
 KEY = "FIXTURE_API_KEY_1234567890ABCDE"
 FIXTURES = Path(__file__).parent / "fixtures" / "api"
@@ -33,10 +33,10 @@ def profile_root(service):
     return {"id": 41, "name": "Fixture HD"}, {"id": 8, "path": "/data/media/movies" if service == "radarr" else "/data/media/tv"}
 
 
-class JellyseerrApiTests(unittest.TestCase):
+class SeerrApiTests(unittest.TestCase):
     def test_initial_auth_uses_exact_docker_jellyfin_fields(self):
-        transport = QueueTransport([(200, fixture("jellyseerr-public-new.json")), (200, {})])
-        client = JellyseerrClient(transport=transport)
+        transport = QueueTransport([(200, fixture("seerr-public-new.json")), (200, {})])
+        client = SeerrClient(transport=transport)
         self.assertFalse(client.initialized())
         client.authenticate_jellyfin("fixture-admin", "FIXTURE_PASSWORD_NOT_REAL")
         request = transport.requests[1]
@@ -50,16 +50,16 @@ class JellyseerrApiTests(unittest.TestCase):
 
     def test_authorized_jellyfin_connection_must_be_exact_internal_plain_http(self):
         for fixture_name, accepted in (
-            ("jellyseerr-jellyfin-correct.json", True),
-            ("jellyseerr-jellyfin-wrong.json", False),
-            ("jellyseerr-jellyfin-missing.json", False),
+            ("seerr-jellyfin-correct.json", True),
+            ("seerr-jellyfin-wrong.json", False),
+            ("seerr-jellyfin-missing.json", False),
         ):
             with self.subTest(fixture=fixture_name):
                 transport = QueueTransport([
-                    (200, fixture("jellyseerr-public-complete.json")),
+                    (200, fixture("seerr-public-complete.json")),
                     (200, fixture(fixture_name)),
                 ])
-                client = JellyseerrClient(transport=transport)
+                client = SeerrClient(transport=transport)
                 self.assertTrue(client.initialized())
                 client.authorize(KEY)
                 if accepted:
@@ -72,11 +72,11 @@ class JellyseerrApiTests(unittest.TestCase):
                 self.assertEqual(transport.requests[1].headers.get("X-api-key"), KEY)
 
     def test_jellyfin_connection_rejects_each_owned_field_conflict(self):
-        correct = fixture("jellyseerr-jellyfin-correct.json")
+        correct = fixture("seerr-jellyfin-correct.json")
         for field, value in (("hostname", "external.invalid"), ("port", 443), ("useSsl", True), ("urlBase", "/proxy"), ("serverType", 1)):
             with self.subTest(field=field):
                 current = dict(correct); current[field] = value
-                client = JellyseerrClient(transport=QueueTransport([(200, current)]))
+                client = SeerrClient(transport=QueueTransport([(200, current)]))
                 client.authorize(KEY)
                 with self.assertRaises(ApiError) as raised:
                     client.verify_jellyfin()
@@ -84,13 +84,13 @@ class JellyseerrApiTests(unittest.TestCase):
 
     def test_jellyfin_connection_accepts_ip_field_used_by_existing_servers(self):
         current = {"ip": "jellyfin", "port": 8096, "urlBase": "", "useSsl": False}
-        client = JellyseerrClient(transport=QueueTransport([(200, current)]))
+        client = SeerrClient(transport=QueueTransport([(200, current)]))
         client.authorize(KEY)
         self.assertTrue(client.verify_jellyfin())
 
     def test_arr_tests_and_defaults_use_internal_services_and_required_flags(self):
         transport = QueueTransport([(200, {"success": True}), (200, []), (200, {}), (200, {"success": True}), (200, []), (200, {})])
-        client = JellyseerrClient(transport=transport)
+        client = SeerrClient(transport=transport)
         client.authorize(KEY)
         for service in ("radarr", "sonarr"):
             profile, root = profile_root(service)
@@ -119,42 +119,42 @@ class JellyseerrApiTests(unittest.TestCase):
         self.assertTrue(all("apikey=" not in request.full_url.casefold() for request in transport.requests))
 
     def test_inspection_is_authorized_get_only_and_validates_exact_defaults(self):
-        seed = JellyseerrClient()
+        seed = SeerrClient()
         runtime = {service: profile_root(service) for service in ("radarr", "sonarr")}
         radarr = seed._payload("radarr", KEY, *runtime["radarr"]); radarr["id"] = 3
         sonarr = seed._payload("sonarr", KEY, *runtime["sonarr"]); sonarr["id"] = 4
         transport = QueueTransport([
-            (200, fixture("jellyseerr-public-complete.json")),
-            (200, fixture("jellyseerr-jellyfin-correct.json")),
+            (200, fixture("seerr-public-complete.json")),
+            (200, fixture("seerr-jellyfin-correct.json")),
             (200, [radarr]), (200, [sonarr]),
         ])
-        client = JellyseerrClient(transport=transport); client.authorize(KEY)
+        client = SeerrClient(transport=transport); client.authorize(KEY)
         result = client.inspect(runtime)
         self.assertTrue(all(result.values()))
         self.assertTrue(all(request.method == "GET" for request in transport.requests))
         self.assertTrue(all(request.headers.get("X-api-key") == KEY for request in transport.requests))
 
     def test_selected_quality_profile_requires_matching_default_non_4k_names(self):
-        seed = JellyseerrClient()
+        seed = SeerrClient()
         radarr = seed._payload("radarr", KEY, *profile_root("radarr")); radarr["id"] = 3
         sonarr = seed._payload("sonarr", KEY, *profile_root("sonarr")); sonarr["id"] = 4
         transport = QueueTransport([(200, [radarr]), (200, [sonarr])])
-        client = JellyseerrClient(transport=transport); client.authorize(KEY)
+        client = SeerrClient(transport=transport); client.authorize(KEY)
         self.assertEqual(client.selected_quality_profile(), "Fixture HD")
         sonarr["activeProfileName"] = "Other"
         transport = QueueTransport([(200, [radarr]), (200, [sonarr])])
-        client = JellyseerrClient(transport=transport); client.authorize(KEY)
+        client = SeerrClient(transport=transport); client.authorize(KEY)
         with self.assertRaises(ApiError) as raised:
             client.selected_quality_profile()
         self.assertEqual(raised.exception.code, "profile_conflict")
 
     def test_equivalent_servers_and_initialized_state_are_rerun_noops(self):
         profile, root = profile_root("radarr")
-        seed = JellyseerrClient()
+        seed = SeerrClient()
         desired = seed._payload("radarr", KEY, profile, root)
         desired["id"] = 3
-        transport = QueueTransport([(200, {"success": True}), (200, [desired]), (200, fixture("jellyseerr-public-complete.json"))])
-        client = JellyseerrClient(transport=transport)
+        transport = QueueTransport([(200, {"success": True}), (200, [desired]), (200, fixture("seerr-public-complete.json"))])
+        client = SeerrClient(transport=transport)
         client.authorize(KEY)
         self.assertFalse(client.ensure_arr("radarr", KEY, profile, root))
         self.assertFalse(client.finish())
@@ -162,10 +162,10 @@ class JellyseerrApiTests(unittest.TestCase):
 
     def test_owned_drift_updates_existing_server_and_multiple_defaults_refuse(self):
         profile, root = profile_root("sonarr")
-        existing = JellyseerrClient()._payload("sonarr", KEY, profile, root)
+        existing = SeerrClient()._payload("sonarr", KEY, profile, root)
         existing.update({"id": 9, "syncEnabled": False, "unowned": "keep"})
         transport = QueueTransport([(200, {"success": True}), (200, [existing]), (200, {})])
-        client = JellyseerrClient(transport=transport)
+        client = SeerrClient(transport=transport)
         client.authorize(KEY)
         self.assertTrue(client.ensure_arr("sonarr", KEY, profile, root))
         updated = json.loads(transport.requests[-1].data)
@@ -173,7 +173,7 @@ class JellyseerrApiTests(unittest.TestCase):
         self.assertEqual(updated["unowned"], "keep")
 
         transport = QueueTransport([(200, {"success": True}), (200, [{"id": 1, "isDefault": True}, {"id": 2, "isDefault": True}])])
-        client = JellyseerrClient(transport=transport)
+        client = SeerrClient(transport=transport)
         client.authorize(KEY)
         with self.assertRaises(ApiError) as raised:
             client.ensure_arr("radarr", KEY, *profile_root("radarr"))
@@ -182,7 +182,7 @@ class JellyseerrApiTests(unittest.TestCase):
     def test_settings_key_reader_accepts_0644_and_rejects_unsafe_traversal_permissions_and_owner(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory) / "config"
-            service = root / "jellyseerr"
+            service = root / "seerr"
             service.mkdir(parents=True)
             path = service / "settings.json"
             path.write_text(json.dumps({"main": {"apiKey": KEY}}), encoding="utf-8")
@@ -252,9 +252,9 @@ class ConfigureCoreTests(unittest.TestCase):
             def seerr_key(config_root, uid): reader_uids.append(uid); return KEY
             class Runner:
                 def run(self, argv, **kwargs):
-                    records = [{"Service": service, "State": "running", "Health": "healthy", "Project": "homeflix"} for service in ("traefik", "jellyfin", "jellyseerr", "radarr", "sonarr")]
+                    records = [{"Service": service, "State": "running", "Health": "healthy", "Project": "homeflix"} for service in ("traefik", "jellyfin", "seerr", "radarr", "sonarr")]
                     return type("Result", (), {"returncode": 0, "stdout": json.dumps(records)})()
-            with patch("scripts.homeflix_setup.core.JellyfinClient", FakeJellyfin), patch("scripts.homeflix_setup.core.ArrClient", FakeArr), patch("scripts.homeflix_setup.core.JellyseerrClient", FakeSeerr):
+            with patch("scripts.homeflix_setup.core.JellyfinClient", FakeJellyfin), patch("scripts.homeflix_setup.core.ArrClient", FakeArr), patch("scripts.homeflix_setup.core.SeerrClient", FakeSeerr):
                 result = configure_core(root, runner=Runner(), http_waiter=lambda *args, **kwargs: ReadinessResult(True, "ready"), api_key_reader=arr_key, settings_key_reader=seerr_key)
             self.assertEqual(reader_uids, [os.getuid()] * 3)
             self.assertEqual(calls[0][1], "fixture-admin")
@@ -283,7 +283,7 @@ class ConfigureCoreTests(unittest.TestCase):
                 class Runner:
                     def run(self, argv, **kwargs):
                         records = []
-                        for service in ("traefik", "jellyfin", "jellyseerr", "radarr", "sonarr"):
+                        for service in ("traefik", "jellyfin", "seerr", "radarr", "sonarr"):
                             records.append({"Service": service, "State": "exited" if case == "unready" and service == "radarr" else "running", "Health": "healthy", "Project": "other" if case == "wrong_project" else "homeflix"})
                         if case == "unknown": records.append({"Service": "not-a-homeflix-service", "State": "running", "Health": "healthy", "Project": "homeflix"})
                         return type("Result", (), {"returncode": 0, "stdout": json.dumps(records)})()

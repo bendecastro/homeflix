@@ -72,7 +72,7 @@ class FixtureContractTests(unittest.TestCase):
         contracts = fixture("contracts.json")
         self.assertIn("Startup and Library", contracts["jellyfin"])
         self.assertEqual(contracts["servarr"], "API v3")
-        self.assertEqual(contracts["jellyseerr"], "API v1 settings and auth endpoints")
+        self.assertEqual(contracts["seerr"], "API v1 settings and auth endpoints")
 
 
 class JsonClientTests(unittest.TestCase):
@@ -535,7 +535,7 @@ class JellyfinApiTests(unittest.TestCase):
             connection.execute(
                 "INSERT INTO ApiKeys (AccessToken, Name) VALUES (?, ?), (?, ?)",
                 (
-                    "JELLYSEERR_KEY_NOT_REAL01", "Jellyseerr",
+                    "SEERR_KEY_NOT_REAL01", "Seerr",
                     "HOMEFLIX_ARR_KEY_NOT_REAL", "Homeflix Radarr-Sonarr",
                 ),
             )

@@ -20,7 +20,7 @@ from .api import (
     ApiError,
     ArrClient,
     JellyfinClient,
-    JellyseerrClient,
+    SeerrClient,
     read_api_key,
     read_jellyfin_api_key,
     read_settings_api_key,
@@ -247,7 +247,7 @@ def _readiness_targets(config: EnvDocument) -> dict[str, tuple[str, dict[str, st
     return {
         "traefik": ("http://127.0.0.1/System/Info/Public", {"Host": f"jellyfin.{domain}"}),
         "jellyfin": ("http://127.0.0.1:8096/System/Info/Public", {}),
-        "jellyseerr": ("http://127.0.0.1/api/v1/status", {"Host": f"jellyseerr.{domain}"}),
+        "seerr": ("http://127.0.0.1/api/v1/status", {"Host": f"seerr.{domain}"}),
         "radarr": ("http://127.0.0.1/ping", {"Host": f"radarr.{domain}"}),
         "sonarr": ("http://127.0.0.1/ping", {"Host": f"sonarr.{domain}"}),
     }
@@ -464,26 +464,26 @@ def configure_core(
             raise RuntimeError("Arr configuration did not produce runtime selections")
         runtime[service] = (key, client.selected_profile, client.selected_root)
 
-    jellyseerr = JellyseerrClient(
-        headers={"Host": f"jellyseerr.{domain}"},
-        transport=chosen_transports.get("jellyseerr", urllib_transport), deadline=operation_deadline, clock=clock,
+    seerr = SeerrClient(
+        headers={"Host": f"seerr.{domain}"},
+        transport=chosen_transports.get("seerr", urllib_transport), deadline=operation_deadline, clock=clock,
     )
-    was_initialized = jellyseerr.initialized()
+    was_initialized = seerr.initialized()
     if not was_initialized:
-        jellyseerr.authenticate_jellyfin(values["JELLYFIN_ADMIN_USER"] or "", values["JELLYFIN_ADMIN_PASSWORD"] or "")
-    jellyseerr.authorize(settings_key_reader(config_root, expected_uid))
-    jellyseerr.verify_jellyfin()
+        seerr.authenticate_jellyfin(values["JELLYFIN_ADMIN_USER"] or "", values["JELLYFIN_ADMIN_PASSWORD"] or "")
+    seerr.authorize(settings_key_reader(config_root, expected_uid))
+    seerr.verify_jellyfin()
     connected: dict[str, bool] = {}
     for service in ("radarr", "sonarr"):
         key, profile, media_root = runtime[service]
-        connected[service] = jellyseerr.ensure_arr(service, key, profile, media_root)
-    initialized_now = jellyseerr.finish()
+        connected[service] = seerr.ensure_arr(service, key, profile, media_root)
+    initialized_now = seerr.finish()
     return {
         "status": "configured",
         "jellyfin": {"administrator_created": created_admin, "libraries": libraries},
         "radarr": arr_results["radarr"],
         "sonarr": arr_results["sonarr"],
-        "jellyseerr": {"radarr_changed": connected["radarr"], "sonarr_changed": connected["sonarr"], "initialized": was_initialized or initialized_now},
+        "seerr": {"radarr_changed": connected["radarr"], "sonarr_changed": connected["sonarr"], "initialized": was_initialized or initialized_now},
     }
 
 
@@ -876,7 +876,7 @@ def verify_core(
         checks.append(_check("acquisition_absent", None, inventory_reason))
         checks.append(_check("mount", None, "time budget exhausted" if exhausted else "data mount identity could not be inspected"))
         checks.append(_check("hardlink_outcome", None, "time budget exhausted" if exhausted else "hardlink outcome could not be inspected"))
-        checks.extend(_check(domain, None, f"{domain} {app_reason}") for domain in ("jellyfin", "radarr", "sonarr", "jellyseerr"))
+        checks.extend(_check(domain, None, f"{domain} {app_reason}") for domain in ("jellyfin", "radarr", "sonarr", "seerr"))
         checks.append(_check("quicksync", None, quicksync_reason))
         return {"status": "failed", "passed": False, "checks": checks}
 
@@ -966,7 +966,7 @@ def verify_core(
             clock=clock,
         ).inspect(admin_user, admin_password, access_token=access_token)
         checks.append(_application_check("jellyfin", jf, ("initialized", "libraries_exact"), "initialized with exact libraries", "initialization or exact libraries differ"))
-        seerr = JellyseerrClient(headers={"Host": f"jellyseerr.{config.get('DOMAIN') or ''}"}, transport=chosen.get("jellyseerr", urllib_transport), deadline=operation_deadline, clock=clock)
+        seerr = SeerrClient(headers={"Host": f"seerr.{config.get('DOMAIN') or ''}"}, transport=chosen.get("seerr", urllib_transport), deadline=operation_deadline, clock=clock)
         seerr.authorize(settings_key_reader(config_root, uid))
         profile_name = values.get("QUALITY_PROFILE") or seerr.selected_quality_profile()
         for service, media_path in (("radarr", "/data/media/movies"), ("sonarr", "/data/media/tv")):
@@ -977,17 +977,17 @@ def verify_core(
             if inspected.get("runtime_root") is not None:
                 runtime[service] = (inspected["runtime_profile"], inspected["runtime_root"])  # type: ignore[assignment]
         inspected_seerr = seerr.inspect(runtime)
-        checks.append(_application_check("jellyseerr", inspected_seerr, tuple(inspected_seerr), "initialized with exact internal default services", "initialization or internal default services differ"))
+        checks.append(_application_check("seerr", inspected_seerr, tuple(inspected_seerr), "initialized with exact internal default services", "initialization or internal default services differ"))
     except ApiError as caught:
         existing = {item["domain"] for item in checks}
         reason = "time budget exhausted" if caught.code == "deadline_exhausted" else "state could not be inspected"
-        for domain in ("jellyfin", "radarr", "sonarr", "jellyseerr"):
+        for domain in ("jellyfin", "radarr", "sonarr", "seerr"):
             if domain not in existing:
                 checks.append(_check(domain, None, f"{domain} {reason}"))
     except (OSError, RuntimeError, ValueError, KeyError, TypeError):
         existing = {item["domain"] for item in checks}
         reason = "time budget exhausted" if clock() >= operation_deadline else "state could not be inspected"
-        for domain in ("jellyfin", "radarr", "sonarr", "jellyseerr"):
+        for domain in ("jellyfin", "radarr", "sonarr", "seerr"):
             if domain not in existing:
                 checks.append(_check(domain, None, f"{domain} {reason}"))
 
@@ -1031,7 +1031,7 @@ _MANDATORY_DOMAINS = frozenset({
     "jellyfin",
     "radarr",
     "sonarr",
-    "jellyseerr",
+    "seerr",
 })
 
 
@@ -1103,6 +1103,26 @@ def reconcile_core(repository_root: str | Path, **kwargs: object) -> dict[str, o
     except (OSError, ValueError):
         return {"status": "checkpoint_failed", "deploy": deploy, "configure": configured, "verify": verified, "reason": "Verified core state could not be checkpointed"}
     return {"status": "verified", "deploy": deploy, "configure": configured, "verify": verified}
+
+
+def prepare_seerr_config(config_root: str | Path) -> None:
+    """Create the fixed-UID bind source before Docker can create it as root."""
+    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+    root_fd = os.open(config_root, flags)
+    try:
+        try:
+            os.mkdir("seerr", mode=0o755, dir_fd=root_fd)
+        except FileExistsError:
+            pass
+        config_fd = os.open("seerr", flags, dir_fd=root_fd)
+        try:
+            metadata = os.fstat(config_fd)
+            if (metadata.st_uid, metadata.st_gid) != (1000, 1000):
+                os.fchown(config_fd, 1000, 1000)
+        finally:
+            os.close(config_fd)
+    finally:
+        os.close(root_fd)
 
 
 def deploy_core(
@@ -1254,7 +1274,17 @@ def deploy_core(
             "reason": "Deployment inputs changed during preflight",
             "safety_note": "External mount changes after the final drift guard cannot be eliminated",
         }
-    # Keep this final snapshot comparison immediately adjacent to the only mutation.
+    try:
+        prepare_seerr_config(config.get("CONFIG_ROOT") or "")
+    except OSError:
+        return {
+            "status": "config_preparation_failed",
+            "changed": False,
+            "services": _diagnostics(initial_states, readiness),
+            "checkpoint_recorded": False,
+            "reason": "Create CONFIG_ROOT/seerr as a real directory owned by 1000:1000 (using sudo mkdir and sudo chown), then retry",
+        }
+    # The deployment snapshot was verified before preparing the Seerr bind source.
     if clock() >= readiness_deadline:
         return {"status": "timeout", "changed": False, "services": _diagnostics(initial_states, readiness), "checkpoint_recorded": False, "reason": "Core deployment deadline was exhausted"}
     startup_process_failed = False

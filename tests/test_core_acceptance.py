@@ -67,7 +67,7 @@ class CoreFixtureAcceptanceTests(unittest.TestCase):
 
             discovery = FixtureRunner("discovery-debian.json")
             discovery.commands["find /dev/dri -maxdepth 1 -name renderD* -type c -print"] = [0, "", ""]
-            for service in ("jellyseerr", "radarr", "sonarr"):
+            for service in ("seerr", "radarr", "sonarr"):
                 discovery.commands[f"getent ahosts {service}.homeflix"] = [2, "", "not found"]
             facts = discover_host(discovery)
             facts = replace(
@@ -132,7 +132,7 @@ class CoreFixtureAcceptanceTests(unittest.TestCase):
 
             common = {
                 "runner": runner,
-                "transports": {"jellyfin": fixture.jellyfin, "radarr": fixture.arr("radarr"), "sonarr": fixture.arr("sonarr"), "jellyseerr": fixture.jellyseerr},
+                "transports": {"jellyfin": fixture.jellyfin, "radarr": fixture.arr("radarr"), "sonarr": fixture.arr("sonarr"), "seerr": fixture.seerr},
                 "api_key_reader": lambda *args: fixture.key,
                 "settings_key_reader": lambda *args: fixture.key,
                 "http_waiter": http_waiter,
@@ -232,13 +232,13 @@ class CoreFixtureAcceptanceTests(unittest.TestCase):
                     (service, "GET", "/api/v3/notification"),
                 ))
             expected_rerun_calls.extend((
-                ("jellyseerr", "GET", "/api/v1/settings/public"),
-                ("jellyseerr", "GET", "/api/v1/settings/jellyfin"),
-                ("jellyseerr", "POST", "/api/v1/settings/radarr/test"),
-                ("jellyseerr", "GET", "/api/v1/settings/radarr"),
-                ("jellyseerr", "POST", "/api/v1/settings/sonarr/test"),
-                ("jellyseerr", "GET", "/api/v1/settings/sonarr"),
-                ("jellyseerr", "GET", "/api/v1/settings/public"),
+                ("seerr", "GET", "/api/v1/settings/public"),
+                ("seerr", "GET", "/api/v1/settings/jellyfin"),
+                ("seerr", "POST", "/api/v1/settings/radarr/test"),
+                ("seerr", "GET", "/api/v1/settings/radarr"),
+                ("seerr", "POST", "/api/v1/settings/sonarr/test"),
+                ("seerr", "GET", "/api/v1/settings/sonarr"),
+                ("seerr", "GET", "/api/v1/settings/public"),
                 ("jellyfin", "GET", "/System/Info/Public"),
                 ("jellyfin", "POST", "/Users/AuthenticateByName"),
                 ("jellyfin", "GET", "/Library/VirtualFolders"),
@@ -254,10 +254,10 @@ class CoreFixtureAcceptanceTests(unittest.TestCase):
                     (service, "GET", "/api/v3/notification"),
                 ))
             expected_rerun_calls.extend((
-                ("jellyseerr", "GET", "/api/v1/settings/public"),
-                ("jellyseerr", "GET", "/api/v1/settings/jellyfin"),
-                ("jellyseerr", "GET", "/api/v1/settings/radarr"),
-                ("jellyseerr", "GET", "/api/v1/settings/sonarr"),
+                ("seerr", "GET", "/api/v1/settings/public"),
+                ("seerr", "GET", "/api/v1/settings/jellyfin"),
+                ("seerr", "GET", "/api/v1/settings/radarr"),
+                ("seerr", "GET", "/api/v1/settings/sonarr"),
             ))
             self.assertEqual(rerun_calls, expected_rerun_calls)
             self.assertEqual(len(fixture.roots["radarr"]), 1)

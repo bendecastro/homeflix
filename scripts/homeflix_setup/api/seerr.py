@@ -1,4 +1,4 @@
-"""Jellyseerr initialization and service reconciliation."""
+"""Seerr initialization and service reconciliation."""
 
 from __future__ import annotations
 
@@ -17,20 +17,21 @@ _INTERNAL = {"jellyfin": 8096, "radarr": 7878, "sonarr": 8989}
 
 
 def read_settings_api_key(config_root: str | Path, expected_uid: int) -> str:
-    raw = read_config_file(config_root, ("jellyseerr", "settings.json"), expected_uid)
+    raw = read_config_file(config_root, ("seerr", "settings.json"), expected_uid,
+                           extra_allowed_uids=frozenset({1000}), extra_uid_from_depth=0)
     try:
         settings = json.loads(raw.decode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError):
-        raise ValueError("Jellyseerr settings are invalid") from None
+        raise ValueError("Seerr settings are invalid") from None
     value = settings.get("main", {}).get("apiKey") if isinstance(settings, dict) and isinstance(settings.get("main"), dict) else None
     if not isinstance(value, str) or not _KEY.fullmatch(value):
-        raise ValueError("Jellyseerr API key is invalid")
+        raise ValueError("Seerr API key is invalid")
     return value
 
 
-class JellyseerrClient:
+class SeerrClient:
     def __init__(self, base_url: str = "http://127.0.0.1", *, headers: Mapping[str, str] | None = None, transport: Transport = urllib_transport, deadline: float | None = None, clock: Callable[[], float] = time.monotonic) -> None:
-        self.http = JsonClient("jellyseerr", base_url, headers=headers, transport=transport, deadline=deadline, clock=clock)
+        self.http = JsonClient("seerr", base_url, headers=headers, transport=transport, deadline=deadline, clock=clock)
 
     def authenticate_jellyfin(self, username: str, password: str) -> None:
         self.http.request("POST", "/api/v1/auth/jellyfin", operation="connect Jellyfin", payload={
@@ -40,22 +41,22 @@ class JellyseerrClient:
 
     def authorize(self, api_key: str) -> None:
         if not _KEY.fullmatch(api_key):
-            raise ValueError("invalid Jellyseerr API key")
+            raise ValueError("invalid Seerr API key")
         self.http.headers["X-Api-Key"] = api_key
 
     def initialized(self) -> bool:
         public = self.http.request("GET", "/api/v1/settings/public", operation="read initialization state")
         if not isinstance(public, dict):
-            raise ApiError("jellyseerr", "read initialization state", None, "invalid_response")
+            raise ApiError("seerr", "read initialization state", None, "invalid_response")
         value = public.get("initialized", public.get("setupComplete"))
         if type(value) is not bool:
-            raise ApiError("jellyseerr", "read initialization state", None, "invalid_response")
+            raise ApiError("seerr", "read initialization state", None, "invalid_response")
         return value
 
     def verify_jellyfin(self) -> bool:
         current = self.http.request("GET", "/api/v1/settings/jellyfin", operation="read Jellyfin settings")
         if not isinstance(current, dict):
-            raise ApiError("jellyseerr", "reconcile Jellyfin settings", None, "jellyfin_connection_conflict")
+            raise ApiError("seerr", "reconcile Jellyfin settings", None, "jellyfin_connection_conflict")
         host = current.get("hostname") or current.get("ip")
         equivalent = (
             host == "jellyfin"
@@ -65,7 +66,7 @@ class JellyseerrClient:
             and current.get("serverType") in {None, 2}
         )
         if not equivalent:
-            raise ApiError("jellyseerr", "reconcile Jellyfin settings", None, "jellyfin_connection_conflict")
+            raise ApiError("seerr", "reconcile Jellyfin settings", None, "jellyfin_connection_conflict")
         return True
 
     def _payload(self, service: str, api_key: str, profile: dict[str, Any], root: dict[str, Any]) -> dict[str, Any]:
@@ -85,16 +86,16 @@ class JellyseerrClient:
         desired = self._payload(service, api_key, profile, root)
         test = self.http.request("POST", f"/api/v1/settings/{service}/test", operation=f"test {service} connection", payload=desired)
         if not isinstance(test, dict) or not (test.get("success") is True or test.get("status") == 200):
-            raise ApiError("jellyseerr", f"test {service} connection", None, "connection_failed")
+            raise ApiError("seerr", f"test {service} connection", None, "connection_failed")
         current = self.http.request("GET", f"/api/v1/settings/{service}", operation=f"list {service} settings")
         if not isinstance(current, list):
-            raise ApiError("jellyseerr", f"list {service} settings", None, "invalid_response")
+            raise ApiError("seerr", f"list {service} settings", None, "invalid_response")
         defaults = [item for item in current if isinstance(item, dict) and item.get("isDefault") is True]
         if len(defaults) > 1:
-            raise ApiError("jellyseerr", f"reconcile {service} settings", None, "multiple_defaults")
+            raise ApiError("seerr", f"reconcile {service} settings", None, "multiple_defaults")
         candidates = [item for item in current if isinstance(item, dict) and item.get("hostname") == service and item.get("port") == _INTERNAL[service] and item.get("is4k") is False]
         if len(candidates) > 1 or (defaults and (not candidates or defaults[0] is not candidates[0])):
-            raise ApiError("jellyseerr", f"reconcile {service} settings", None, "server_conflict")
+            raise ApiError("seerr", f"reconcile {service} settings", None, "server_conflict")
         existing = candidates[0] if candidates else None
         if existing is None:
             try:
@@ -108,7 +109,7 @@ class JellyseerrClient:
                     raise
             return True
         if type(existing.get("id")) is not int:
-            raise ApiError("jellyseerr", f"reconcile {service} settings", None, "invalid_response")
+            raise ApiError("seerr", f"reconcile {service} settings", None, "invalid_response")
         owned = set(desired)
         if all(existing.get(key) == value for key, value in desired.items()):
             return False
@@ -123,26 +124,26 @@ class JellyseerrClient:
         for service in ("radarr", "sonarr"):
             current = self.http.request("GET", f"/api/v1/settings/{service}", operation=f"inspect {service} settings")
             if not isinstance(current, list):
-                raise ApiError("jellyseerr", f"inspect {service} settings", None, "invalid_response")
+                raise ApiError("seerr", f"inspect {service} settings", None, "invalid_response")
             defaults = [
                 item for item in current
                 if isinstance(item, dict) and item.get("isDefault") is True and item.get("is4k") is False
             ]
             if len(defaults) != 1:
-                raise ApiError("jellyseerr", f"inspect {service} settings", None, "profile_conflict" if defaults else "profile_not_found")
+                raise ApiError("seerr", f"inspect {service} settings", None, "profile_conflict" if defaults else "profile_not_found")
             name = defaults[0].get("activeProfileName")
             if not isinstance(name, str) or not name:
-                raise ApiError("jellyseerr", f"inspect {service} settings", None, "invalid_response")
+                raise ApiError("seerr", f"inspect {service} settings", None, "invalid_response")
             names.append(name)
         if names[0] != names[1]:
-            raise ApiError("jellyseerr", "inspect quality profile", None, "profile_conflict")
+            raise ApiError("seerr", "inspect quality profile", None, "profile_conflict")
         return names[0]
 
     def inspect_arr(self, service: str, profile: dict[str, Any], root: dict[str, Any]) -> bool:
         """Validate exactly one selected default non-4K server using GET only."""
         current = self.http.request("GET", f"/api/v1/settings/{service}", operation=f"inspect {service} settings")
         if not isinstance(current, list):
-            raise ApiError("jellyseerr", f"inspect {service} settings", None, "invalid_response")
+            raise ApiError("seerr", f"inspect {service} settings", None, "invalid_response")
         expected: dict[str, object] = {
             "hostname": service, "port": _INTERNAL[service], "useSsl": False,
             "baseUrl": "", "activeProfileId": profile["id"],

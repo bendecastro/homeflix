@@ -116,7 +116,7 @@ class HostDiscoveryTests(unittest.TestCase):
                 "domain": "homeflix",
                 "status": "resolved",
                 "services": [
-                    {"hostname": "jellyseerr.homeflix", "status": "resolved"},
+                    {"hostname": "seerr.homeflix", "status": "resolved"},
                     {"hostname": "radarr.homeflix", "status": "resolved"},
                     {"hostname": "sonarr.homeflix", "status": "resolved"},
                 ],
@@ -237,7 +237,7 @@ class HostDiscoveryTests(unittest.TestCase):
 
     def test_service_dns_unresolved_despite_healthy_resolver_is_structured(self) -> None:
         runner = FixtureRunner("discovery-debian.json")
-        runner.commands["getent ahosts jellyseerr.homeflix"] = [2, "", ""]
+        runner.commands["getent ahosts seerr.homeflix"] = [2, "", ""]
         runner.commands["getent ahosts radarr.homeflix"] = [0, "192.0.2.22 STREAM radarr.homeflix\n", ""]
         runner.commands["getent ahosts sonarr.homeflix"] = [2, "", ""]
         result = discover_host(runner).to_dict()
@@ -250,7 +250,7 @@ class HostDiscoveryTests(unittest.TestCase):
 
     def test_service_dns_probe_error_is_distinct_from_unresolved(self) -> None:
         runner = TimeoutRunner("discovery-debian.json", ("getent", "ahosts", "sonarr.example.test"))
-        runner.commands["getent ahosts jellyseerr.example.test"] = [0, "192.0.2.21 STREAM jellyseerr.example.test\n", ""]
+        runner.commands["getent ahosts seerr.example.test"] = [0, "192.0.2.21 STREAM seerr.example.test\n", ""]
         runner.commands["getent ahosts radarr.example.test"] = [0, "192.0.2.22 STREAM radarr.example.test\n", ""]
         facts = discover_host(runner, domain="example.test").to_dict()
         self.assertEqual(facts["lan_dns"]["domain"], "example.test")

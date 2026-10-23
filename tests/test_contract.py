@@ -21,7 +21,7 @@ HEALTHCHECK = {
     "start_period": "1m30s",
 }
 
-CORE = ("traefik", "jellyfin", "jellyseerr", "radarr", "sonarr")
+CORE = ("traefik", "jellyfin", "seerr", "radarr", "sonarr")
 ACQUISITION = ("gluetun", "qbittorrent", "nzbget", "prowlarr", "lidarr", "bazarr")
 VPN_NAMESPACE = ("qbittorrent", "nzbget", "prowlarr")
 ARR_DATA = ("radarr", "sonarr", "lidarr")
@@ -56,7 +56,7 @@ def safe_mapping() -> dict[str, object]:
             "networks": {"traefik-network": None},
             "volumes": [_bind("/srv/homeflix/data/media", "/data/media")],
         },
-        "jellyseerr": {"networks": {"traefik-network": None}},
+        "seerr": {"networks": {"traefik-network": None}},
         "radarr": {
             "networks": {"traefik-network": None},
             "volumes": [_bind("/srv/homeflix/data", "/data")],

@@ -245,7 +245,7 @@ class StatusCliTests(unittest.TestCase):
             "jellyfin": {"administrator_created": True, "libraries": ["Movies", "Shows", "Music"]},
             "radarr": {"profile": "Fixture HD", "root": "/data/media/movies", "targeted_connection_changed": True, "refresh_connection_changed": True},
             "sonarr": {"profile": "Fixture HD", "root": "/data/media/tv", "targeted_connection_changed": False, "refresh_connection_changed": False},
-            "jellyseerr": {"initialized": True},
+            "seerr": {"initialized": True},
         }
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

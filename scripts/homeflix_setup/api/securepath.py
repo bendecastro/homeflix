@@ -13,11 +13,11 @@ _DIR_FLAGS = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLL
 _FILE_FLAGS = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
 
 
-def _verify(metadata: os.stat_result, expected_uid: int, *, directory: bool) -> None:
+def _verify(metadata: os.stat_result, expected_uid: int, *, directory: bool, extra_allowed_uids: frozenset[int] = frozenset()) -> None:
     expected_type = stat.S_ISDIR if directory else stat.S_ISREG
     if not expected_type(metadata.st_mode):
         raise ValueError("application configuration object has an unsafe type")
-    if metadata.st_uid not in {0, expected_uid}:
+    if metadata.st_uid not in {0, expected_uid} | extra_allowed_uids:
         raise ValueError("application configuration owner is unsafe")
     # LinuxServer config dirs are commonly 0775. Group-writable directories
     # owned by the expected uid are therefore allowed. Secret files and
@@ -36,6 +36,8 @@ def read_config_file(
     expected_uid: int,
     *,
     limit: int = 1024 * 1024,
+    extra_allowed_uids: frozenset[int] = frozenset(),
+    extra_uid_from_depth: int = 0,
 ) -> bytes:
     """Open fixed components with openat/no-follow and verify root, dirs, and file."""
 
@@ -55,15 +57,17 @@ def read_config_file(
             descriptor = child
             if index == len(parts) - 1:
                 _verify(os.fstat(descriptor), expected_uid, directory=True)
-        for part in components[:-1]:
+        for depth, part in enumerate(components[:-1]):
             child = os.open(part, _DIR_FLAGS, dir_fd=descriptor)
             os.close(descriptor)
             descriptor = child
-            _verify(os.fstat(descriptor), expected_uid, directory=True)
+            _verify(os.fstat(descriptor), expected_uid, directory=True,
+                    extra_allowed_uids=extra_allowed_uids if depth >= extra_uid_from_depth else frozenset())
         file_descriptor = os.open(components[-1], _FILE_FLAGS, dir_fd=descriptor)
         try:
             metadata = os.fstat(file_descriptor)
-            _verify(metadata, expected_uid, directory=False)
+            _verify(metadata, expected_uid, directory=False,
+                    extra_allowed_uids=extra_allowed_uids if len(components) - 1 >= extra_uid_from_depth else frozenset())
             if metadata.st_size > limit:
                 raise ValueError("application configuration file is too large")
             chunks: list[bytes] = []

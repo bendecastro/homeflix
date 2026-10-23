@@ -56,7 +56,7 @@ class ComposeOverrideTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             (root / "compose.yml").write_text(
-                "services:\n  jellyfin:\n    image: busybox\n  jellyseerr:\n    image: busybox\n  radarr:\n    image: busybox\n  sonarr:\n    image: busybox\n",
+                "services:\n  jellyfin:\n    image: busybox\n  seerr:\n    image: busybox\n  radarr:\n    image: busybox\n  sonarr:\n    image: busybox\n",
                 encoding="utf-8",
             )
             (root / "override.yml").write_text(override, encoding="utf-8")

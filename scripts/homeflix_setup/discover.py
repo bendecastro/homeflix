@@ -880,7 +880,7 @@ def discover_host(runner: Runner, *, domain: str = "homeflix") -> HostFacts:
         resolver_result.stdout if dns_reason is None else ""
     )
     lan_dns_services: list[LanDnsServiceFact] = []
-    for service in ("jellyseerr", "radarr", "sonarr"):
+    for service in ("seerr", "radarr", "sonarr"):
         hostname = f"{service}.{normalized_domain}"
         resolution = _run(runner, "getent", "ahosts", hostname)
         if resolution.returncode == 0 and resolution.stdout.strip():

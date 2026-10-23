@@ -475,11 +475,11 @@ def main(argv: Sequence[str] | None = None, *, repository_root: Path | None = No
             result = {
                 "status": "planned", "state_written": False,
                 "phases": ["configure", "preflight:core", "deploy:core", "initialize:core", "verify:core"],
-                "services": ["traefik", "jellyfin", "jellyseerr", "radarr", "sonarr"],
+                "services": ["traefik", "jellyfin", "seerr", "radarr", "sonarr"],
                 "commands": [
                     ["scripts/homeflix", "configure", "--data-root", "DATA_ROOT", "--config-root", "CONFIG_ROOT", "--cache-root", "CACHE_ROOT"],
                     ["scripts/homeflix", "preflight", "--phase", "core"],
-                    ["docker", "compose", "--project-name", "homeflix", "up", "--detach", "--no-deps", "traefik", "jellyfin", "jellyseerr", "radarr", "sonarr"],
+                    ["docker", "compose", "--project-name", "homeflix", "up", "--detach", "--no-deps", "traefik", "jellyfin", "seerr", "radarr", "sonarr"],
                     ["scripts/homeflix", "initialize", "core"], ["scripts/homeflix", "verify", "core"],
                 ],
                 "required_human_inputs": ["DATA_ROOT", "CONFIG_ROOT", "CACHE_ROOT", "quality profile if the default is unsuitable"],
@@ -786,7 +786,7 @@ def main(argv: Sequence[str] | None = None, *, repository_root: Path | None = No
         print("Jellyfin libraries: " + " ".join(result["jellyfin"]["libraries"]))
         for service in ("radarr", "sonarr"):
             print(f"{service}: profile={result[service]['profile']} root={result[service]['root']}")
-        print("Jellyseerr initialized: " + str(result["jellyseerr"]["initialized"]).lower())
+        print("Seerr initialized: " + str(result["seerr"]["initialized"]).lower())
     elif arguments.command == "initialize":
         print(f"Acquisition API initialization: {result['status']}")
     elif arguments.command == "deploy":

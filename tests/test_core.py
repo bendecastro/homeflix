@@ -97,7 +97,7 @@ class ReadinessHelperTests(unittest.TestCase):
             ("http://127.0.0.1/System/Info/Public", {"Host": "jellyfin.homeflix.test"}),
         )
         self.assertEqual(targets["jellyfin"], ("http://127.0.0.1:8096/System/Info/Public", {}))
-        self.assertEqual(targets["jellyseerr"][1], {"Host": "jellyseerr.homeflix.test"})
+        self.assertEqual(targets["seerr"][1], {"Host": "seerr.homeflix.test"})
         self.assertEqual(targets["radarr"], ("http://127.0.0.1/ping", {"Host": "radarr.homeflix.test"}))
         self.assertEqual(targets["sonarr"], ("http://127.0.0.1/ping", {"Host": "sonarr.homeflix.test"}))
 
@@ -169,6 +169,11 @@ class ReadinessHelperTests(unittest.TestCase):
 
 
 class CoreDeploymentTests(unittest.TestCase):
+    def setUp(self):
+        preparation = patch("scripts.homeflix_setup.core.prepare_seerr_config")
+        self.prepare_seerr = preparation.start()
+        self.addCleanup(preparation.stop)
+
     def make_root(self) -> tuple[tempfile.TemporaryDirectory[str], Path]:
         temporary = tempfile.TemporaryDirectory()
         root = Path(temporary.name)
@@ -197,6 +202,7 @@ class CoreDeploymentTests(unittest.TestCase):
             root, runner=runner, preflight_runner=passing_preflight,
             container_waiter=containers, http_waiter=http,
         )
+        self.prepare_seerr.assert_called_once()
         up = next(command for command in runner.commands if "up" in command)
         self.assertEqual(up[-8:], ("up", "--detach", "--no-deps", *CORE_SERVICES))
         self.assertEqual(container_calls, list(CORE_SERVICES))
@@ -206,6 +212,17 @@ class CoreDeploymentTests(unittest.TestCase):
         rendered = " ".join(up).casefold()
         for forbidden in ("gluetun", "qbittorrent", "nzbget", "prowlarr", "lidarr", "bazarr", "glances", "watchtower"):
             self.assertNotIn(forbidden, rendered)
+
+    def test_config_preparation_failure_prevents_compose_up(self):
+        temporary, root = self.make_root()
+        self.addCleanup(temporary.cleanup)
+        self.prepare_seerr.side_effect = PermissionError()
+        runner = FakeRunner([{}])
+        result = deploy_core(root, runner=runner, preflight_runner=passing_preflight,
+                             http_waiter=lambda *args, **kwargs: ReadinessResult(True, "ready"))
+        self.assertEqual(result["status"], "config_preparation_failed")
+        self.assertIn("sudo chown", result["reason"])
+        self.assertFalse(any("up" in command for command in runner.commands))
 
     def test_healthy_live_services_are_noop_regardless_of_checkpoint(self) -> None:
         temporary, root = self.make_root()
@@ -594,7 +611,7 @@ class StatefulCoreFixture:
             self.naming_ok = {"radarr": missing != "arr_settings", "sonarr": True}
             self.completed_ok = {"radarr": True, "sonarr": True}
             self.servers = {"radarr": [self._server("radarr")], "sonarr": [self._server("sonarr")]}
-            if missing == "jellyseerr_server": self.servers["sonarr"] = []
+            if missing == "seerr_server": self.servers["sonarr"] = []
             self.initialized = True
             self.jellyfin_connected = True
             discovery_ready = missing != "jellyfin_startup"
@@ -869,13 +886,13 @@ class StatefulCoreFixture:
             raise AssertionError(f"unexpected {service} fixture request {outgoing.method} {outgoing.full_url}")
         return transport
 
-    def jellyseerr(self, outgoing, timeout):
+    def seerr(self, outgoing, timeout):
         split = urlsplit(outgoing.full_url)
         path = split.path
-        call = ("jellyseerr", outgoing.method, path)
+        call = ("seerr", outgoing.method, path)
         self.api_calls.append(call)
         if split.query:
-            raise AssertionError("unexpected Jellyseerr fixture query")
+            raise AssertionError("unexpected Seerr fixture query")
         if outgoing.method == "GET" and path == "/api/v1/settings/public":
             return self._response(200, {"initialized": self.initialized})
         if outgoing.method == "POST" and path == "/api/v1/auth/jellyfin":
@@ -907,7 +924,7 @@ class StatefulCoreFixture:
                 self.updates["server"][service] += 1
                 self.configuration_mutations.append(call)
                 return self._response(200, payload)
-        raise AssertionError(f"unexpected Jellyseerr fixture request {outgoing.method} {outgoing.full_url}")
+        raise AssertionError(f"unexpected Seerr fixture request {outgoing.method} {outgoing.full_url}")
 
 
 class StatefulFixtureStrictnessTests(unittest.TestCase):
@@ -920,13 +937,18 @@ class StatefulFixtureStrictnessTests(unittest.TestCase):
         for transport, request in (
             (fixture.jellyfin, Request("http://127.0.0.1/unknown", method="GET")),
             (fixture.arr("radarr"), Request("http://127.0.0.1/api/v3/rootfolder/extra", method="POST", data=b"{}")),
-            (fixture.jellyseerr, Request("http://127.0.0.1/api/v1/settings/radarr/extra/bad", method="PUT", data=b"{}")),
+            (fixture.seerr, Request("http://127.0.0.1/api/v1/settings/radarr/extra/bad", method="PUT", data=b"{}")),
         ):
             with self.subTest(url=request.full_url), self.assertRaises(AssertionError):
                 transport(request, 1)
 
 
 class CoreVerificationAndResumeTests(unittest.TestCase):
+    def setUp(self):
+        preparation = patch("scripts.homeflix_setup.core.prepare_seerr_config")
+        preparation.start()
+        self.addCleanup(preparation.stop)
+
     def make_root(self):
         temporary = tempfile.TemporaryDirectory()
         root = Path(temporary.name)
@@ -969,7 +991,7 @@ class CoreVerificationAndResumeTests(unittest.TestCase):
             def __init__(self, **kwargs): pass
             def authorize(self, key): pass
             def inspect(self, runtime): return {"initialized": True, "jellyfin": True, "radarr": True, "sonarr": True}
-        with patch("scripts.homeflix_setup.core.JellyfinClient", Jellyfin), patch("scripts.homeflix_setup.core.ArrClient", Arr), patch("scripts.homeflix_setup.core.JellyseerrClient", Seerr):
+        with patch("scripts.homeflix_setup.core.JellyfinClient", Jellyfin), patch("scripts.homeflix_setup.core.ArrClient", Arr), patch("scripts.homeflix_setup.core.SeerrClient", Seerr):
             result = verify_core(
                 root, runner=Runner(), api_key_reader=lambda *args: "FIXTURE_API_KEY_1234567890ABCDE",
                 settings_key_reader=lambda *args: "FIXTURE_API_KEY_1234567890ABCDE",
@@ -984,8 +1006,8 @@ class CoreVerificationAndResumeTests(unittest.TestCase):
         self.assertNotIn("findings", result)
         self.assertEqual({item["domain"] for item in result["checks"]}, {
             "docker", "stack_contract", "compose_project", "service:traefik", "service:jellyfin",
-            "service:jellyseerr", "service:radarr", "service:sonarr", "acquisition_absent",
-            "mount", "hardlink_outcome", "jellyfin", "radarr", "sonarr", "jellyseerr", "quicksync",
+            "service:seerr", "service:radarr", "service:sonarr", "acquisition_absent",
+            "mount", "hardlink_outcome", "jellyfin", "radarr", "sonarr", "seerr", "quicksync",
         })
         self.assertEqual(next(item for item in result["checks"] if item["domain"] == "quicksync")["status"], "not-applicable")
 
@@ -1033,7 +1055,7 @@ class CoreVerificationAndResumeTests(unittest.TestCase):
             def __init__(self, **kwargs): pass
             def authorize(self, key): pass
             def inspect(self, runtime): return {"initialized": True, "jellyfin": True, "radarr": True, "sonarr": True}
-        with patch("scripts.homeflix_setup.core.JellyfinClient", Jellyfin), patch("scripts.homeflix_setup.core.ArrClient", Arr), patch("scripts.homeflix_setup.core.JellyseerrClient", Seerr):
+        with patch("scripts.homeflix_setup.core.JellyfinClient", Jellyfin), patch("scripts.homeflix_setup.core.ArrClient", Arr), patch("scripts.homeflix_setup.core.SeerrClient", Seerr):
             result = verify_core(root, runner=runner, api_key_reader=lambda *args: "FIXTURE_API_KEY_1234567890ABCDE", settings_key_reader=lambda *args: "FIXTURE_API_KEY_1234567890ABCDE", http_waiter=lambda *args, **kwargs: ReadinessResult(True, "ready"))
         self.assertEqual(next(item for item in result["checks"] if item["domain"] == "quicksync")["status"], "pass")
         self.assertTrue(any("config" in command and "json" in command for command in runner.commands))
@@ -1102,7 +1124,7 @@ class CoreVerificationAndResumeTests(unittest.TestCase):
             def inspect(self, runtime): return {"initialized": True, "jellyfin": True, "radarr": True, "sonarr": True}
 
         def verify(**overrides):
-            with patch("scripts.homeflix_setup.core.JellyfinClient", Jellyfin), patch("scripts.homeflix_setup.core.ArrClient", Arr), patch("scripts.homeflix_setup.core.JellyseerrClient", Seerr):
+            with patch("scripts.homeflix_setup.core.JellyfinClient", Jellyfin), patch("scripts.homeflix_setup.core.ArrClient", Arr), patch("scripts.homeflix_setup.core.SeerrClient", Seerr):
                 return verify_core(
                     root, runner=Runner(),
                     api_key_reader=lambda *args: "FIXTURE_API_KEY_1234567890ABCDE",
@@ -1150,7 +1172,7 @@ class CoreVerificationAndResumeTests(unittest.TestCase):
             def inspect(self, runtime): return {"initialized": True, "jellyfin": True, "radarr": True, "sonarr": True}
 
         def verify(**overrides):
-            with patch("scripts.homeflix_setup.core.JellyfinClient", Jellyfin), patch("scripts.homeflix_setup.core.ArrClient", Arr), patch("scripts.homeflix_setup.core.JellyseerrClient", Seerr):
+            with patch("scripts.homeflix_setup.core.JellyfinClient", Jellyfin), patch("scripts.homeflix_setup.core.ArrClient", Arr), patch("scripts.homeflix_setup.core.SeerrClient", Seerr):
                 return verify_core(
                     root, runner=Runner(),
                     api_key_reader=lambda *args: "FIXTURE_API_KEY_1234567890ABCDE",
@@ -1196,7 +1218,7 @@ class CoreVerificationAndResumeTests(unittest.TestCase):
             from scripts.homeflix_setup.contract import evaluate_stack_contract
             return evaluate_stack_contract({"services": {"prowlarr": {"network_mode": "bridge"}}})
 
-        with patch("scripts.homeflix_setup.core.JellyfinClient", Jellyfin), patch("scripts.homeflix_setup.core.ArrClient", Arr), patch("scripts.homeflix_setup.core.JellyseerrClient", Seerr):
+        with patch("scripts.homeflix_setup.core.JellyfinClient", Jellyfin), patch("scripts.homeflix_setup.core.ArrClient", Arr), patch("scripts.homeflix_setup.core.SeerrClient", Seerr):
             result = verify_core(
                 root, runner=Runner(),
                 api_key_reader=lambda *args: "FIXTURE_API_KEY_1234567890ABCDE",
@@ -1274,7 +1296,7 @@ class CoreVerificationAndResumeTests(unittest.TestCase):
                         def __init__(self, **kwargs): pass
                         def authorize(self, key): pass
                         def inspect(self, runtime): return {"initialized": True, "jellyfin": True, "radarr": True, "sonarr": True}
-                    with patch("scripts.homeflix_setup.core.JellyfinClient", Jellyfin), patch("scripts.homeflix_setup.core.ArrClient", Arr), patch("scripts.homeflix_setup.core.JellyseerrClient", Seerr):
+                    with patch("scripts.homeflix_setup.core.JellyfinClient", Jellyfin), patch("scripts.homeflix_setup.core.ArrClient", Arr), patch("scripts.homeflix_setup.core.SeerrClient", Seerr):
                         result = verify_core(
                             root, runner=Runner(),
                             api_key_reader=lambda *args: "FIXTURE_API_KEY_1234567890ABCDE",
@@ -1348,7 +1370,7 @@ class CoreVerificationAndResumeTests(unittest.TestCase):
         with patch("scripts.homeflix_setup.core.SetupState.save", side_effect=OSError("private checkpoint path")):
             result = reconcile_core(
                 root, runner=fixture,
-                transports={"jellyfin": fixture.jellyfin, "radarr": fixture.arr("radarr"), "sonarr": fixture.arr("sonarr"), "jellyseerr": fixture.jellyseerr},
+                transports={"jellyfin": fixture.jellyfin, "radarr": fixture.arr("radarr"), "sonarr": fixture.arr("sonarr"), "seerr": fixture.seerr},
                 api_key_reader=lambda *args: fixture.key, settings_key_reader=lambda *args: fixture.key,
                 preflight_runner=passing_preflight,
                 http_waiter=lambda *args, **kwargs: ReadinessResult(True, "ready"),
@@ -1369,8 +1391,8 @@ class CoreVerificationAndResumeTests(unittest.TestCase):
             ("radarr_false", "radarr", "failure"),
             ("radarr_discovery", "radarr", "failure"),
             ("sonarr_wrong", "sonarr", "unknown"),
-            ("jellyseerr_false", "jellyseerr", "failure"),
-            ("jellyseerr_wrong", "jellyseerr", "unknown"),
+            ("seerr_false", "seerr", "failure"),
+            ("seerr_wrong", "seerr", "unknown"),
             ("acquisition", "acquisition_absent", "warning"),
             ("acquisition_malformed", "acquisition_absent", "unknown"),
             ("quicksync_invalid", "quicksync", "failure"),
@@ -1410,12 +1432,12 @@ class CoreVerificationAndResumeTests(unittest.TestCase):
                         def __init__(self, **kwargs): pass
                         def authorize(self, key): pass
                         def inspect(self, runtime):
-                            if scenario == "jellyseerr_wrong": return {"initialized": "yes"}
-                            return {"initialized": scenario != "jellyseerr_false", "jellyfin": True, "radarr": True, "sonarr": True}
+                            if scenario == "seerr_wrong": return {"initialized": "yes"}
+                            return {"initialized": scenario != "seerr_false", "jellyfin": True, "radarr": True, "sonarr": True}
                     def quick(*args):
                         if scenario == "quicksync_unknown": raise ValueError("private /root 10.0.0.1")
                         return False if scenario == "quicksync_invalid" else None
-                    with patch("scripts.homeflix_setup.core.JellyfinClient", Jellyfin), patch("scripts.homeflix_setup.core.ArrClient", Arr), patch("scripts.homeflix_setup.core.JellyseerrClient", Seerr):
+                    with patch("scripts.homeflix_setup.core.JellyfinClient", Jellyfin), patch("scripts.homeflix_setup.core.ArrClient", Arr), patch("scripts.homeflix_setup.core.SeerrClient", Seerr):
                         result = verify_core(root, runner=Runner(), api_key_reader=lambda *args: StatefulCoreFixture.key, settings_key_reader=lambda *args: StatefulCoreFixture.key, http_waiter=lambda *args, **kwargs: ReadinessResult(True, "ready"), quicksync_inspector=quick)
                     check = next(item for item in result["checks"] if item["domain"] == domain)
                     self.assertEqual(check["status"], expected_status)
@@ -1434,7 +1456,7 @@ class CoreVerificationAndResumeTests(unittest.TestCase):
             ({"core_containers_started": True}, "jellyfin_library", {"library": 1, "library_options": 1}),
             ({"core_api_configured": True}, "arr_root", {"root": 1}),
             ({"core_verified": True}, "arr_settings", {"settings": 1}),
-            ({"configured": True, "core_verified": True}, "jellyseerr_server", {"server": 1}),
+            ({"configured": True, "core_verified": True}, "seerr_server", {"server": 1}),
         )
         for initial, missing, created_kinds in cases:
             with self.subTest(initial=initial, missing=missing):
@@ -1454,7 +1476,7 @@ class CoreVerificationAndResumeTests(unittest.TestCase):
                     fixture = StatefulCoreFixture(missing)
                     kwargs = {
                         "runner": fixture,
-                        "transports": {"jellyfin": fixture.jellyfin, "radarr": fixture.arr("radarr"), "sonarr": fixture.arr("sonarr"), "jellyseerr": fixture.jellyseerr},
+                        "transports": {"jellyfin": fixture.jellyfin, "radarr": fixture.arr("radarr"), "sonarr": fixture.arr("sonarr"), "seerr": fixture.seerr},
                         "api_key_reader": lambda *args: fixture.key,
                         "settings_key_reader": lambda *args: fixture.key,
                         "preflight_runner": passing_preflight,
@@ -1497,7 +1519,7 @@ class CoreVerificationAndResumeTests(unittest.TestCase):
                 "jellyfin": fixture.jellyfin,
                 "radarr": fixture.arr("radarr"),
                 "sonarr": fixture.arr("sonarr"),
-                "jellyseerr": fixture.jellyseerr,
+                "seerr": fixture.seerr,
             },
             api_key_reader=lambda *args: fixture.key,
             settings_key_reader=lambda *args: fixture.key,
@@ -1520,9 +1542,9 @@ class FakeRuntimeVerificationTests(unittest.TestCase):
 
     MANDATORY = {
         "docker", "stack_contract", "compose_project",
-        "service:traefik", "service:jellyfin", "service:jellyseerr", "service:radarr", "service:sonarr",
+        "service:traefik", "service:jellyfin", "service:seerr", "service:radarr", "service:sonarr",
         "acquisition_absent", "mount", "hardlink_outcome",
-        "jellyfin", "radarr", "sonarr", "jellyseerr",
+        "jellyfin", "radarr", "sonarr", "seerr",
     }
     PRIVATE = ("127.0.0.1", "FIXTURE_API_KEY_1234567890ABCDE", "NOT_REAL", "/root")
 
@@ -1577,7 +1599,7 @@ class FakeRuntimeVerificationTests(unittest.TestCase):
             "hardlink_prober": lambda *args, **kwargs: True,
         }
         kwargs.update(overrides)
-        with patch("scripts.homeflix_setup.core.JellyfinClient", jellyfin), patch("scripts.homeflix_setup.core.ArrClient", arr), patch("scripts.homeflix_setup.core.JellyseerrClient", seerr):
+        with patch("scripts.homeflix_setup.core.JellyfinClient", jellyfin), patch("scripts.homeflix_setup.core.ArrClient", arr), patch("scripts.homeflix_setup.core.SeerrClient", seerr):
             return verify_core(root, **kwargs)
 
     def assert_secret_free(self, result, extra=()):
@@ -1796,7 +1818,7 @@ class FakeRuntimeVerificationTests(unittest.TestCase):
             "hardlink_prober": lambda *args, **kwargs: True,
             "discover_probe": True,
         }
-        with patch("scripts.homeflix_setup.core.JellyfinClient", ProbeJellyfin), patch("scripts.homeflix_setup.core.ArrClient", arr), patch("scripts.homeflix_setup.core.JellyseerrClient", seerr):
+        with patch("scripts.homeflix_setup.core.JellyfinClient", ProbeJellyfin), patch("scripts.homeflix_setup.core.ArrClient", arr), patch("scripts.homeflix_setup.core.SeerrClient", seerr):
             result = verify_core(root, **kwargs)
         self.assertTrue(result["passed"], result)
         probe = next(item for item in result["checks"] if item["domain"] == "discovery_probe")
@@ -1811,7 +1833,7 @@ class FakeRuntimeVerificationTests(unittest.TestCase):
         self.assertNotIn(str(data), rendered)
         self.assertNotIn("keep-me", rendered)
 
-    def test_existing_stack_verify_uses_app_key_and_jellyseerr_profile(self):
+    def test_existing_stack_verify_uses_app_key_and_seerr_profile(self):
         temporary, root, _data = self.make_root(); self.addCleanup(temporary.cleanup)
         env = (root / ".env").read_text(encoding="utf-8")
         (root / ".env").write_text(
@@ -1851,7 +1873,7 @@ class FakeRuntimeVerificationTests(unittest.TestCase):
                 }
 
         _jellyfin, _arr, seerr = self.clients()
-        with patch("scripts.homeflix_setup.core.JellyfinClient", TokenJellyfin), patch("scripts.homeflix_setup.core.ArrClient", TrackingArr), patch("scripts.homeflix_setup.core.JellyseerrClient", seerr):
+        with patch("scripts.homeflix_setup.core.JellyfinClient", TokenJellyfin), patch("scripts.homeflix_setup.core.ArrClient", TrackingArr), patch("scripts.homeflix_setup.core.SeerrClient", seerr):
             result = verify_core(
                 root, runner=Healthy(),
                 api_key_reader=lambda *args: "FIXTURE_API_KEY_1234567890ABCDE",
