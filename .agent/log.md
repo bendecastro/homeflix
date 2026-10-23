@@ -688,3 +688,10 @@ container run with `WIREGUARD_MTU=` passed settings parsing, and `abc` failed it
 symptom it addresses is a Gluetun reconnect loop with `running TLS handshake: context
 deadline exceeded`/`EOF` while plain HTTP through the tunnel works. One operator
 deployment cleared that loop with 1200. Not a default, because the right value depends on the path.
+
+## [2026-10-23] decision | Seerr migration proposed
+
+Jellyseerr 2.7.3 is end-of-life (Hub image archived, frozen at 2.7.3; unpatched high
+avatarproxy advisory). Proposed ADR-0012 and `project/seerr-migration-plan.md`: swap to
+`ghcr.io/seerr-team/seerr:latest`, full `jellyseerr` -> `seerr` rename, CLI accepts UID 1000
+for the Seerr config only. Owner deployment facts verified over SSH; nothing changed yet.

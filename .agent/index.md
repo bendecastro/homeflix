@@ -72,6 +72,7 @@ to run it, you want [`docs/`](../docs/) instead —
 - [ADR-0008: single-filesystem `/data` root, hardlink imports](decisions/adr-0008-single-filesystem-data-root-hardlinks.md) — Accepted (supersedes 0003)
 - [ADR-0010: LAN DNS naming — ship `homeflix`, not `.local`](decisions/adr-0010-lan-dns-naming.md) — Accepted
 - [ADR-0011: WireGuard VPN transport + port forwarding](decisions/adr-0011-wireguard-vpn-transport.md) — Accepted (amends 0005)
+- [ADR-0012: Seerr replaces Jellyseerr](decisions/adr-0012-seerr-request-portal.md) — Proposed
 
 ### Tasks
 - [active.md](tasks/active.md) · [parking-lot.md](tasks/parking-lot.md) · [completed.md](tasks/completed.md)
