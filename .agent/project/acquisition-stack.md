@@ -6,7 +6,7 @@ amended by [ADR-0011](../decisions/adr-0011-wireguard-vpn-transport.md). Source:
 the prior private design package (see `references/source-research.md`).
 
 The automated pipeline: family request → search → download → rename/move → appears in
-Jellyfin. All `linuxserver/*` images except Jellyseerr.
+Jellyfin. All `linuxserver/*` images except Seerr.
 
 > Acquire only content legally entitled to; the VPN is privacy hygiene, not a license.
 
@@ -14,7 +14,7 @@ Jellyfin. All `linuxserver/*` images except Jellyseerr.
 
 | Role | Service | Port | VPN? | URL |
 |---|---|---|---|---|
-| Requests (family) | Jellyseerr | 5055 | direct | jellyseerr.local |
+| Requests (family) | Seerr | 5055 | direct | seerr.local |
 | Movies | Radarr | 7878 | direct | radarr.local |
 | TV | Sonarr | 8989 | direct | sonarr.local |
 | Music | Lidarr | 8686 | direct | lidarr.local |

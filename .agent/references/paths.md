@@ -43,7 +43,7 @@ hardlinks silently — see `gotchas.md`.
 |---|---|---|---|---|
 | Traefik dashboard | traefik.homeflix | 8080 | – | `api.insecure=true` (harden!) |
 | Jellyfin | jellyfin.homeflix | 8096 | – | also published on host:8096 |
-| Jellyseerr | jellyseerr.homeflix | 5055 | – | family requests |
+| Seerr | seerr.homeflix | 5055 | – | family requests |
 | Overseerr | overseerr.homeflix | 5000 | – | alt — drop one |
 | Radarr | radarr.homeflix | 7878 | – | |
 | Sonarr | sonarr.homeflix | 8989 | – | |
@@ -68,4 +68,4 @@ hardlinks silently — see `gotchas.md`.
 ## [2026-08-04] Gluetun control port and Overseerr drop
 
 - **Gluetun's control server is `:8000`, route `/v1/vpn/status`, and requires auth.** The inherited `:8888/v1/openvpn/status` probe was wrong three ways and was removed in favour of Gluetun's built-in tunnel healthcheck. The table row above that still lists `8888` / healthcheck is the 2026-08-04 snapshot. deunhealth later probes `127.0.0.1:9999` in the shared namespace, not `:8888`.
-- **Overseerr is not in the shipped compose.** ADR-0004 chose Jellyseerr; the 2026-08-04 compose drop closed the "alt — drop one" row above. Do not stand up both.
+- **Overseerr is not in the shipped compose.** ADR-0004 chose Seerr; the 2026-08-04 compose drop closed the "alt — drop one" row above. Do not stand up both.

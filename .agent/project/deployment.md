@@ -37,7 +37,7 @@ Three correctness fixes were made versus the prior package's compose:
 3. **Bazarr's media mount must stay writable** (it writes subtitle files alongside the
    media); only Jellyfin gets `:ro`.
 
-Also: Overseerr dropped (ADR-0004 chose Jellyseerr); `version:` and the empty `volumes: {}`
+Also: Overseerr dropped (ADR-0004 chose Seerr); `version:` and the empty `volumes: {}`
 removed (obsolete in Compose v2); images moved to `lscr.io/linuxserver/*` with tags
 parameterised so they can be pinned.
 

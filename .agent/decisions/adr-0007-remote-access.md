@@ -49,7 +49,7 @@ Three viable approaches:
 1. **Preferred:** add a ~$30–50 **Google TV / Fire TV stick** to that TV so Tailscale runs
    natively and everything stays on one mechanism. Cleanest, no public surface.
 2. **Fallback:** stand up **Cloudflare Tunnel** (needs a domain on Cloudflare) for just
-   those devices, putting **Jellyseerr + light access behind Cloudflare Access** (email
+   those devices, putting **Seerr + light access behind Cloudflare Access** (email
    OTP / Google login). Keep heavy Jellyfin video on Tailscale where possible to respect
    the free-tier video caveat; accept the ToS risk only for the unavoidable TV streams.
 

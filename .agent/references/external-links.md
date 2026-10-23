@@ -17,7 +17,7 @@ useful since homelab tooling drifts.
 
 - Jellyfin — https://jellyfin.org/docs/
 - Plex — https://support.plex.tv/
-- Jellyseerr — https://github.com/Fallenbagel/jellyseerr · Overseerr — https://docs.overseerr.dev/
+- Seerr — https://github.com/seerr-team/seerr · Overseerr — https://docs.overseerr.dev/
 - qBittorrent — https://github.com/qbittorrent/qBittorrent/wiki
 - SABnzbd — https://sabnzbd.org/wiki/ · NZBGet — https://nzbget.com/documentation/
 - Bazarr — https://wiki.bazarr.media/ · setup guide https://wiki.bazarr.media/Getting-Started/Setup-Guide/

@@ -30,7 +30,7 @@ Phase 0 is largely complete — the focus is reconcile → deploy → verify →
 - **Exit:** reboot is clean; HDD auto-mounts; runtime up.
 
 ## Phase 2 — Media server up
-- [ ] Deploy the core allowlist (Traefik, Jellyfin, Jellyseerr, Radarr, Sonarr); create
+- [ ] Deploy the core allowlist (Traefik, Jellyfin, Seerr, Radarr, Sonarr); create
       admin + one family account. Do not start Gluetun or acquisition services.
 - [ ] Add libraries (`/data/media/{movies,tv,music}`); play a test file on a real family
       device on LAN. Confirm direct play / transcode.
@@ -39,14 +39,14 @@ Phase 0 is largely complete — the focus is reconcile → deploy → verify →
 ## Phase 3 — Acquisition loop
 - [ ] Verify and bring up Gluetun, then qBittorrent/NZBGet/Prowlarr (VPN) +
       Radarr/Sonarr/Lidarr/Bazarr +
-      Jellyseerr. Verify VPN IP + kill switch.
+      Seerr. Verify VPN IP + kill switch.
 - [ ] Enable hardlink imports, set root folders under `/data/media`, categories, download
       client `gluetun:<port>`.
 - [ ] Apply naming scheme (`conventions/media-naming.md`).
 - [ ] **Verify hardlinking actually works** (`ls -li` inode match — see
       `references/commands.md`); a copy instead of a hardlink means the mounts are wrong.
 - [ ] One full request → acquire → imported/renamed → plays in Jellyfin, torrent still seeding.
-- [ ] Drop Overseerr or Jellyseerr.
+- [ ] Drop Overseerr or Seerr.
 - **Exit:** a non-admin family request becomes a watchable, correctly-named item.
 
 ## Phase 4 — Networking & remote access

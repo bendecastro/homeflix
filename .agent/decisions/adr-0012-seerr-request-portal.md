@@ -3,7 +3,7 @@
 Date: 2026-10-23
 
 ## Status
-Proposed
+Accepted
 
 ## Context
 [ADR-0004](adr-0004-jellyfin-media-server.md) picked Jellyseerr as the request portal.

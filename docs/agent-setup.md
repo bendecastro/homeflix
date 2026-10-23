@@ -54,7 +54,7 @@ approves the exact host-preparation plan. `host prepare` is read-only by default
 requires `--apply` and the reviewed plan fingerprint. Sudo authentication stays a human gate.
 
 Use `scripts/homeflix --json setup core --dry-run` for a non-mutating setup plan. Dry-run must
-show only Traefik, Jellyfin, Jellyseerr, Radarr, and Sonarr and an empty acquisition-mutation
+show only Traefik, Jellyfin, Seerr, Radarr, and Sonarr and an empty acquisition-mutation
 list. Configuration writes ignored local files and generates the Jellyfin administrator
 credential without printing its value. Retrieve that credential only from an unredirected
 controlling terminal with `scripts/homeflix secrets reveal jellyfin`; never paste it into chat
@@ -75,7 +75,7 @@ The agent may compose these capabilities after discovery and approval:
 2. Use `configure` with the three reviewed existing paths and a chosen quality-profile name.
    During `initialize core`, that exact name is resolved and validated independently against
    live Radarr and Sonarr; initialization fails safely if either service does not provide it.
-   DNS failure produces deterministic direct Jellyseerr/Radarr/Sonarr setup ports;
+   DNS failure produces deterministic direct Seerr/Radarr/Sonarr setup ports;
    QuickSync is selected only when discovery proves the Intel render device usable.
 3. Run `preflight --phase core` and review every failure or warning.
 4. Reconcile only the core allowlist with `deploy core`.
@@ -84,7 +84,7 @@ The agent may compose these capabilities after discovery and approval:
 
 `scripts/homeflix setup core` is a resumable convenience composition of those primitives, not
 a replacement for agent judgment. The API operations initialize the Jellyfin administrator
-and exact Movies/Shows/Music libraries, Radarr/Sonarr roots and media settings, and Jellyseerr
+and exact Movies/Shows/Music libraries, Radarr/Sonarr roots and media settings, and Seerr
 connections. They discover runtime IDs and reconcile equivalent resources rather than assuming
 fixed IDs.
 
@@ -105,7 +105,7 @@ equivalent rather than a household title, run `scripts/homeflix --json verify co
 --discover-probe`. That flag writes and deletes a uniquely named movies-library probe and
 is not part of routine verification. On an already-initialized host, `verify core` does
 not require `JELLYFIN_ADMIN_*` or `QUALITY_PROFILE` in `.env`: it reads the dedicated
-Jellyfin application key and the default non-4K profile already selected in Jellyseerr.
+Jellyfin application key and the default non-4K profile already selected in Seerr.
 `initialize` still needs admin credentials. See [first use](first-use.md#4-make-imports-appear-promptly)
 for the operator-facing two-connection model.
 
@@ -134,7 +134,7 @@ A live-host completion report should include, without secrets or private address
 - acquisition-service absence and the expected QuickSync selection or “not selected” result;
 - initialized Jellyfin libraries, exact Radarr/Sonarr roots, media settings, and the two
   Jellyfin discovery connections (targeted plus unconditional refresh), and initialized
-  Jellyseerr default connections;
+  Seerr default connections;
 - a successful `verify core`, followed by a no-duplicate rerun; and
 - confirmation that `.env`, `.homeflix/setup.json`, and the generated override remain ignored.
 

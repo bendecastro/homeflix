@@ -173,7 +173,7 @@ bite.
   Identical release names repeated across queue rows are episode records sharing a single
   `downloadId`, not duplicate grabs. Group by `downloadId` before diagnosing duplication.
 - **[2026-08-11] Radarr and Sonarr are not published on the host.** Only the proxy, Jellyfin
-  and Jellyseerr are bound, so host-loopback `curl` against an *arr port returns nothing —
+  and Seerr are bound, so host-loopback `curl` against an *arr port returns nothing —
   which reads like a hung service rather than a closed port. Reach them with
   `docker exec <service> curl http://localhost:<port>/...`. The LinuxServer images ship
   BusyBox `grep`, which has no `-P`, so shell extraction of `<ApiKey>` needs `sed`. Send the
@@ -206,7 +206,7 @@ bite.
 - **[2026-08-14] Static Compose contract checks need both source agreement and route ownership.** Every *arr `/data` bind must use the same host source; choosing one representative service as `${DATA_ROOT}` is insufficient. For VPN-proxied services, the owning `traefik.http.routers.<svc>.rule` Host label establishes the route; leftover `.service` labels do not.
 - **[2026-08-16] Remote backup destinations are deliberately narrow.** Only `user@host:/abs/path` is accepted; malformed, relative, traversal, option-like, URL, IPv6, and shell-meta forms fail before SSH. Transfers use batch mode, put the new archive before pruning, and leave existing archives untouched on transfer or timeout failure. A remote destination is never created as a local directory. Fixture-accepted only.
 - **[2026-08-17] Probe Traefik through its published entrypoint.** Core readiness reaches Jellyfin through Traefik `:80`, not the unpublished `:8080` endpoint. Fixture-accepted only.
-- **[2026-08-17] Existing-stack core verification does not require admin env values.** It reads the dedicated Jellyfin app key and Jellyseerr's selected quality profile; LinuxServer config directories with `0775` ownership by PUID are readable, while secret files with group/other write permissions fail closed. Fixture-accepted only.
+- **[2026-08-17] Existing-stack core verification does not require admin env values.** It reads the dedicated Jellyfin app key and Seerr's selected quality profile; LinuxServer config directories with `0775` ownership by PUID are readable, while secret files with group/other write permissions fail closed. Fixture-accepted only.
 - **[2026-08-19] Keep forwarded-port states distinct.** With `VPN_PORT_FORWARDING` off, `verify acquisition` reports `port forwarding is not configured` as not-applicable. When forwarding is enabled but Gluetun's status file cannot be read, it reports `forwarded port is configured but unavailable`; a listen-port mismatch remains a separate `port_agrees` failure. No port value is printed. Fixture-accepted only.
 - **[2026-08-10] Network discovery must fail closed on ambiguous Docker or routing state.** Preserve an existing proxy subnet only after exact network-name presence, Compose ownership labels, and valid IPAM are confirmed; unknown daemon inspection is not absence. Exclude kernel local/broadcast routes, reject equal-metric default routes, and reject foreign more-specific overlaps; only an identical connected route for the Homeflix-owned network is exempt.
 - **[2026-08-04] Device checks must dereference symlinks.** GNU `stat -c %d` reports the symlink's device; use `stat -Lc` and a real hardlink smoke test or a symlinked media path can make a cross-filesystem layout pass device inspection.

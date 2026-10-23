@@ -1,6 +1,6 @@
 # Seerr migration plan
 
-Status: Proposed (revised after independent review)
+Status: In progress
 Updated: 2026-10-23
 
 ## Goal
@@ -10,8 +10,8 @@ the repo ships the `seerr` service, the setup CLI configures and verifies it, al
 tests pass, docs and wiki say `seerr`, and the owner's deployment runs Seerr with its
 migrated requests, users and settings intact.
 
-## Current state
-Verified 2026-10-23:
+## Pre-migration state
+Verified before repository changes on 2026-10-23:
 
 - `docker-compose.yml` runs `fallenbagel/jellyseerr:${JELLYSEERR_TAG:-latest}`, service
   and container `jellyseerr`, `${CONFIG_ROOT}/jellyseerr:/app/config`, Traefik router
@@ -49,28 +49,28 @@ Owner decisions 2026-10-23: full rename, `latest` tag, UID 1000 accepted for See
 
 ## Steps
 Repository (one writer; fixture tests gate each step):
-- [ ] 1. Compose and env: rename service/container/router/labels to `seerr`, image
+- [x] 1. Compose and env: rename service/container/router/labels to `seerr`, image
       `ghcr.io/seerr-team/seerr:${SEERR_TAG:-latest}`, add `init: true`, volume
       `${CONFIG_ROOT}/seerr:/app/config`; core phase list; `.env.example`
       `JELLYSEERR_TAG` → `SEERR_TAG`.
-- [ ] 2. CLI rename: `api/jellyseerr.py` → `api/seerr.py`, `JellyseerrClient` →
+- [x] 2. CLI rename: `api/jellyseerr.py` → `api/seerr.py`, `JellyseerrClient` →
       `SeerrClient`, settings path `seerr/settings.json`, hostname `seerr.${DOMAIN}`,
       result/transport keys, allowlists, CLI output (`core.py`, `compose.py`,
       `discover.py`, `cli.py`, `api/__init__.py`).
-- [ ] 3. Ownership: path components from `CONFIG_ROOT` down to `seerr/` keep the
+- [x] 3. Ownership: path components from `CONFIG_ROOT` down to `seerr/` keep the
       `{0, PUID}` rule; only `seerr/` and files under it also accept 1000. Setup creates
       `${CONFIG_ROOT}/seerr` owned by 1000 before the first `up` (Docker would create it
       as root, which Seerr cannot write). `DIRECT_PORTS` and the override generator use
       `seerr`. Tests for
       PUID=1000 and PUID≠1000.
-- [ ] 4. Tests and fixtures: rename `test_api_jellyseerr.py`, `jellyseerr-*.json`
+- [x] 4. Tests and fixtures: rename `test_api_jellyseerr.py`, `jellyseerr-*.json`
       fixtures, the `jellyseerr` key in `fixtures/api/contracts.json`, discovery
       fixtures, and assertions in `test_discover.py`, `test_compose.py`,
       `test_core*.py`, `test_cli.py`, `test_contract.py`, `test_api_jellyfin.py`.
-- [ ] 5. Docs: README, `docs/*` (agent-setup, configuration, quickstart, first-use,
+- [x] 5. Docs: README, `docs/*` (agent-setup, configuration, quickstart, first-use,
       media-library, specs/verification), with an upgrade note for existing
       Jellyseerr installs (step 7 condensed).
-- [ ] 6. Wiki: ADR-0012 → Accepted; ADR-0004 image line points at 0012; service pages
+- [x] 6. Wiki: ADR-0012 → Accepted; ADR-0004 image line points at 0012; service pages
       (`media-server.md`, `overview.md`, `storage.md`, `acquisition-stack.md`,
       `roadmap.md`, `paths.md`, `gotchas.md`, `external-links.md`, `index.md`); `log.md`.
       Historical records stay as written: `log.md` entries, ADR-0004's original choice,
@@ -93,6 +93,8 @@ matters: the config directory moves before the new compose file is pulled, so no
       the migration finishes; then `docker rm jellyseerr`.
 - [ ] 13. `scripts/homeflix verify core`; log in via Jellyfin; confirm existing requests,
       users, Radarr/Sonarr connections and Discover → Networks.
+
+Repository steps 1–6 implemented; deployment steps 7–13 remain pending.
 
 ## Validation
 - `python3 -m unittest discover -s tests -v`

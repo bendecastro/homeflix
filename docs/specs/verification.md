@@ -10,7 +10,7 @@
 - Core Traefik readiness SHALL use a family-facing proxy path and SHALL NOT require a published dashboard on `:8080`. `(satisfied #15)`
 - Rendering SHALL restore `create_host_path: false` when the project file declared it and the Compose JSON renderer omitted the key. Runtime `verify core` SHALL use that same restored model. `(satisfied #15)`
 - An explicit `verify core --discover-probe` intent MAY create and delete a uniquely named library probe to prove unconditional Jellyfin refresh; default `verify core` SHALL NOT write library files. `(satisfied #14)`
-- Existing-stack `verify core` SHALL inspect using the dedicated Jellyfin application key and the unique default non-4K quality profile already selected in Jellyseerr when admin or `QUALITY_PROFILE` env keys are absent. `(satisfied #16)`
+- Existing-stack `verify core` SHALL inspect using the dedicated Jellyfin application key and the unique default non-4K quality profile already selected in Seerr when admin or `QUALITY_PROFILE` env keys are absent. `(satisfied #16)`
 - Application-data directory walks SHALL accept group-writable directories owned by the expected uid; secret files and other-writable directories SHALL still be refused. `(satisfied #16)`
 - Disruptive fail-closed verification SHALL require an explicit operator command and SHALL NOT run as part of routine runtime verification. `(satisfied #10)`
 - Non-disruptive VPN-gate evidence SHALL be collectable while gated services are already running, and only while every running gated service shares the Gluetun network namespace; a gated service running outside that namespace, or whose namespace cannot be inspected, SHALL fail the gate. `(satisfied #18)`

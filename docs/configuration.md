@@ -151,7 +151,7 @@ Never two separate mounts.
 ## Config backups
 
 `CONFIG_ROOT` is small and irreplaceable (every *arr database, Jellyfin users and
-watch state, Jellyseerr history). Media is large and re-acquirable and is **not**
+watch state, Seerr history). Media is large and re-acquirable and is **not**
 backed up by this mechanism. The checkout `.env` is a separate secret file — back
 it up with equivalent 0600 protection; these archives do not include it.
 
@@ -191,3 +191,32 @@ Two known-open items, marked in `docker-compose.yml`:
 
 Never commit `.env`. If a credential leaks, rotate it — rewriting git history doesn't
 un-publish anything already pushed.
+
+## Upgrading from Jellyseerr
+
+Seerr migrates the existing config **one way** on first start. Do not start it with
+an empty config directory. With `CONFIG_ROOT` set to your existing application-data
+root in the shell, and before pulling the repository update:
+
+1. Stop the old portal: `docker stop jellyseerr` (flushes SQLite's WAL).
+2. Back up: `sudo tar czf jellyseerr-config.tgz -C "$CONFIG_ROOT" jellyseerr`.
+   Verify with `sudo tar tzf jellyseerr-config.tgz`; confirm `settings.json` and
+   `db/db.sqlite3` are listed. Keep this tarball for rollback.
+3. Move and fix ownership: `mv "$CONFIG_ROOT/jellyseerr" "$CONFIG_ROOT/seerr"`,
+   then `sudo chown -R 1000:1000 "$CONFIG_ROOT/seerr"`.
+4. Add `seerr.${DOMAIN}` to LAN DNS and update bookmarks. Save copies of `.env`
+   and `docker-compose.override.yml` as `*.pre-seerr`, then pull the repo update.
+   Replace `JELLYSEERR_TAG` with `SEERR_TAG=latest` in `.env`; rename the
+   `jellyseerr:` override block to `seerr:` (or regenerate with
+   `scripts/homeflix configure`).
+5. Run `docker compose pull seerr && docker compose up -d seerr`; watch
+   `docker compose logs -f seerr` until migration finishes. Remove the stopped old
+   container with `docker rm jellyseerr`.
+6. Run `scripts/homeflix verify core`; log in through Jellyfin and confirm existing
+   requests, users, Radarr/Sonarr connections, and Discover → Networks.
+
+Rollback requires the **pre-migration tarball**, not the migrated directory: stop
+and remove Seerr, move its config aside, restore the tarball into `CONFIG_ROOT`
+with `sudo tar xzf jellyseerr-config.tgz -C "$CONFIG_ROOT"`, restore the saved env
+and override, check out the previous repository commit, then
+`docker compose up -d jellyseerr`.

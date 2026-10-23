@@ -1,14 +1,15 @@
 # Active Tasks — Live Cursor
 
-Updated: 2026-08-19
+Updated: 2026-10-23
 
 > First thing the next agent reads after `index.md`. Keep it true.
 
 ## In flight
 
-- **Proposed, awaiting owner approval:** [Seerr migration](../project/seerr-migration-plan.md)
-  ([ADR-0012](../decisions/adr-0012-seerr-request-portal.md)). Replace archived
-  Jellyseerr 2.7.3 with Seerr and rename `jellyseerr` → `seerr`. No step started.
+- **In progress:** [Seerr migration](../project/seerr-migration-plan.md)
+  ([ADR-0012](../decisions/adr-0012-seerr-request-portal.md), Accepted).
+  Repository steps 1–6 complete; owner deployment steps 7–13 remain pending.
+  Fixture validation does not establish live Seerr API compatibility.
 
 - **Program fixture-accepted:** [Deep Homeflix operations](../../docs/changes/deep-homeflix-operations/prd.md),
   parent **#3**, slices **#4–#13**. The public CLI, living specs, compatibility adapters,
@@ -45,7 +46,7 @@ ADR-0001 (wiki) · 0002 (host) · ~~0003 (storage)~~ superseded · 0004 (Jellyfi
 0005 (*arr+VPN) · 0006 (Traefik; remote access open) · 0007 (remote access — Tailscale
 primary; Proposed, gated on device inventory) · **0008 (single `/data` root, hardlinks —
 Accepted)** · **0011 (WireGuard + port forwarding — Accepted, amends 0005)** · 0012 (Seerr replaces
-Jellyseerr — Proposed).
+Seerr — Accepted).
 
 ## Notes
 - Source-of-record for original artifacts: the prior private design package (see

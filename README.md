@@ -3,7 +3,7 @@
 A self-hosted streaming service for your household — a private "Netflix" backed by a
 media library you own, running on a single low-power mini-PC.
 
-Jellyfin serves the library. Jellyseerr lets the household request titles. The *arr apps
+Jellyfin serves the library. Seerr lets the household request titles. The *arr apps
 manage acquisition, with the download clients and indexer manager isolated behind a VPN
 with a kill switch. Traefik routes everything to friendly `*.homeflix` names.
 
@@ -22,7 +22,7 @@ Open the checkout with a capable coding agent and paste one of these exact inten
 
 The current CLI supports **local Debian/Ubuntu with existing mounted storage**. It runs in the
 target checkout and does not provide SSH transport; an agent may use its own SSH capability.
-Core includes Traefik, Jellyfin, Jellyseerr, Radarr, and Sonarr. Acquisition
+Core includes Traefik, Jellyfin, Seerr, Radarr, and Sonarr. Acquisition
 (`setup acquisition --clients`), verification modes (`verify contract`, `verify core`,
 `verify backup`, `verify vpn`, `verify vpn --disrupt`), and CONFIG_ROOT backup are shipped CLI
 capabilities. Encrypted-storage provisioning remains a later slice. Automation is
@@ -39,7 +39,7 @@ reviewed mutation plans, secure human gates, and live evidence before completion
              ┌───────────────┼────────────────┐
              ▼               ▼                ▼
       ┌────────────┐  ┌────────────┐   ┌──────────────┐
-      │  Jellyfin  │  │ Jellyseerr │   │ Radarr/Sonarr│
+      │  Jellyfin  │  │ Seerr │   │ Radarr/Sonarr│
       │  (play)    │  │ (requests) │   │ Lidarr/Bazarr│
       └─────┬──────┘  └──────┬─────┘   └───────┬──────┘
             │                │                 │
@@ -87,7 +87,7 @@ Details: [`docs/bazarr.md`](docs/bazarr.md).
 | Service | Purpose | Default host |
 |---|---|---|
 | Jellyfin | Media server / playback | `jellyfin.homeflix` |
-| Jellyseerr | Household request portal | `jellyseerr.homeflix` |
+| Seerr | Household request portal | `seerr.homeflix` |
 | Radarr · Sonarr · Lidarr | Movie / TV / music management | `radarr.homeflix`, … |
 | Bazarr | Subtitles | `bazarr.homeflix` |
 | Prowlarr | Indexer manager *(VPN)* | `prowlarr.homeflix` |

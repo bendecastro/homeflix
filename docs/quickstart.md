@@ -165,7 +165,7 @@ Or skip it: Jellyfin is also published directly on `http://<host-ip>:8096`.
    an **Emby / Jellyfin** connection in each *arr app so imports trigger library refreshes.
    Use internal host `jellyfin`, port `8096`; see the
    [first-use settings](first-use.md#4-make-imports-appear-promptly).
-7. **Jellyseerr** (`jellyseerr.homeflix`) — connect it to Jellyfin, then to Radarr/Sonarr.
+7. **Seerr** (`seerr.homeflix`) — connect it to Jellyfin, then to Radarr/Sonarr.
    This is the only URL most of your household needs.
 
 Next, follow the [first-use guide](first-use.md) to create household accounts, connect a

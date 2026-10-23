@@ -18,10 +18,10 @@ risk rather than blanket-VPN'ing everything.
 ## Decision
 - **Stack:** qBittorrent (torrents) + NZBGet (usenet) for downloads; Prowlarr
   (indexers); Radarr (movies), Sonarr (TV), Lidarr (music); Bazarr (subtitles);
-  Jellyseerr (requests). All `linuxserver/*` images except Jellyseerr.
+  Seerr (requests). All `linuxserver/*` images except Seerr.
 - **VPN split (deliberate):** only the three risky services route through the VPN —
   **qBittorrent, NZBGet, Prowlarr** via `network_mode: container:gluetun`. Everything
-  else (Radarr/Sonarr/Lidarr/Bazarr/Jellyseerr/Jellyfin/monitoring) runs **direct** on
+  else (Radarr/Sonarr/Lidarr/Bazarr/Seerr/Jellyfin/monitoring) runs **direct** on
   the `traefik-network` — they only talk to internal services + legal metadata APIs.
 - **VPN:** Gluetun (`qmcgaw/gluetun`) → ProtonVPN. Transport and port forwarding
   are in [ADR-0011](adr-0011-wireguard-vpn-transport.md) (`VPN_TYPE=wireguard` by

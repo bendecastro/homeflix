@@ -16,7 +16,7 @@ entry.
 - Debian and Ubuntu hosts, locally or over SSH.
 - Existing mounted storage, or optional dedicated-disk provisioning with LUKS2 and ext4.
 - A resumable core phase that does not require VPN credentials.
-- API-driven Jellyfin, Radarr, Sonarr, and Jellyseerr initialization.
+- API-driven Jellyfin, Radarr, Sonarr, and Seerr initialization.
 - A later acquisition phase gated on VPN egress and fail-closed verification.
 - QuickSync detection and an ignored host-specific Compose override when supported.
 
@@ -67,9 +67,9 @@ Compose explicitly references them. The setup CLI consumes them for API initiali
    explicit destructive confirmation before provisioning encrypted storage.
 4. Prepare Docker, directories, `.env`, and the ignored override.
 5. Run core preflight; missing VPN credentials are not a core failure.
-6. Start Traefik, Jellyfin, Jellyseerr, Radarr, and Sonarr explicitly.
+6. Start Traefik, Jellyfin, Seerr, Radarr, and Sonarr explicitly.
 7. Use service APIs to create the Jellyfin administrator, libraries, Radarr/Sonarr roots and
-   media settings, and Jellyseerr connections. Discover profile IDs at runtime; recommend a
+   media settings, and Seerr connections. Discover profile IDs at runtime; recommend a
    balanced 720p/1080p profile unless the user chooses otherwise.
 8. Verify live APIs, mounts, roots, initialization state, and hardware passthrough.
 9. Stop cleanly at a resumable checkpoint when VPN credentials are unavailable.
@@ -119,7 +119,7 @@ Each slice is independently testable and useful. Core setup shipped first.
 ## Success criteria
 
 - On a clean supported host with existing mounted storage, an agent can reach a working
-  Jellyseerr dashboard and connected Jellyfin/Radarr/Sonarr services without browser wizards.
+  Seerr dashboard and connected Jellyfin/Radarr/Sonarr services without browser wizards.
 - Empty VPN credentials do not block or accidentally start acquisition services.
 - Interrupted setup resumes without duplicate resources.
 - Dedicated root disks and changed/stale storage targets are refused.

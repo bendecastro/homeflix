@@ -1,10 +1,10 @@
 # homeflix — Media Server (player layer)
 
-Updated: 2026-08-16
+Updated: 2026-10-23
 Decision: [ADR-0004](../decisions/adr-0004-jellyfin-media-server.md). Source:
 the prior private design package.
 
-**Jellyfin** is the media server; **Jellyseerr** is the family request portal.
+**Jellyfin** is the media server; **Seerr** is the family request portal.
 
 ## Jellyfin
 
@@ -21,14 +21,15 @@ the prior private design package.
 - Imports appear via the two *arr connections (targeted plus `Library/Refresh`). Core
   initialize reconciles them; fixture-accepted only.
 
-## Jellyseerr (requests)
+## Seerr (requests)
 
-- Image: `fallenbagel/jellyseerr:latest` · port **5055** · `jellyseerr.local`
-- Config → `${CONFIG_ROOT}/jellyseerr`
+- Image: `ghcr.io/seerr-team/seerr:${SEERR_TAG:-latest}` · port **5055** · `seerr.${DOMAIN}`
+- Config → `${CONFIG_ROOT}/seerr`; fixed UID/GID 1000, `init: true`.
+- Repository migration accepted in ADR-0012 (2026-10-23); live migration pending.
 - The family-facing "request a movie/show" front door; wires to Jellyfin + Radarr/Sonarr.
 
-> Overseerr is also defined in the compose as an alternative — **pick one**; running
-> both is redundant surface (ADR-0004).
+Seerr is the shipped request portal ([ADR-0012](../decisions/adr-0012-seerr-request-portal.md));
+Overseerr is not shipped.
 
 ## Transcoding
 
@@ -44,7 +45,6 @@ limits for kids. Ties into remote access — `project/networking-remote-access.m
 
 - [ ] Jellyfin client app exists and works on each family device.
 - [ ] Hardware transcode works (QuickSync).
-- [ ] Drop Overseerr or Jellyseerr (choose one).
 - [ ] Remote access for off-LAN family — currently LAN-only ([ADR-0006](../decisions/adr-0006-traefik-local-remote-access-open.md)).
 
 ## Links
@@ -53,8 +53,8 @@ limits for kids. Ties into remote access — `project/networking-remote-access.m
 
 ## [2026-08-04] Overseerr dropped from the shipped compose
 
-The 2026-08-04 compose rebuild dropped Overseerr (ADR-0004 chose Jellyseerr). The blockquote and open checkbox above that still treat Overseerr as a live alternative are the earlier snapshot.
+The 2026-08-04 compose rebuild dropped Overseerr (ADR-0004 chose the predecessor request portal). Overseerr is not a live alternative in the shipped stack.
 
 ## [2026-08-13] Default DOMAIN is homeflix
 
-Ship `DOMAIN=homeflix` ([ADR-0010](../decisions/adr-0010-lan-dns-naming.md)). The `jellyfin.local` / `jellyseerr.local` URLs above are the pre-ADR-0010 snapshot. `.local` is mDNS-only; operators must serve `*.homeflix` locally.
+Ship `DOMAIN=homeflix` ([ADR-0010](../decisions/adr-0010-lan-dns-naming.md)). The `jellyfin.local` URLs above are the pre-ADR-0010 snapshot. `.local` is mDNS-only; operators must serve `*.homeflix` locally.

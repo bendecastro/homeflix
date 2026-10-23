@@ -11,7 +11,7 @@ Use Homeflix only with content you have the right to access.
 Homeflix uses local names by default:
 
 - Jellyfin (watch): `http://jellyfin.homeflix`
-- Jellyseerr (request): `http://jellyseerr.homeflix`
+- Seerr (request): `http://seerr.homeflix`
 - qBittorrent (administrator only): `http://qbittorrent.homeflix`
 
 Replace `local` if you changed `DOMAIN` in `.env`. These names work only after you
@@ -32,9 +32,9 @@ In Jellyfin, sign in as the administrator and open **Dashboard → Users**. Crea
 non-administrator account for each household member who will watch or request media.
 Use library and parental-access controls where appropriate.
 
-Jellyseerr authenticates household members through Jellyfin. After creating an account,
-have the person sign in to Jellyseerr once and confirm they can submit a request. Review
-request permissions in Jellyseerr if requests require administrator approval or should
+Seerr authenticates household members through Jellyfin. After creating an account,
+have the person sign in to Seerr once and confirm they can submit a request. Review
+request permissions in Seerr if requests require administrator approval or should
 have limits.
 
 ## 3. Connect a playback device
@@ -111,7 +111,7 @@ start downloading merely because it was accepted.
 
 The normal path is:
 
-1. Jellyseerr accepts the request.
+1. Seerr accepts the request.
 2. Radarr (movie) or Sonarr (show) monitors the title and searches indexers.
 3. qBittorrent or NZBGet downloads a matching release.
 4. Radarr or Sonarr imports and renames it under `/data/media`.
@@ -135,7 +135,7 @@ request pipeline is broken.
 
 Check the pipeline in this order:
 
-1. **Jellyseerr:** open the request and confirm it was approved and sent to Radarr or
+1. **Seerr:** open the request and confirm it was approved and sent to Radarr or
    Sonarr.
 2. **Radarr/Sonarr:** open **Activity → Queue** and the title's history. Confirm whether a
    release was found, rejected, downloading, or imported.
@@ -187,7 +187,7 @@ for the inode-level check.
 - [ ] A real playback device can reach Jellyfin and play a title.
 - [ ] Radarr and Sonarr both pass their **Emby / Jellyfin** and **Webhook** connection tests.
 - [ ] A title that Jellyfin has never seen before appears without a manual scan.
-- [ ] A released Jellyseerr request reaches Radarr or Sonarr.
+- [ ] A released Seerr request reaches Radarr or Sonarr.
 - [ ] The download client receives and completes the job.
 - [ ] The title appears in Jellyfin after import.
 - [ ] A torrent import has a hardlink count of at least 2.

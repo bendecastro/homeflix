@@ -697,3 +697,14 @@ avatarproxy advisory). Proposed ADR-0012 and `project/seerr-migration-plan.md`: 
 for the Seerr config only. Owner deployment facts verified over SSH; nothing changed yet.
 Revised after independent review: sudo backup with archive check, config move before compose pull,
 override `jellyseerr:` block rename, UID 1000 accepted only on `seerr/`, complete rollback.
+
+## [2026-10-23] build | Seerr rename (repo)
+
+- Accepted ADR-0012; repository migration steps 1–6 rename the request portal to
+  Seerr, using `ghcr.io/seerr-team/seerr:${SEERR_TAG:-latest}` with `init: true`.
+- CLI reads accept UID 1000 only within Seerr config, retaining root/PUID checks
+  on CONFIG_ROOT. Core deployment prepares the fixed-UID directory before startup
+  and fails actionably if ownership cannot be set.
+- Added ownership/preparation tests and upgrade/rollback guidance. Fixture and
+  Compose validation do not prove live Seerr API compatibility; deployment steps
+  7–13 remain pending. No live host touched.

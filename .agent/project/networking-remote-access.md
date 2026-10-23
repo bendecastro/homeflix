@@ -52,7 +52,7 @@ Today: **LAN-only, no TLS**. The plan is [ADR-0007](../decisions/adr-0007-remote
   surface**. Covers phones/tablets/laptops/Apple TV/Android-Fire TV.
 - **Locked-down TVs only (Roku/Samsung/LG)** — Tailscale has no client there. Preferred
   fix: add a cheap Google/Fire TV stick (stay all-Tailscale). Fallback:
-  **Cloudflare Tunnel** for those + Jellyseerr behind Cloudflare Access (ToS caveat on
+  **Cloudflare Tunnel** for those + Seerr behind Cloudflare Access (ToS caveat on
   heavy video).
 - Reverse-proxy + port-forward + public TLS — **rejected** (too much exposure).
 

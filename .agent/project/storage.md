@@ -23,7 +23,7 @@ values are shown for reference; they belong in `.env`, not in committed files.
 
 ```
 ${CONFIG_ROOT}/          (~2–20GB) the thing to BACK UP
-└── {qbittorrent,radarr,sonarr,lidarr,bazarr,jellyseerr,
+└── {qbittorrent,radarr,sonarr,lidarr,bazarr,seerr,
       jellyfin,prowlarr,nzbget,glances,traefik,...}/
 ${CACHE_ROOT}/           (~10–50GB) transcode scratch, ephemeral
 ```

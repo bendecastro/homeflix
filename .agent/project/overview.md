@@ -24,7 +24,7 @@ didn't survive review.
 
 - **Operator** — owner/admin; the person running the box.
 - **Household** — end users; need easy apps on their devices, simple sign-in, and a way
-  to request titles (Jellyseerr).
+  to request titles (Seerr).
 
 > Each deployment should inventory its own household members, their devices
 > (TV/stick/phone), and whether they watch off-LAN. That inventory drives the
@@ -37,7 +37,7 @@ didn't survive review.
 - [ADR-0008](../decisions/adr-0008-single-filesystem-data-root-hardlinks.md) — single
   `/data` root on the HDD, hardlink imports; SSD holds config + cache. **Accepted**
   (supersedes ADR-0003, whose SSD-downloads split rested on circular reasoning)
-- [ADR-0004](../decisions/adr-0004-jellyfin-media-server.md) — Jellyfin + Jellyseerr.
+- [ADR-0004](../decisions/adr-0004-jellyfin-media-server.md) — Jellyfin + Seerr.
   **Accepted**
 - [ADR-0005](../decisions/adr-0005-arr-stack-gluetun-protonvpn.md) — Full *arr stack;
   qBittorrent/NZBGet/Prowlarr behind Gluetun+ProtonVPN. **Accepted**
@@ -57,13 +57,13 @@ didn't survive review.
    `.env.example` written at the repo root on the ADR-0008 `/data` root, fully
    parameterised. Not yet deployed.
 6. **Verify on the host** — transcode/QuickSync capability before relying on it.
-7. ~~**Overseerr vs Jellyseerr**~~ — resolved: Overseerr dropped from the compose per ADR-0004.
+7. ~~**Overseerr vs Seerr**~~ — resolved: Overseerr dropped from the compose per ADR-0004.
 
 ## Success criteria (v1 done = )
 
 - [ ] Stack deployed on the host; all services healthy (`docker compose ps`).
 - [ ] Gluetun connected; qBittorrent/NZBGet/Prowlarr use the VPN IP (kill switch verified).
-- [ ] A family request in Jellyseerr → acquired → moved+renamed to HDD → plays in Jellyfin.
+- [ ] A family request in Seerr → acquired → moved+renamed to HDD → plays in Jellyfin.
 - [ ] Each family member signs in on their own device and plays (on LAN at minimum).
 - [ ] **Remote access** works for ≥1 off-LAN family member (after ADR-0007).
 - [ ] Stack restarts cleanly after a host reboot; HDD auto-mounts.

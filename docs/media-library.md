@@ -4,7 +4,7 @@ Core setup configures Radarr and Sonarr; it never acquires anything. Adding titl
 separate, explicitly requested step. This page covers the supported way to do it in bulk and
 the *arr API behaviours that make the naive approach quietly wrong.
 
-If you only want to add the occasional film or show, use Jellyseerr and stop reading — it
+If you only want to add the occasional film or show, use Seerr and stop reading — it
 handles all of this for you. This page is for scripted or agent-driven bulk adds.
 
 ## The client
@@ -67,7 +67,7 @@ anything was grabbed twice.
 
 ### 4. Radarr and Sonarr are not published on the host
 
-The Compose stack exposes the proxy, Jellyfin and Jellyseerr; Radarr and Sonarr are reachable
+The Compose stack exposes the proxy, Jellyfin and Seerr; Radarr and Sonarr are reachable
 only inside the Docker network or through the proxy. `curl` against the host's loopback port
 returns nothing at all, which reads like a hung service rather than a closed port.
 

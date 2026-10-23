@@ -13,6 +13,9 @@ design chose Jellyfin (fully free/open, self-hosted, no account dependency or pa
 and paired it with Jellyseerr for family requests. Overseerr is also present in the
 compose as an alternative.
 
+Request portal update: [ADR-0012](adr-0012-seerr-request-portal.md) replaces Jellyseerr
+with Seerr; the original choice below is retained as history.
+
 ## Decision
 - **Media server:** Jellyfin (`linuxserver/jellyfin`), port 8096, served at
   `jellyfin.local` via Traefik. Libraries: `/data/movies`, `/data/tv`, `/data/music`
