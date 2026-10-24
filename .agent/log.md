@@ -708,3 +708,12 @@ override `jellyseerr:` block rename, UID 1000 accepted only on `seerr/`, complet
 - Added ownership/preparation tests and upgrade/rollback guidance. Fixture and
   Compose validation do not prove live Seerr API compatibility; deployment steps
   7–13 remain pending. No live host touched.
+
+## [2026-10-24] fix | Gluetun port-file rewrite blocked downloads
+
+Three Radarr grabs sat at `metaDL` with no peers. Gluetun had been looping
+`permission denied` on `/tmp/gluetun/forwarded_port` since 2026-10-22: it had chowned the
+file to uid 1000 and, without `DAC_OVERRIDE`, could not rewrite it. The qBittorrent
+rebind hook therefore never ran. Restarting qBittorrent live restored DHT and peers.
+In the repo, gluetun now gets `PUID: 0`/`PGID: 0`. The prod checkout has not been updated
+or recreated yet. See gotchas.

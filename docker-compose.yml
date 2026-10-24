@@ -108,6 +108,12 @@ services:
       - "${NZBGET_PORT:-6789}:${NZBGET_PORT:-6789}/tcp"
       - "${PROWLARR_PORT:-9696}:${PROWLARR_PORT:-9696}/tcp"
     environment:
+      # Gluetun chowns its /tmp/gluetun files to PUID/PGID (default 1000). Without
+      # DAC_OVERRIDE its root process then cannot rewrite them, so every port-forward
+      # restart after the first fails with "permission denied" and qBittorrent is never
+      # told to rebind. Keeping them root-owned avoids restoring that capability.
+      PUID: 0
+      PGID: 0
       VPN_SERVICE_PROVIDER: ${VPN_SERVICE_PROVIDER:-protonvpn}
       VPN_TYPE: ${VPN_TYPE:-wireguard}
       # Gluetun reads only the pair matching VPN_TYPE; the other stays empty.

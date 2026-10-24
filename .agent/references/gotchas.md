@@ -111,6 +111,15 @@ bite.
 ## Hit in practice
 > _Add dated, specific gotchas here as they happen, with the fix that worked._
 
+- **[2026-10-24] Gluetun's port file is writable only once under `cap_drop: ALL`.**
+  Gluetun chowns `/tmp/gluetun/forwarded_port` to `PUID`/`PGID` (default 1000). When port
+  forwarding restarted (Oct 22, live), root could not rewrite that file without
+  `DAC_OVERRIDE`, so it looped `permission denied` every 5 s and the up-command was never
+  run. qBittorrent kept dead sockets: `firewalled`, 0 DHT nodes, every tracker
+  `Operation not permitted`, and new grabs stuck at `metaDL` while the tunnel, egress IP and
+  forwarded port all looked fine. Restarting qBittorrent restored peers. The fix is
+  `PUID: 0`/`PGID: 0` on gluetun so the file stays root-owned. Not yet redeployed or
+  reconnect-tested live.
 - **[2026-08-10] A catch-all `LAN_SUBNET` silently disables VPN port forwarding.**
   `FIREWALL_OUTBOUND_SUBNETS` was shipped as `192.168.0.0/16,10.0.0.0/8`, but VPN
   providers place their gateway inside private address space — ProtonVPN's WireGuard
