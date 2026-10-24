@@ -717,3 +717,10 @@ file to uid 1000 and, without `DAC_OVERRIDE`, could not rewrite it. The qBittorr
 rebind hook therefore never ran. Restarting qBittorrent live restored DHT and peers.
 In the repo, gluetun now gets `PUID: 0`/`PGID: 0`. The prod checkout has not been updated
 or recreated yet. See gotchas.
+
+## [2026-10-24] fix | Gluetun PUID/PGID 0 deployed
+
+Applied the gluetun `PUID: 0`/`PGID: 0` lines to the prod compose (edit limited to that
+block; the checkout's other local changes were left alone) and recreated gluetun,
+qbittorrent and prowlarr. The port file is now root-owned. The up-command set the new
+forwarded port, there are no permission errors, and all three grabs are downloading.

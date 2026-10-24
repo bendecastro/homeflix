@@ -118,8 +118,9 @@ bite.
   run. qBittorrent kept dead sockets: `firewalled`, 0 DHT nodes, every tracker
   `Operation not permitted`, and new grabs stuck at `metaDL` while the tunnel, egress IP and
   forwarded port all looked fine. Restarting qBittorrent restored peers. The fix is
-  `PUID: 0`/`PGID: 0` on gluetun so the file stays root-owned. Not yet redeployed or
-  reconnect-tested live.
+  `PUID: 0`/`PGID: 0` on gluetun so the file stays root-owned. Deployed live 2026-10-24:
+  the file is root-owned, the up-command ran, and an in-container rewrite works with only
+  NET_ADMIN+CHOWN. A natural mid-session reconnect has not been observed yet.
 - **[2026-08-10] A catch-all `LAN_SUBNET` silently disables VPN port forwarding.**
   `FIREWALL_OUTBOUND_SUBNETS` was shipped as `192.168.0.0/16,10.0.0.0/8`, but VPN
   providers place their gateway inside private address space — ProtonVPN's WireGuard
