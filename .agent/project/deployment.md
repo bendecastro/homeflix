@@ -105,6 +105,15 @@ is not evidence — use `scripts/restore-config.sh --to` a scratch directory.
 6. Restore the checkout `.env` separately (0600), then `docker compose up -d`
 7. If this was a drill, delete the scratch directory
 
+## [2026-10-24] Live acquisition subset verification
+
+The Gluetun acquisition subset was updated and recreated in the live deployment after
+setting `PUID: 0`/`PGID: 0` on Gluetun. The forwarded-port file remained root-owned,
+the up-command set the new port without permission errors, and all three observed
+grabs were downloading. This is evidence for Gluetun, qBittorrent and Prowlarr only;
+it does not establish full-stack deployment or general production verification. See
+[the dated Gluetun gotcha](../references/gotchas.md).
+
 ## Secrets at deploy time
 
 Real secrets (`PROTONVPN_*`, indexer keys, usenet creds) live in the host `.env`
