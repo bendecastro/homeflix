@@ -21,7 +21,7 @@ assuming a path, so change a path here when the project keeps something elsewher
 | requirements | `docs/PRD.md` | product-level spec, created on first need; a feature's requirements live in its work item |
 | architecture | `ARCHITECTURE.md` | created on first need |
 | project-skills | `.agents/skills/` | created on first need; one `local-<name>/` folder per skill, with a README naming shared copies and how to refresh them |
-| project-agents | — | not yet decided; ask the owner before creating project-specific agents |
+| project-agents | `.agents/agents/` | created on first need; one `local-<name>.md` file per agent, beside `.agents/skills/` |
 | components | `docs/components/` | verified state of real systems, hosts, tools and services; per-domain pages (hardware, storage, media server, acquisition, networking, deployment); a new service page may start from `templates/service.md` |
 
 When a skill names a default path for one of these roles (for example `docs/adr/`,
