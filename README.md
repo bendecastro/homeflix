@@ -107,19 +107,19 @@ same data. Imports are instant, cost no extra disk, and the torrent keeps seedin
 its original path. The *arr apps mount the single root `/data`; splitting that into
 separate `torrents` and `media` mounts silently breaks hardlinking even on one physical
 disk, because Docker presents them as distinct mountpoints.
-→ [ADR-0008](.agent/decisions/adr-0008-single-filesystem-data-root-hardlinks.md)
+→ [ADR-0008](docs/decisions/adr-0008-single-filesystem-data-root-hardlinks.md)
 
 **Download clients share the VPN's network namespace.** qBittorrent, NZBGet and Prowlarr
 run with `network_mode: container:gluetun`, so they have no network path that isn't the
 tunnel. The kill switch fails closed: if the VPN drops, those three lose connectivity
 entirely rather than leaking. They're reachable as `gluetun:<port>`, never localhost.
-→ [ADR-0005](.agent/decisions/adr-0005-arr-stack-gluetun-protonvpn.md)
+→ [ADR-0005](docs/decisions/adr-0005-arr-stack-gluetun-protonvpn.md)
 
 **Everything is an `.env` variable.** No paths, ports, domain, timezone, VPN provider or
 image tag is hardcoded. A deployment is a `.env` file.
 
 Full reasoning: [`docs/`](docs/) for running it, the
-[ADRs](.agent/decisions/) for why.
+[ADRs](docs/decisions/) for why.
 
 ## Requirements
 
@@ -133,20 +133,22 @@ hard requirement is that `DATA_ROOT` is internally one filesystem.
 
 ## How this was built
 
-This repo carries its own engineering record. `.agent/` is a project-scoped wiki
-maintained by an AI agent across sessions — architecture pages, a build roadmap, a
-gotchas file, dated decision records, and an append-only log.
+This repo carries its own engineering record, maintained by an AI agent across sessions:
+component pages in [`docs/components/`](docs/components/), dated decision records in
+[`docs/decisions/`](docs/decisions/), research and earlier plans in
+[`docs/research/`](docs/research/), work items in [`work/`](work/), and agent mechanics
+(gotchas, commands, an append-only log) in `.bc-agent/`.
 
 It's included deliberately, and not as a tidy after-the-fact writeup. The most useful
-thing in it is a mistake: [ADR-0003](.agent/decisions/adr-0003-two-tier-storage-move-not-hardlink.md)
+thing in it is a mistake: [ADR-0003](docs/decisions/adr-0003-two-tier-storage-move-not-hardlink.md)
 specified downloads on the SSD and the library on the HDD, and was accepted.
-[ADR-0008](.agent/decisions/adr-0008-single-filesystem-data-root-hardlinks.md)
+[ADR-0008](docs/decisions/adr-0008-single-filesystem-data-root-hardlinks.md)
 later reversed it — the original argument turned out to be circular, its stated benefit
 didn't survive scrutiny, and the workflow it documented was factually wrong about
 seeding surviving a cross-filesystem move. The superseded record is kept, with its
 reasoning intact, because the correction is the interesting part.
 
-Start at [`.agent/index.md`](.agent/index.md).
+Start at [`docs/overview.md`](docs/overview.md).
 
 ## Legal
 

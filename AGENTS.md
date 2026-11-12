@@ -1,17 +1,20 @@
 # Homeflix agent guidance
 
 Homeflix is a public, self-hosted media stack. Runtime artifacts live at the repository
-root; `.agent/` is the maintained project wiki and the source of truth for architecture,
-decisions, current work, and operational gotchas.
+root. Project knowledge lives in visible folders: work items in `work/`, decision records in
+`docs/decisions/`, research and earlier plans in `docs/research/`, component pages in
+`docs/components/`, and the glossary in `CONTEXT.md`. `.bc-agent/` holds agent mechanics
+(session protocol, context map, conventions, references, log).
 
 ## Start here
 
 Before non-trivial work, read in this order:
 
-1. [`.agent/AGENTS.md`](.agent/AGENTS.md) — wiki maintenance rules and session protocol
-2. [`.agent/index.md`](.agent/index.md) — broad project orientation
-3. [`.agent/map.md`](.agent/map.md) — choose the smallest task-specific context set
-4. [`.agent/tasks/active.md`](.agent/tasks/active.md) and any linked plan
+1. [`.bc-agent/AGENTS.md`](.bc-agent/AGENTS.md) — session protocol and the "Where things go"
+   table that names each role's path
+2. [`docs/overview.md`](docs/overview.md) — broad project orientation
+3. [`.bc-agent/map.md`](.bc-agent/map.md) — choose the smallest task-specific context set
+4. The items in [`work/2-active/`](work/2-active/) and any linked plan
 
 For a narrow task, do not read the whole wiki; use the context map.
 
@@ -30,10 +33,10 @@ an add. Pin every title to a TVDB/TMDB id, dry-run before applying, and confirm 
 
 ## Project constraints
 
-- Keep `.agent/` current in the same change when work alters project state, establishes a
-  durable fact, changes a service, or makes an architectural decision. Follow the update
-  triggers in `.agent/AGENTS.md`.
-- Check existing ADRs before changing architecture. Do not silently reverse accepted
+- Keep `work/`, `docs/` and `.bc-agent/` current in the same change when work alters project
+  state, establishes a durable fact, changes a service, or makes an architectural decision.
+  Follow the update triggers in `.bc-agent/AGENTS.md`.
+- Check existing ADRs in `docs/decisions/` before changing architecture. Do not silently reverse accepted
   decisions.
 - Never commit secrets, real `.env` values, operator-private infrastructure details, or
   machine-specific absolute paths. Portable configuration belongs in environment variables.

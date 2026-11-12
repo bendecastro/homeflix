@@ -72,7 +72,7 @@ connectivity rather than leaking.
 | Variable | Default | Notes |
 |---|---|---|
 | `VPN_SERVICE_PROVIDER` | `protonvpn` | ~40 supported — see the [Gluetun wiki](https://github.com/qdm12/gluetun-wiki). |
-| `VPN_TYPE` | `wireguard` | `wireguard` (default) or `openvpn`. See [ADR-0011](../.agent/decisions/adr-0011-wireguard-vpn-transport.md). |
+| `VPN_TYPE` | `wireguard` | `wireguard` (default) or `openvpn`. See [ADR-0011](decisions/adr-0011-wireguard-vpn-transport.md). |
 | `VPN_WIREGUARD_PRIVATE_KEY` | — | Used when `VPN_TYPE=wireguard`. Enter with `scripts/homeflix secrets vpn`. For ProtonVPN, enable NAT-PMP when generating the config. |
 | `VPN_USER` / `VPN_PASSWORD` | — | Used when `VPN_TYPE=openvpn`. Provider *OpenVPN* credentials, not your account login. Enter with `scripts/homeflix secrets vpn`. Unsupported providers are refused and point at the Gluetun wiki. |
 | `VPN_PORT_FORWARDING` | `on` | Enables provider port forwarding. Without it, qBittorrent still downloads but inbound peers degrade. |
@@ -183,7 +183,7 @@ Two known-open items, marked in `docker-compose.yml`:
 - **Traefik dashboard is unauthenticated** (`--api.insecure=true`). Acceptable on a
   trusted LAN; harden before exposing anything remotely.
 - **No remote access is configured.** The stack is LAN-only by design. See
-  [ADR-0007](../.agent/decisions/adr-0007-remote-access.md) for the intended
+  [ADR-0007](decisions/adr-0007-remote-access.md) for the intended
   approach (Tailscale, with a Cloudflare Tunnel fallback for TVs that can't run it).
 - **`:ro` on `/var/run/docker.sock` does not restrict the Docker API.** Glances does
   not mount the socket (host metrics via `pid: host` only). Traefik, deunhealth, and

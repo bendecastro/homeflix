@@ -148,12 +148,12 @@ class DocumentationContractTests(unittest.TestCase):
         self.assertIn("live request-to-library", spec)
 
     def test_wiki_records_program_fixture_acceptance_without_live_claims(self) -> None:
-        index = (ROOT / ".agent" / "index.md").read_text(encoding="utf-8")
-        active = (ROOT / ".agent" / "tasks" / "active.md").read_text(encoding="utf-8")
-        completed = (ROOT / ".agent" / "tasks" / "completed.md").read_text(encoding="utf-8")
-        log = (ROOT / ".agent" / "log.md").read_text(encoding="utf-8")
-        roadmap = (ROOT / ".agent" / "project" / "roadmap.md").read_text(encoding="utf-8")
-        setup = (ROOT / ".agent" / "project" / "agent-first-setup.md").read_text(encoding="utf-8")
+        index = (ROOT / "docs" / "overview.md").read_text(encoding="utf-8")
+        active = (ROOT / "docs" / "research" / "2026-11-12-earlier-task-history" / "active.md").read_text(encoding="utf-8")
+        completed = (ROOT / "docs" / "research" / "2026-11-12-earlier-task-history" / "completed.md").read_text(encoding="utf-8")
+        log = (ROOT / ".bc-agent" / "log.md").read_text(encoding="utf-8")
+        roadmap = (ROOT / "docs" / "research" / "2026-11-12-earlier-task-history" / "roadmap.md").read_text(encoding="utf-8")
+        setup = (ROOT / "docs" / "research" / "2026-08-04-agent-first-setup" / "README.md").read_text(encoding="utf-8")
         sentence = "Disposable-host and private-production live acceptance remain separate."
         for document in (index, completed, log):
             self.assertIn(sentence, document)
@@ -203,7 +203,7 @@ class DocumentationContractTests(unittest.TestCase):
                 self.assertEqual(result.returncode, 0, f"{path} must remain gitignored")
 
     def test_superseded_acquisition_plan_is_not_an_executable_queue(self) -> None:
-        plan = (ROOT / ".agent" / "project" / "agent-first-acquisition-plan.md").read_text(encoding="utf-8")
+        plan = (ROOT / "docs" / "research" / "2026-11-12-earlier-task-history" / "agent-first-acquisition-plan.md").read_text(encoding="utf-8")
         self.assertRegex(plan, r"(?im)^Status:\s*Superseded")
         self.assertNotRegex(plan, r"(?m)^- \[ \]")
         self.assertIn("Do not execute this page as a separate plan", plan)

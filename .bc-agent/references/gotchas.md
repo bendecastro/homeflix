@@ -1,0 +1,235 @@
+# References — Gotchas
+
+Updated: 2026-08-17
+
+Traps specific to the homeflix design, plus the generic classics. Add real ones as they
+bite.
+
+## homeflix-specific (from the design review)
+
+- **Do not start qBittorrent or Prowlarr without current fail-closed evidence.**
+  `deploy acquisition` requires stored `fail_closed: true` from a successful
+  `verify vpn --disrupt`. `#9` tunnel evidence alone is not enough. Fixture-accepted.
+- **Radarr/Sonarr must reach qBittorrent as `gluetun:<port>`, never `localhost` or
+  `qbittorrent`.** Those clients share Gluetun's network namespace. A localhost
+  client from *arr would miss the download client; a `qbittorrent` hostname does
+  not resolve on the *arr network.
+- **Never split `/data` into two bind mounts for an *arr app.** Give Radarr/Sonarr/Lidarr
+  the single root `${DATA_ROOT}:/data`. If you instead mount `torrents/` and `media/`
+  separately, Docker makes them distinct mountpoints and **hardlinks fail even though the
+  host filesystem is the same** — the *arr apps silently fall back to copying. This is the
+  #1 way to lose hardlinking. See [ADR-0008](../../docs/decisions/adr-0008-single-filesystem-data-root-hardlinks.md).
+- **Don't put the data or appdata roots under `/home`.** TRaSH warns against it directly:
+  home directories carry restrictive default permissions and end up a permissions mess for
+  containers running as PUID 1000. Use `/opt/<name>/...` or `/docker/appdata/...`. The
+  prior design placed these under the user's home directory — don't copy that.
+- **Hardlinked files look like they use double the space.** `du` and file managers count
+  a file under both `torrents/` and `media/`, but the blocks exist once. Space frees only
+  when both names are deleted. Use `du --count-links=no` / check the link count (`ls -l`
+  column 2) before panicking about disk usage.
+- **A cross-filesystem Move breaks seeding.** If downloads and library ever end up on
+  different filesystems, *arr Import Mode = Move relocates the file while the torrent
+  still points at the old path — qBittorrent errors with missing files and seeding stops.
+  The *arr apps do **not** re-point the download client. This killed the original
+  ADR-0003 design; don't reintroduce it.
+- **⚠️ Historical (resolved):** the two prior compose variants disagreed on the
+  `/downloads` mount, which would have broken imports. ADR-0008's single `/data` root
+  removes the whole class of bug — there is no separate downloads mount to drift.
+- **Backups on the same HDD as the library = not a backup.** Prior `backup.sh` wrote to
+  `${BACKUP_ROOT}` on the library drive. Use `scripts/homeflix backup create` /
+  `scripts/backup-config.sh` → `BACKUP_DEST` (another filesystem, including when the
+  dest path does not exist yet, or documented `user@host:/abs/path`) and prove a
+  restore with `scripts/restore-config.sh`. A failed SQLite snapshot or SSH
+  transfer does not publish or prune. Media and the checkout `.env` are not
+  included. Fixture-accepted only.
+- **`:ro` on `/var/run/docker.sock` does not restrict the Docker API.** It is
+  root-equivalent regardless. Glances no longer mounts it (`pid: host` only).
+  Remaining: Traefik (discovery), deunhealth (restart), Watchtower (optional updates).
+- **`depends_on: service_healthy` does not survive a host reboot.** Those conditions
+  apply to `docker compose up`, not to `restart: unless-stopped` on boot.
+- **`:latest` + Watchtower auto-update at 02:00** on a family-critical box → a bad
+  upstream image can break things unattended. Consider pinned tags + notify-only.
+- **Traefik `--api.insecure=true`** → dashboard with no auth. Fine on trusted LAN,
+  unacceptable once anything is remotely reachable.
+- **Kill switch = no downloads when VPN is down.** Gluetun `FIREWALL=on` fails safe
+  (good) but means qBittorrent/NZBGet/Prowlarr have no network until the VPN recovers.
+- **`*.local` needs LAN DNS.** Without router/Pi-hole/`/etc/hosts` entries the friendly
+  hostnames won't resolve on family devices.
+- **Talk to `gluetun:<port>`, not localhost.** The VPN'd services share Gluetun's netns;
+  the *arr apps must reference `gluetun:6969/6789/9696`.
+- **`+pmp` in an OpenVPN username does not enable forwarding.** Gluetun also needs
+  `VPN_PORT_FORWARDING=on`. The default transport is WireGuard ([ADR-0011](../../docs/decisions/adr-0011-wireguard-vpn-transport.md));
+  ProtonVPN must have NAT-PMP selected when the key is generated. The forwarded
+  port changes on every reconnect — `scripts/gluetun-qbt-port.sh` pushes it into
+  qBittorrent, which requires localhost WebUI auth bypass inside the shared
+  namespace.
+- **`PROXY_SUBNET` and `PROXY_NETWORK_SUBNET` are aliases.** Compose interpolates
+  either. A checkout that only has the older name still renders; do not give
+  them different CIDRs.
+- **NZBGet `saveconfig` writes the file only.** Official JSON-RPC does not apply
+  ControlPassword or path changes in-memory; `config()` stays on the old values
+  until `reload()`. Rotation must persist `.env` after saveconfig succeeds, then
+  reload and retry login — a generated password must not live only in
+  `nzbget.conf`. Merge updates into `loadconfig()` file text so untouched
+  `${MainDir}` references are not expanded. Fixture-accepted only.
+- **Fail-closed verify restarts namespace dependents.** After Gluetun restarts, any
+  previously running `qbittorrent` / `nzbget` / `prowlarr` must be restarted or they
+  keep a stale netns. `verify vpn --disrupt` snapshots the running set and restores
+  exactly those services. Do not treat routine `vpn verify` as that proof.
+- **Fail-closed restore is not paid from the leftover prove deadline.** After
+  `ip link set … down`, a blocked-egress wget can hang until its own short cap.
+  Compensation uses an independent restore budget so Gluetun and the snapshot
+  still get `compose restart` when that probe exhausts the operation clock.
+- **Bazarr starts empty.** The container is `Up` after `compose up`, but without Radarr/
+  Sonarr links, a language profile, and providers it never searches. Run
+  `./scripts/configure-bazarr.sh` or follow [`docs/bazarr.md`](../../docs/bazarr.md).
+- **Bazarr must not use `localhost` for Radarr/Sonarr.** From inside the container that is
+  Bazarr itself. Use the compose service names (`radarr`, `sonarr`) on `traefik-network`.
+- **No path mappings under stock Homeflix mounts.** Radarr/Sonarr use `/data/media/...`;
+  Bazarr mounts `${DATA_ROOT}/media` at `/data/media`. Adding identity mappings or wrong
+  pairs causes “file not found” on search. Only map when the roots truly differ.
+- **Bazarr’s media mount is writable on purpose.** It writes `.srt` next to video files.
+  Only Jellyfin should mount media read-only.
+- **Forced vs full English.** “Forced” = foreign-language lines only; full English is the
+  complete track. The recommended profile asks for both so players can offer
+  `English - Forced` without forcing always-on captions.
+- **A passing Emby/Jellyfin connection Test does not prove new-title discovery.** The
+  built-in Test only POSTs `/Notifications/Admin`. On import, the targeted update always
+  POSTs `/Library/Media/Updated` with the *arr movie/series path even when Jellyfin's
+  `GetPaths` lookup is empty; that call is not a full-library scan and still misses
+  titles in empty or unwatched library folders. Core reconcile keeps that targeted
+  connection **and** an unconditional webhook to `POST /Library/Refresh`
+  (`ValidateMediaLibrary`) with header `X-Emby-Token` (token not in the URL). Fixture-
+  accepted only; not live-host proof.
+
+## Generic classics (watch for)
+
+- **Permissions hell** — all services run PUID/PGID 1000; library + downloads must be
+  writable by uid 1000 or imports fail.
+- **Transcoding without GPU access** — pass the iGPU device + drivers; prefer direct play.
+
+## Hit in practice
+> _Add dated, specific gotchas here as they happen, with the fix that worked._
+
+- **[2026-10-24] Gluetun's port file is writable only once under `cap_drop: ALL`.**
+  Gluetun chowns `/tmp/gluetun/forwarded_port` to `PUID`/`PGID` (default 1000). When port
+  forwarding restarted (Oct 22, live), root could not rewrite that file without
+  `DAC_OVERRIDE`, so it looped `permission denied` every 5 s and the up-command was never
+  run. qBittorrent kept dead sockets: `firewalled`, 0 DHT nodes, every tracker
+  `Operation not permitted`, and new grabs stuck at `metaDL` while the tunnel, egress IP and
+  forwarded port all looked fine. Restarting qBittorrent restored peers. The fix is
+  `PUID: 0`/`PGID: 0` on gluetun so the file stays root-owned. Deployed live 2026-10-24:
+  the file is root-owned, the up-command ran, and an in-container rewrite works with only
+  NET_ADMIN+CHOWN. A natural mid-session reconnect has not been observed yet.
+- **[2026-08-10] A catch-all `LAN_SUBNET` silently disables VPN port forwarding.**
+  `FIREWALL_OUTBOUND_SUBNETS` was shipped as `192.168.0.0/16,10.0.0.0/8`, but VPN
+  providers place their gateway inside private address space — ProtonVPN's WireGuard
+  gateway is `10.2.0.1`, inside `10.0.0.0/8`. Gluetun therefore added a route sending the
+  provider's own gateway out `eth0`, and NAT-PMP requests to `10.2.0.1:5351` timed out.
+  Everything else looked correct: container healthy, tunnel up, expected public IP, no
+  leak. The only symptom was a missing `/tmp/gluetun/forwarded_port`, and Gluetun's
+  explanatory error only appears after roughly nine silent retries (~2 minutes).
+  `LAN_SUBNET` is now required with no compose fallback and discovered from the host's
+  default route, the Compose network is pinned via a separate `PROXY_SUBNET` chosen to
+  avoid every non-default IPv4 route already present on the host, so neither value has to
+  be widened to cover the other, and
+  `tests/test_compose.py::VpnFirewallTests` fails if any shipped allowed subnet covers a
+  known provider gateway.
+- **[2026-08-10] Don't infer a LAN subnet from just any interface address.** A host can
+  carry a Tailscale `/32`, several Docker bridges, and the real LAN on one machine. Use the
+  lowest-metric IPv4 **default route** and its preferred source address (or match its
+  gateway when no preferred source is reported). Only RFC1918 and CGNAT ranges may enter
+  the VPN bypass; public, `/32`, loopback, link-local and multicast addresses fail closed.
+  Proxy subnet selection must separately avoid all existing IPv4 routes across routing
+  tables, including Docker bridges, VLANs and secondary LANs, while recognizing and
+  preserving Homeflix's own existing proxy network on reruns.
+- **[2026-08-11] The *arr "Update Library" connection is not a full-library scan.** On
+  import, Radarr/Sonarr still POST `/Library/Media/Updated` with the movie or series path
+  after `GetPaths` — they do not no-op just because Jellyfin has never indexed the title.
+  `/Library/Media/Updated` still fails to discover titles in empty or unwatched library
+  folders, and Jellyfin's `LibraryMonitor` starts no filesystem watcher for a folder that
+  contains no items. The connection **Test** still passes because it only POSTs
+  `/Notifications/Admin`. The fix is a second **Webhook** connection posting to
+  `/Library/Refresh`, which runs `ValidateMediaLibrary`; keep the targeted connection for
+  path-targeted updates. Corrected 2026-08-16: earlier notes claimed empty `GetPaths`
+  skipped the update. Current *arr always sends the *arr path.
+- **[2026-08-11] Passing `/dev/dri` into Jellyfin does not enable hardware transcoding.**
+  The device mapping only makes the GPU available. Jellyfin still defaults to
+  `HardwareAccelerationType: none` and transcodes on the CPU, silently. Hardware
+  acceleration must also be selected in **Dashboard → Playback → Transcoding**, with HEVC
+  and HEVC 10-bit decoding enabled. Verify from the transcode log (`h264_qsv`/`h264_vaapi`
+  versus `libx264`) rather than from the setting.
+- **[2026-08-11] Jellyfin's media mount is read-only, so libraries must not save metadata
+  beside the media.** Library defaults that write artwork, NFO or trickplay images into the
+  library folder produce a burst of `IOException saving to /data/media/...` on every scan;
+  artwork silently falls back to the config directory and the rest just fails. Core setup
+  now sets `SaveLocalMetadata=false`, `MetadataSavers=[]` and `SaveTrickplayWithMedia=false`
+  on each managed library.
+- **[2026-08-11] Sonarr applies `addOptions.monitor` asynchronously, so season monitoring
+  written immediately after an add is silently reverted.** The refresh task that applies the
+  add options finishes *after* the `POST` returns, so a corrective `PUT` of
+  `seasons[].monitored` is overwritten a moment later, leaving the series unmonitored. The
+  read taken straight after the `PUT` returns exactly what was written, so the write looks
+  successful; nothing logs an error, and the regression is only visible later. A single read
+  after a write is not evidence here. `LibraryClient` re-asserts monitoring and requires the
+  desired state to hold across **two reads separated by a delay** before issuing any search,
+  failing with `monitoring_unstable` rather than leaving a half-configured series.
+- **[2026-08-11] `series/lookup` can rank an unrelated exact-title match above the intended
+  show.** A same-named series can outrank the one being sought, including when the intended
+  series carries a disambiguating suffix in its own title. Resolving a name to an id by
+  string equality picks the wrong series. Titles must be pinned to a TVDB/TMDB id and the
+  lookup response checked to carry the id that was requested.
+- **[2026-08-11] A Sonarr season-pack download produces one queue record per episode.**
+  Identical release names repeated across queue rows are episode records sharing a single
+  `downloadId`, not duplicate grabs. Group by `downloadId` before diagnosing duplication.
+- **[2026-08-11] Radarr and Sonarr are not published on the host.** Only the proxy, Jellyfin
+  and Seerr are bound, so host-loopback `curl` against an *arr port returns nothing —
+  which reads like a hung service rather than a closed port. Reach them with
+  `docker exec <service> curl http://localhost:<port>/...`. The LinuxServer images ship
+  BusyBox `grep`, which has no `-P`, so shell extraction of `<ApiKey>` needs `sed`. Send the
+  key as an `X-Api-Key` header; `?apikey=` writes a credential into logs and shell history.
+- **[2026-08-11] `renameMovies`/`renameEpisodes` live in `config/naming`, not
+  `config/mediamanagement`.** Sending the rename flag to `/api/v3/config/mediamanagement` is
+  accepted with a success response and then silently dropped, so renaming stays off while the
+  rest of the payload applies normally. `copyUsingHardlinks` genuinely does belong to
+  `config/mediamanagement`, which is what makes the mistake quiet: hardlinking comes out
+  correct and only renaming is missing. Core setup had this wrong and therefore never enabled
+  renaming; `ArrClient.configure()` now writes the flag to `config/naming`, `inspect()` reads
+  it from there, and a regression test asserts the flag is never sent to
+  `config/mediamanagement`.
+- **[2026-08-11] An empty *arr rename preview does not mean filenames are correct.**
+  `GET /api/v3/rename?movieId=` and `?seriesId=` return an empty list for every title while
+  renaming is disabled, which reads as "nothing to do" when the real answer was 78 files. The
+  flag must be enabled before the preview carries any information.
+- **[2026-08-11] Renaming an existing seeded library does not break hardlinks.** A rename
+  within one filesystem rewrites a directory entry and preserves the inode, so the `torrents/`
+  link and the torrent client are unaffected. Verified across 78 files: no media file left with
+  a link count of 1, every media inode still resolvable under `torrents/`, `df` unchanged.
+- **[2026-08-11] Jellyfin counts are meaningless while a library scan runs.** Immediately after
+  a bulk rename the API reported 11 of 13 movies with zero streams, one series at 10 episodes
+  instead of 15 and another at 0; everything reconciled with disk once the scan ended. Poll
+  `GET /ScheduledTasks` until every task is `Idle` before concluding an import failed. This is
+  the bulk form of the single-item "created before probed" race.
+
+## [2026-08-24] Promoted operational details
+
+- **[2026-08-14] Static Compose contract checks need both source agreement and route ownership.** Every *arr `/data` bind must use the same host source; choosing one representative service as `${DATA_ROOT}` is insufficient. For VPN-proxied services, the owning `traefik.http.routers.<svc>.rule` Host label establishes the route; leftover `.service` labels do not.
+- **[2026-08-16] Remote backup destinations are deliberately narrow.** Only `user@host:/abs/path` is accepted; malformed, relative, traversal, option-like, URL, IPv6, and shell-meta forms fail before SSH. Transfers use batch mode, put the new archive before pruning, and leave existing archives untouched on transfer or timeout failure. A remote destination is never created as a local directory. Fixture-accepted only.
+- **[2026-08-17] Probe Traefik through its published entrypoint.** Core readiness reaches Jellyfin through Traefik `:80`, not the unpublished `:8080` endpoint. Fixture-accepted only.
+- **[2026-08-17] Existing-stack core verification does not require admin env values.** It reads the dedicated Jellyfin app key and Seerr's selected quality profile; LinuxServer config directories with `0775` ownership by PUID are readable, while secret files with group/other write permissions fail closed. Fixture-accepted only.
+- **[2026-08-19] Keep forwarded-port states distinct.** With `VPN_PORT_FORWARDING` off, `verify acquisition` reports `port forwarding is not configured` as not-applicable. When forwarding is enabled but Gluetun's status file cannot be read, it reports `forwarded port is configured but unavailable`; a listen-port mismatch remains a separate `port_agrees` failure. No port value is printed. Fixture-accepted only.
+- **[2026-08-10] Network discovery must fail closed on ambiguous Docker or routing state.** Preserve an existing proxy subnet only after exact network-name presence, Compose ownership labels, and valid IPAM are confirmed; unknown daemon inspection is not absence. Exclude kernel local/broadcast routes, reject equal-metric default routes, and reject foreign more-specific overlaps; only an identical connected route for the Homeflix-owned network is exempt.
+- **[2026-08-04] Device checks must dereference symlinks.** GNU `stat -c %d` reports the symlink's device; use `stat -Lc` and a real hardlink smoke test or a symlinked media path can make a cross-filesystem layout pass device inspection.
+- **[2026-08-16] Scratch restore has hard safety rails.** Restore validates archive names and members, refuses the live `CONFIG_ROOT` and non-empty scratch directories, and requires every restored SQLite database to pass `PRAGMA integrity_check` with at least one database present. A local `BACKUP_DEST` on the same device as `DATA_ROOT` is refused even when the destination does not exist yet.
+
+## Unquoted dotenv values execute on source
+
+- **[2026-08-04] Quote cron-like `.env` values.** `WATCHTOWER_SCHEDULE=0 0 2 * * *` unquoted ran as a command when `.env.example` was sourced. The same class of bug applies to `LAN_SUBNET`. Quote those assignments.
+
+## Older Compose JSON omits bind create_host_path
+
+- **[2026-08-17] Restore `create_host_path: false` after `docker compose config --format json`.** Older Compose JSON drops that flag from source. The contract render must put it back or data binds lose fail-closed host-path creation. Fixture-accepted only.
+
+## [2026-10-07] Optional WireGuard MTU override
+
+- If Gluetun repeatedly reports `running TLS handshake: context deadline exceeded` or `EOF` while plain HTTP through the tunnel works, an optional `VPN_WIREGUARD_MTU` override may help. Compose passes it as `WIREGUARD_MTU`; leave it empty to retain Gluetun's default. One operator deployment cleared the loop with `1200`; that value is path-dependent, not a new default. An isolated `--network none` run accepted `WIREGUARD_MTU=` during settings parsing and rejected `abc`; that check does not prove tunnel health. See [VPN architecture](../../docs/components/networking-remote-access.md).

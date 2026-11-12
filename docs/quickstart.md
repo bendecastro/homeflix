@@ -202,7 +202,7 @@ drives and imports become full copies: slow, double the disk, and the torrent br
 because the file it was seeding has moved.
 
 Full reasoning:
-[ADR-0008](../.agent/decisions/adr-0008-single-filesystem-data-root-hardlinks.md).
+[ADR-0008](decisions/adr-0008-single-filesystem-data-root-hardlinks.md).
 
 ## Troubleshooting
 
@@ -221,4 +221,4 @@ the kill switch is doing its job and those services have no network by design.
 [docs/bazarr.md](bazarr.md)). Confirm Radarr is reachable as host `radarr`, not
 `localhost`, and that a language profile is assigned to the title.
 
-More: [`.agent/references/gotchas.md`](../.agent/references/gotchas.md).
+More: [`.bc-agent/references/gotchas.md`](../.bc-agent/references/gotchas.md).

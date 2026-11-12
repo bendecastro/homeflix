@@ -4,7 +4,7 @@
 #
 # Never writes over the live CONFIG_ROOT. The point of this script is to prove
 # a backup opens, not to recover a dead host (that runbook is in
-# .agent/project/deployment.md). Media is not in these archives.
+# docs/components/deployment.md). Media is not in these archives.
 #
 # Usage:
 #   ./scripts/restore-config.sh --list

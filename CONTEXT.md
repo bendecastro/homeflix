@@ -7,7 +7,9 @@
 - **Core phase** — The setup phase that provides the family-facing media and request experience without requiring acquisition credentials or starting acquisition services.
 - **Disruptive verification** — An explicitly authorized check that changes live state temporarily and must restore that state before it can succeed.
 - **Fixture acceptance** — Evidence from deterministic fixtures and fake adapters; it does not establish that a real deployment works.
+- **Household** — The end users of a deployment: they need easy apps on their devices, simple sign-in, and a way to request titles (Seerr).
 - **Live acceptance** — Redacted evidence that the intended behavior works on a real supported deployment.
+- **Operator** — The owner and admin of a deployment; the person running the host.
 - **Reconciliation** — Inspection of current state followed by the smallest safe changes needed to reach desired state; rerunning it does not duplicate resources.
 - **Runtime verification** — Read-only inspection of a running deployment whose success requires every mandatory runtime domain to be observed.
 - **Stack contract** — The load-bearing structural invariants that a rendered Homeflix Compose model must satisfy for storage, privacy, routing, recovery, and setup phases to work safely.
