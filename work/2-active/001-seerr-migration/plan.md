@@ -2,6 +2,7 @@
 
 Why: Jellyseerr 2.7.3 is archived and lacks fixes for a high-severity path-traversal advisory and four medium data-leak advisories; Seerr is its maintained successor ([ADR-0012](../../../docs/decisions/adr-0012-seerr-request-portal.md)).
 Done when: the repo ships the `seerr` service, the setup CLI configures and verifies it, all tests pass, docs and wiki say `seerr`, and the owner's deployment runs Seerr with its migrated requests, users and settings intact.
+Blocked by: nothing
 
 The full migration plan, with exact commands, validation, risks and rollback, is in
 [migration-plan.md](migration-plan.md). Repository steps 1–6 are done; fixture validation

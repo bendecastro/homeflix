@@ -2,6 +2,7 @@
 
 Why: an agent should be able to validate existing storage, or provision one explicitly approved dedicated disk or partition as LUKS2 plus ext4 with automatic unlock, persistent mounting and a recovery header backup, without risking the wrong disk.
 Done when: `storage discover`, `storage plan` and `storage apply` work as specified in [implementation-plan.md](implementation-plan.md), proven with loop-device tests before any real-disk test, and `docs/agent-setup.md` documents the confirmation and recovery flow.
+Blocked by: nothing
 
 The task-by-task plan (approved design, status Proposed when written) is
 [implementation-plan.md](implementation-plan.md).

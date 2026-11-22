@@ -2,6 +2,7 @@
 
 Why: the stack runs `:latest` tags with Watchtower on a family box, so any pull can bring a breaking major release; the choice between auto-update and pinned tags with notify-only has not been made.
 Done when: a decision record chooses `:latest` + Watchtower or pinned tags + notify-only, and the compose file and `.env.example` match it.
+Blocked by: nothing
 
 ## Steps
 

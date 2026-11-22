@@ -15,6 +15,7 @@ assuming a path, so change a path here when the project keeps something elsewher
 | work-done | `work/3-done/` | finished work, always inside a `<year>-<month>/` folder such as `2026-03/` |
 | work-dropped | `work/4-dropped/` | abandoned work and rejected requests, with the reason |
 | ideas | `work/0-ideas.md` | undecided ideas and observations, one line each |
+| work-index | `work/README.md` | generated table of open items; run `python3 .bc-agent/scripts/work_index.py` |
 | decisions | `docs/decisions/` | one numbered decision record per file, named `adr-NNNN-<slug>.md` |
 | research | `docs/research/` | one `<date>-<slug>/` folder per investigation |
 | glossary | `CONTEXT.md` | canonical names for the project's domain concepts; the project's existing glossary, kept instead of `glossary.md` |
@@ -56,6 +57,19 @@ A work item is one feature or plan. Template: [templates/work-item.md](templates
   moves as a whole. Why: everything about a feature stays in one place through its whole
   life, and the steps already are the slice map, so separate slice files would drift.
 - **Several items may be active at once.**
+- **Every open item has a `Blocked by:` line.** It names the items that must finish first, or
+  `nothing`. `python3 .bc-agent/scripts/work_index.py` checks the names, rejects self-blocks, cycles and dropped
+  blockers, and writes the generated table in [work/README.md](../work/README.md): active items
+  first, then ready ones, those unblocking the most work leading. Run it after changing an item.
+  Why: the order is derived from what each item waits for, so it cannot drift from a hand-kept list.
+- **A building block gets its own item.** When two items would wait on one step of a third,
+  that step becomes its own item, and both name it. Why: an item can only wait on a whole item,
+  and a shared building block buried in a large item hides what is ready.
+- **Before creating an item, look for overlap.** Search the open items and `work/0-ideas.md`.
+  Fold the work into an existing item rather than starting a parallel one, and delete the idea
+  lines the new item absorbs. Why: duplicated items drift apart and split one decision across two places.
+- **One item, one deliverable.** Split an item that holds several deliverables that could ship
+  and be used separately. Why: a large item's later parts block nothing but still hide behind its first.
 - **GitHub issues are optional.** When one exists, record its number on the item's `Issue:`
   line. Why: the folders are the source of truth; an issue is a pointer to them.
 - **Undecided ideas and observations** are one line each in `work/0-ideas.md`. An idea
@@ -70,9 +84,9 @@ A work item is one feature or plan. Template: [templates/work-item.md](templates
 | When you… | Do this |
 | --- | --- |
 | Start non-trivial work | Read the items in `work/2-active/`, then pick context with [map.md](map.md). |
-| Begin agreed work | Create the item from the template, or `git mv` it from `1-planned/` to `2-active/`. |
-| Finish a step | Check its box in the item. |
-| Finish or drop an item | Fill `## Outcome`, then `git mv` it to its done month folder or to `4-dropped/`. |
+| Begin agreed work | Create the item from the template, or `git mv` it from `1-planned/` to `2-active/`, then run `python3 .bc-agent/scripts/work_index.py`. |
+| Finish a step | Check its box in the item, then run `python3 .bc-agent/scripts/work_index.py`. |
+| Finish or drop an item | Fill `## Outcome`, then `git mv` it to its done month folder or to `4-dropped/`, then run `python3 .bc-agent/scripts/work_index.py`. |
 | Make an architectural or hard-to-reverse choice | Add a numbered record under `docs/decisions/` from [templates/adr.md](templates/adr.md). |
 | Investigate something at length | Write it up in a dated folder under `docs/research/`. |
 | Check the state of a real system | Update its page under `docs/components/` from [templates/component.md](templates/component.md). |
