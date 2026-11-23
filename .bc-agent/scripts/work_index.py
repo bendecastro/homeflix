@@ -2,20 +2,32 @@
 """Write the pipeline table in work/README.md from the open work items.
 
 Usage: python3 .bc-agent/scripts/work_index.py [--check] [work-dir]
-Tests: python3 -m unittest discover -s .bc-agent/scripts -p 'test_*.py'
 
-Every item in 1-planned/ and 2-active/ needs a
-`Blocked by:` line naming full item names (`030-media-panels`, comma-separated)
-or `nothing`. Unknown names, dropped blockers, self-blocks and cycles among open
+Every item in 1-planned/ and 2-active/ needs a `Blocked by:` line naming full
+item names (`012-search-ranking`, comma-separated) or `nothing`. A `Stage:` line
+is optional; an unknown stage is an error. Unknown names, dropped blockers, self-blocks and cycles among open
 items are errors. A blocker in 3-done/ is satisfied; an item is ready when all
-its blockers are done. A `Stage:` line is optional; an item without one sorts
-in the last stage, and an unknown stage is an error.
+its blockers are done.
 
-The table is a topological order of the open items. Among the items available
-at each point it picks: active before planned, ready before not ready, more
-open items transitively unblocked first, then the stage order from the
+The optional work/order.md is the owner's ranking of open items, top first, as
+a numbered list (`1. 012-search-ranking`, ASCII digits); other lines are ignored.
+Lines end at \r\n, \r or \n; whitespace in a line is space or tab only.
+Names in 3-done/ or 4-dropped/ (or their month folders) are skipped unless an
+open item has the same name; an unknown or repeated name is an error.
+Without the file there is no owner order; the three tiers below still apply.
+Unlisted blockers do not inherit a listed item’s rank; dashboard-written orders list every open item, so this
+only affects hand-written partial lists.
+
+The table is a topological order of the open items: an item never precedes an
+open item it is transitively blocked by. Among the items available at each
+point it picks: active items, then planned items that an active item is
+(transitively) blocked by, then other planned items, then owner order (listed before
+unlisted), ready before not ready, more open items transitively unblocked
+first, then the stage order from the
 `Stages:` line in `.bc-agent/AGENTS.md` (default: now, next, later,
-unscheduled), then the name. `--check` writes nothing and exits 1 while the
+unscheduled; an item without a `Stage:` line sorts after every stage), then
+the name. A valid owner order is a fixed point: ranking by
+it reproduces it. `--check` writes nothing and exits 1 while the
 table is out of date. Python 3.9 or later, standard library only.
 """
 from __future__ import annotations
@@ -29,6 +41,7 @@ START = "<!-- work-index:start -->"
 END = "<!-- work-index:end -->"
 COMMAND = "python3 .bc-agent/scripts/work_index.py"
 ITEM_NAME = re.compile(r"^\d{3}-")
+ORDER_LINE = re.compile(r"^[ \t]*[0-9]+\.[ \t]+([0-9]{3}-[^ \t]+)[ \t]*$")
 MONTH = re.compile(r"^\d{4}-\d{2}$")
 LINK = re.compile(r"!?\[([^\]]+)\]\((?:[^()]|\([^()]*\))*\)")
 ABBREVIATION = re.compile(r"\b(?:e\.g|i\.e|vs|etc|Mr|Mrs|Ms|Dr)\.$", re.I)
@@ -86,8 +99,8 @@ def read_item(work: Path, folder: str, name: str, stages: tuple[str, ...]) -> di
         raise WorkIndexError(f"{rel}: missing")
     text = read_text(work / rel)
     stage_match = re.search(r"^Stage: (.+)$", text, re.M)
-    stage = stage_match.group(1).strip() if stage_match else stages[-1]
-    if stage not in stages:
+    stage = stage_match.group(1).strip() if stage_match else None
+    if stage is not None and stage not in stages:
         raise StageError(f"{rel}: unknown Stage line (one of: {', '.join(stages)})")
     why_match = re.search(r"^Why: (.+)$", text, re.M)
     why = first_sentence(why_match.group(1) if why_match else "")
@@ -97,7 +110,7 @@ def read_item(work: Path, folder: str, name: str, stages: tuple[str, ...]) -> di
     total = len(re.findall(r"^- \[[ x]\]", steps, re.M | re.I))
     blocked_match = re.search(r"^Blocked by:[ \t]*(.*)$", text, re.M)
     if not blocked_match or not blocked_match.group(1).strip():
-        raise StageError(f"{rel}: missing Blocked by line (item names such as 030-media-panels, or nothing)")
+        raise StageError(f"{rel}: missing Blocked by line (item names such as 012-search-ranking, or nothing)")
     blocked = blocked_match.group(1).strip()
     blockers = [] if blocked == "nothing" else [b.strip() for b in blocked.split(",") if b.strip()]
     return {
@@ -107,22 +120,53 @@ def read_item(work: Path, folder: str, name: str, stages: tuple[str, ...]) -> di
     }
 
 
+def archive_folders(work: Path, top: str) -> list[str]:
+    """A status folder plus its month folders."""
+    folders = [top]
+    if (work / top).is_dir():
+        folders += [f"{top}/{m.name}" for m in (work / top).iterdir() if m.is_dir() and MONTH.match(m.name)]
+    return folders
+
+
 def closed_names(work: Path) -> dict[str, str]:
     """Map each done or dropped item name to its status folder."""
     names = {}
-    folders = ["3-done", "4-dropped"]
-    if (work / "3-done").is_dir():
-        folders += [f"3-done/{m.name}" for m in (work / "3-done").iterdir() if m.is_dir() and MONTH.match(m.name)]
-    for folder in folders:
+    for folder in archive_folders(work, "3-done") + archive_folders(work, "4-dropped"):
         for name in entries(work, folder):
             names[name.removesuffix(".md")] = folder.split("/")[0]
     return names
 
 
+def read_owner_order(work: Path, open_items: dict | set, closed: dict[str, str]) -> tuple[dict[str, int], list[str]]:
+    """Rank of each open item listed in work/order.md, plus errors for unknown or repeated names."""
+    path = work / "order.md"
+    if not path.is_file():
+        return {}, []
+    rank: dict[str, int] = {}
+    seen: set[str] = set()
+    errors = []
+    for line in re.split(r"\r\n|\r|\n", read_text(path)):
+        match = ORDER_LINE.match(line)
+        if not match:
+            continue
+        name = match.group(1)
+        if name in closed and name not in open_items:
+            continue
+        if name in seen:
+            errors.append(f"order.md: names {name} more than once")
+            continue
+        seen.add(name)
+        if name in open_items:
+            rank[name] = len(rank)
+        elif name not in closed:
+            errors.append(f"order.md: names unknown item {name}")
+    return rank, errors
+
+
 def order_items(work: Path, items: list[dict], stages: tuple[str, ...]) -> list[dict]:
     open_items = {i["name"]: i for i in items}
     closed = closed_names(work)
-    errors = []
+    rank, errors = read_owner_order(work, open_items, closed)
     for i in items:
         for b in i["blockers"]:
             if b == i["name"]:
@@ -151,9 +195,18 @@ def order_items(work: Path, items: list[dict], stages: tuple[str, ...]) -> list[
                 reach(d, seen)
         return seen
 
+    feeds_active: set[str] = set()
+    stack = [b for n, i in open_items.items() if i["folder"] == "active" for b in waits[n]]
+    while stack:
+        b = stack.pop()
+        if b not in feeds_active:
+            feeds_active.add(b)
+            stack.extend(waits[b])
+
     def key(n: str) -> tuple:
         i = open_items[n]
-        return (i["folder"] != "active", bool(waits[n]), -len(reach(n, set())), stages.index(i["stage"]), n)
+        tier = 0 if i["folder"] == "active" else 1 if n in feeds_active else 2
+        return (tier, rank.get(n, float("inf")), bool(waits[n]), -len(reach(n, set())), stages.index(i["stage"]) if i["stage"] else len(stages), n)
 
     for n, i in open_items.items():
         i["waits"] = ", ".join(f"[{b}]({open_items[b]['path']})" for b in waits[n]) or "—"
@@ -204,12 +257,12 @@ def build_block(work: Path, stages: tuple[str, ...]) -> str:
             except StageError as error:
                 errors.append(str(error))
     if errors:
+        open_names = {n.removesuffix(".md") for f in ("2-active", "1-planned") for n in entries(work, f)}
+        errors += read_owner_order(work, open_names, closed_names(work))[1]
         raise WorkIndexError("\n".join(errors))
     items = order_items(work, items, stages)
-    done = len(entries(work, "3-done"))
-    if (work / "3-done").is_dir():
-        done += sum(len(entries(work, f"3-done/{month.name}"))
-                    for month in (work / "3-done").iterdir() if month.is_dir() and MONTH.match(month.name))
+    done = sum(len(entries(work, f)) for f in archive_folders(work, "3-done"))
+    dropped = sum(len(entries(work, f)) for f in archive_folders(work, "4-dropped"))
     ideas_path = work / "0-ideas.md"
     if not ideas_path.is_file():
         raise WorkIndexError("0-ideas.md: missing")
@@ -225,7 +278,7 @@ def build_block(work: Path, stages: tuple[str, ...]) -> str:
         "",
         f"- [Ideas](0-ideas.md): {ideas}",
         f"- [Done](3-done/): {done}",
-        f"- [Dropped](4-dropped/): {len(entries(work, '4-dropped'))}",
+        f"- [Dropped](4-dropped/): {dropped}",
         END,
     ])
 
