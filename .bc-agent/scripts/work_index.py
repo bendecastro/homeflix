@@ -28,7 +28,11 @@ first, then the stage order from the
 unscheduled; an item without a `Stage:` line sorts after every stage), then
 the name. A valid owner order is a fixed point: ranking by
 it reproduces it. `--check` writes nothing and exits 1 while the
-table is out of date. Python 3.9 or later, standard library only.
+table is out of date, and, when work/order.md exists, while it leaves out an
+open item (the message names where to add it: directly above the first listed
+item that waits on it, else at the bottom) or lists an item above an item it
+is Blocked by. The owner's dashboard writes every open item and never puts one
+above its blocker, so either fault comes from an agent. Python 3.9 or later, standard library only.
 """
 from __future__ import annotations
 
@@ -283,6 +287,37 @@ def build_block(work: Path, stages: tuple[str, ...]) -> str:
     ])
 
 
+def owner_order_errors(work: Path, stages: tuple[str, ...]) -> list[str]:
+    """What --check reports about work/order.md: open items it leaves out, and items listed above an item they wait on.
+
+    The owner's dashboard writes every open item and refuses to put one above its blocker, so either fault means an
+    agent created an item or added a Blocked by line without placing it; the message says where it goes.
+    """
+    if not (work / "order.md").is_file():
+        return []
+    items = {i["name"]: i for i in (read_item(work, f, n, stages) for f in ("2-active", "1-planned") for n in entries(work, f))}
+    rank, _ = read_owner_order(work, items, closed_names(work))
+    waits = {n: [b for b in i["blockers"] if b in items] for n, i in items.items()}
+
+    def waits_on(n: str, target: str, seen: set[str]) -> bool:
+        for b in waits[n]:
+            if b == target or (b not in seen and (seen.add(b) or waits_on(b, target, seen))):
+                return True
+        return False
+
+    listed = sorted(rank, key=rank.get)
+    errors = []
+    for n in sorted(set(items) - set(rank)):
+        first = next((m for m in listed if waits_on(m, n, set())), None)
+        where = f"directly above {first}, the first listed item that waits on it" if first else "at the bottom"
+        errors.append(f"order.md does not list {n}; add it {where}, and move no other line (the owner sets this order)")
+    for n in listed:
+        for b in waits[n]:
+            if b in rank and rank[b] > rank[n]:
+                errors.append(f"order.md lists {n} above {b}, which it waits on; check with the owner before changing the Blocked by line or the order")
+    return errors
+
+
 def main(argv: list[str]) -> int:
     check = "--check" in argv
     paths = [arg for arg in argv if arg != "--check"]
@@ -296,8 +331,11 @@ def main(argv: list[str]) -> int:
             raise WorkIndexError(f"{readme_path}: missing {START} … {END} markers")
         updated = readme[:start] + block + readme[end + len(END):]
         if check:
+            errors = owner_order_errors(work, read_stages(work.resolve().parent))
             if updated != readme:
-                raise WorkIndexError(f"work/README.md is out of date; run {COMMAND}")
+                errors.insert(0, f"work/README.md is out of date; run {COMMAND}")
+            if errors:
+                raise WorkIndexError("\n".join(errors))
         elif updated != readme:
             readme_path.write_bytes(updated.encode("utf-8"))
     except (WorkIndexError, OSError, UnicodeDecodeError) as error:

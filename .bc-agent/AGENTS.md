@@ -62,6 +62,17 @@ A work item is one feature or plan. Template: [templates/work-item.md](templates
   blockers, and writes the generated table in [work/README.md](../work/README.md): active items
   first, then ready ones, those unblocking the most work leading. Run it after changing an item.
   Why: the order is derived from what each item waits for, so it cannot drift from a hand-kept list.
+- **The owner may rank open items in `work/order.md`**, a numbered list of item names, top
+  first (`1. 012-search-ranking`), written by the owner's dashboard. Within each tier of the
+  table, listed items come first, in list order, unless an item waits on another; run
+  `python3 .bc-agent/scripts/work_index.py` after changing it. Why: the owner's priority beats
+  the computed tiebreaks, but never what an item waits for.
+- **Never reorder `work/order.md`; place what you add.** When it exists, a new item goes in
+  directly above the first listed item that waits on it, or at the bottom; no other line moves.
+  Before adding a `Blocked by:` line that names an item listed below this one, check with the
+  owner. `work_index.py --check` fails while the file leaves out an open item or lists an item
+  above one it waits on, and says where the item goes. Why: the owner sets this order on their
+  dashboard; an unplaced item or a new blocker silently pushed the owner's items to the bottom.
 - **A building block gets its own item.** When two items would wait on one step of a third,
   that step becomes its own item, and both name it. Why: an item can only wait on a whole item,
   and a shared building block buried in a large item hides what is ready.
