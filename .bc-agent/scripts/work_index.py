@@ -5,7 +5,8 @@ Usage: python3 .bc-agent/scripts/work_index.py [--check] [work-dir]
 
 Every item in 1-planned/ and 2-active/ needs a `Blocked by:` line naming full
 item names (`012-search-ranking`, comma-separated) or `nothing`. A `Stage:` line
-is optional; an unknown stage is an error. Unknown names, dropped blockers, self-blocks and cycles among open
+is optional; an unknown stage is an error. A `Kind:` line (security, bug, feature, ...)
+is optional and free text. Unknown names, dropped blockers, self-blocks and cycles among open
 items are errors. A blocker in 3-done/ is satisfied; an item is ready when all
 its blockers are done.
 
@@ -29,10 +30,19 @@ unscheduled; an item without a `Stage:` line sorts after every stage), then
 the name. A valid owner order is a fixed point: ranking by
 it reproduces it. `--check` writes nothing and exits 1 while the
 table is out of date, and, when work/order.md exists, while it leaves out an
-open item (the message names where to add it: directly above the first listed
-item that waits on it, else at the bottom) or lists an item above an item it
+open item or lists an item above an item it
 is Blocked by. The owner's dashboard writes every open item and never puts one
-above its blocker, so either fault comes from an agent. Python 3.9 or later, standard library only.
+above its blocker, so either fault comes from an agent.
+
+Where --check says to add a missing item: an item whose Kind is a top kind goes
+directly below the top group (the run of listed items at the top of order.md
+whose Kind is a top kind), or at the top when there is none, so it never jumps
+ahead of a top item the owner placed; several new top items go oldest first.
+Every other item goes directly above the first listed item that waits on it,
+else at the bottom. Either way an item stays below every item it is Blocked by
+and above the first item that waits on it. Top kinds come from the
+`Top kinds:` line in `.bc-agent/AGENTS.md` (default: security, bug, build,
+architecture; `none` turns top placement off). Python 3.9 or later, standard library only.
 """
 from __future__ import annotations
 
@@ -41,6 +51,7 @@ import sys
 from pathlib import Path
 
 DEFAULT_STAGES = ("now", "next", "later", "unscheduled")
+DEFAULT_TOP_KINDS = ("security", "bug", "build", "architecture")
 START = "<!-- work-index:start -->"
 END = "<!-- work-index:end -->"
 COMMAND = "python3 .bc-agent/scripts/work_index.py"
@@ -75,6 +86,16 @@ def read_stages(project: Path) -> tuple[str, ...]:
     return DEFAULT_STAGES
 
 
+def read_top_kinds(project: Path) -> tuple[str, ...]:
+    agents = project / ".bc-agent" / "AGENTS.md"
+    if agents.is_file():
+        match = re.search(r"^Top kinds:[ \t]*(.+)$", read_text(agents), re.M)
+        if match:
+            kinds = tuple(k.strip().lower() for k in match.group(1).split(",") if k.strip())
+            return () if kinds == ("none",) else kinds
+    return DEFAULT_TOP_KINDS
+
+
 def entries(work: Path, folder: str) -> list[str]:
     path = work / folder
     return sorted(name.name for name in path.iterdir() if ITEM_NAME.match(name.name)) if path.is_dir() else []
@@ -106,6 +127,8 @@ def read_item(work: Path, folder: str, name: str, stages: tuple[str, ...]) -> di
     stage = stage_match.group(1).strip() if stage_match else None
     if stage is not None and stage not in stages:
         raise StageError(f"{rel}: unknown Stage line (one of: {', '.join(stages)})")
+    kind_match = re.search(r"^Kind:[ \t]*(.+)$", text, re.M)
+    kind = kind_match.group(1).strip().lower() if kind_match else None
     why_match = re.search(r"^Why: (.+)$", text, re.M)
     why = first_sentence(why_match.group(1) if why_match else "")
     parts = re.split(r"^## Steps$", text, maxsplit=1, flags=re.M)
@@ -119,7 +142,7 @@ def read_item(work: Path, folder: str, name: str, stages: tuple[str, ...]) -> di
     blockers = [] if blocked == "nothing" else [b.strip() for b in blocked.split(",") if b.strip()]
     return {
         "blockers": blockers,
-        "stage": stage, "name": name.removesuffix(".md"), "path": rel, "folder": folder[2:],
+        "stage": stage, "kind": kind, "name": name.removesuffix(".md"), "path": rel, "folder": folder[2:],
         "why": why, "steps": f"{done}/{total}" if total else "—",
     }
 
@@ -287,7 +310,7 @@ def build_block(work: Path, stages: tuple[str, ...]) -> str:
     ])
 
 
-def owner_order_errors(work: Path, stages: tuple[str, ...]) -> list[str]:
+def owner_order_errors(work: Path, stages: tuple[str, ...], top_kinds: tuple[str, ...] = DEFAULT_TOP_KINDS) -> list[str]:
     """What --check reports about work/order.md: open items it leaves out, and items listed above an item they wait on.
 
     The owner's dashboard writes every open item and refuses to put one above its blocker, so either fault means an
@@ -306,11 +329,21 @@ def owner_order_errors(work: Path, stages: tuple[str, ...]) -> list[str]:
         return False
 
     listed = sorted(rank, key=rank.get)
-    errors = []
-    for n in sorted(set(items) - set(rank)):
-        first = next((m for m in listed if waits_on(m, n, set())), None)
-        where = f"directly above {first}, the first listed item that waits on it" if first else "at the bottom"
-        errors.append(f"order.md does not list {n}; add it {where}, and move no other line (the owner sets this order)")
+    missing = sorted(set(items) - set(rank))
+    placed = list(listed)
+    where: dict[str, str] = {}
+    for n in (m for m in missing if items[m]["kind"] in top_kinds):
+        at = next((i for i, m in enumerate(placed) if items[m]["kind"] not in top_kinds), len(placed))
+        at = max([at] + [i + 1 for i, m in enumerate(placed) if waits_on(n, m, set())])
+        at = min([at] + [i for i, m in enumerate(placed) if waits_on(m, n, set())])
+        where[n] = f"directly below {placed[at - 1]}" if at else "at the top"
+        placed.insert(at, n)
+    for n in missing:
+        if n not in where:
+            first = next((m for m in placed if waits_on(m, n, set())), None)
+            where[n] = f"directly above {first}, the first listed item that waits on it" if first else "at the bottom"
+    errors = [f"order.md does not list {n}; add it {where[n]}, and move no other line (the owner sets this order)"
+              for n in missing]
     for n in listed:
         for b in waits[n]:
             if b in rank and rank[b] > rank[n]:
@@ -331,7 +364,8 @@ def main(argv: list[str]) -> int:
             raise WorkIndexError(f"{readme_path}: missing {START} … {END} markers")
         updated = readme[:start] + block + readme[end + len(END):]
         if check:
-            errors = owner_order_errors(work, read_stages(work.resolve().parent))
+            project = work.resolve().parent
+            errors = owner_order_errors(work, read_stages(project), read_top_kinds(project))
             if updated != readme:
                 errors.insert(0, f"work/README.md is out of date; run {COMMAND}")
             if errors:
