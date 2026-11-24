@@ -87,6 +87,20 @@ A work item is one feature or plan. Template: [templates/work-item.md](templates
 - **Before creating an item, look for overlap.** Search the open items and `work/0-ideas.md`.
   Fold the work into an existing item rather than starting a parallel one, and delete the idea
   lines the new item absorbs. Why: duplicated items drift apart and split one decision across two places.
+- **Every planned item is planned before it starts.** `bc-plan-to-pipeline` writes a
+  `Planned: bc-plan-to-pipeline <date>` line under `Source:` once the item has its requirements
+  and sliced `## Steps`. Before an item without that line moves from `1-planned/` to
+  `2-active/`, by hand, on "carry on" or by a drain, run `bc-plan-to-pipeline` on it from a
+  settled source, in the same reply: it fills the item in place and asks only what is still open.
+  When the owner said they are away (or the run is a drain) and a question stays open, file it
+  where the owner sees questions (this project's or this machine's instructions name the place),
+  never in chat, leave the item in `1-planned/`, then move the next planned item to `2-active/`
+  and start it in the same run. Planning an item is part of carrying on, not a reason to stop:
+  never end a reply that only says an item needs planning, a question needs filing or an item
+  needs starting; do that work first. `work_index.py --check` warns about each planned item
+  without the line.
+  Why: an item filed without planning starts with unstated requirements and no slices, and the
+  work drifts from what the owner decided.
 - **One item, one deliverable.** Split an item that holds several deliverables that could ship
   and be used separately. Why: a large item's later parts block nothing but still hide behind its first.
 - **GitHub issues are optional.** When one exists, record its number on the item's `Issue:`
@@ -105,7 +119,7 @@ Top kinds: security, bug, build, architecture
 | When you… | Do this |
 | --- | --- |
 | Start non-trivial work | Read the items in `work/2-active/`, then pick context with [map.md](map.md). |
-| Begin agreed work | Create the item from the template, or `git mv` it from `1-planned/` to `2-active/`, then run `python3 .bc-agent/scripts/work_index.py`. |
+| Begin agreed work | Create the item from the template, or `git mv` it from `1-planned/` to `2-active/`, then run `python3 .bc-agent/scripts/work_index.py`. A planned item without a `Planned:` line is planned first (see Work items). |
 | Finish a step | Check its box in the item, then run `python3 .bc-agent/scripts/work_index.py`. |
 | Finish or drop an item | Fill `## Outcome`, then `git mv` it to its done month folder or to `4-dropped/`, then run `python3 .bc-agent/scripts/work_index.py`. |
 | Make an architectural or hard-to-reverse choice | Add a numbered record under `docs/decisions/` from [templates/adr.md](templates/adr.md). |

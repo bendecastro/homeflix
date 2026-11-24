@@ -42,7 +42,12 @@ Every other item goes directly above the first listed item that waits on it,
 else at the bottom. Either way an item stays below every item it is Blocked by
 and above the first item that waits on it. Top kinds come from the
 `Top kinds:` line in `.bc-agent/AGENTS.md` (default: security, bug, build,
-architecture; `none` turns top placement off). Python 3.9 or later, standard library only.
+architecture; `none` turns top placement off).
+
+`--check` also warns, on stderr and without changing the exit code, about each
+item in 1-planned/ that has no `Planned:` line: it has not been through
+bc-plan-to-pipeline, so it must be planned before it moves to 2-active/.
+Python 3.9 or later, standard library only.
 """
 from __future__ import annotations
 
@@ -351,6 +356,16 @@ def owner_order_errors(work: Path, stages: tuple[str, ...], top_kinds: tuple[str
     return errors
 
 
+def unplanned_items(work: Path) -> list[str]:
+    """Items in 1-planned/ without a `Planned:` line (bc-plan-to-pipeline writes it)."""
+    missing = []
+    for name in entries(work, "1-planned"):
+        rel = f"1-planned/{name}/plan.md" if (work / "1-planned" / name).is_dir() else f"1-planned/{name}"
+        if (work / rel).is_file() and not re.search(r"^Planned:", read_text(work / rel), re.M):
+            missing.append(rel)
+    return missing
+
+
 def main(argv: list[str]) -> int:
     check = "--check" in argv
     paths = [arg for arg in argv if arg != "--check"]
@@ -365,6 +380,8 @@ def main(argv: list[str]) -> int:
         updated = readme[:start] + block + readme[end + len(END):]
         if check:
             project = work.resolve().parent
+            for rel in unplanned_items(work):
+                print(f"work-index: warning: {rel} has no Planned: line; run bc-plan-to-pipeline on it before it moves to 2-active/", file=sys.stderr)
             errors = owner_order_errors(work, read_stages(project), read_top_kinds(project))
             if updated != readme:
                 errors.insert(0, f"work/README.md is out of date; run {COMMAND}")
