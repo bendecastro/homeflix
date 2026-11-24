@@ -67,8 +67,16 @@ A work item is one feature or plan. Template: [templates/work-item.md](templates
   table, listed items come first, in list order, unless an item waits on another; run
   `python3 .bc-agent/scripts/work_index.py` after changing it. Why: the owner's priority beats
   the computed tiebreaks, but never what an item waits for.
-- **Never reorder `work/order.md`; place what you add.** When it exists, a new item goes in
-  directly above the first listed item that waits on it, or at the bottom; no other line moves.
+- **An item may name its kind on a `Kind:` line** (security, bug, build, architecture,
+  performance, tests, feature, docs, ...): what the item is, while `Source:` says who filed it.
+  The owner's dashboard shows it. Why: placement in `work/order.md` follows the kind.
+- **Never reorder `work/order.md`; place what you add.** When it exists, a new item whose kind is on the `Top kinds:` line below goes directly below the run of
+  top-kind items at the top of the list (at the top when there is none; several new ones oldest
+  first); any other new item goes directly above the first listed item that waits on it, or at
+  the bottom. An item never goes above an item it waits on. No other line moves. Create the item
+  file first, run `work_index.py --check` before touching `order.md`, and add the line exactly
+  where it says. Why: once the line is listed, `--check` can no longer tell that a new item
+  jumped ahead of one the owner placed.
   Before adding a `Blocked by:` line that names an item listed below this one, check with the
   owner. `work_index.py --check` fails while the file leaves out an open item or lists an item
   above one it waits on, and says where the item goes. Why: the owner sets this order on their
@@ -89,6 +97,8 @@ A work item is one feature or plan. Template: [templates/work-item.md](templates
   is a step in that work item. A standalone question that someone must investigate is a
   planned work item whose answer lands in `docs/research/`. One not worth an item yet is a
   line in `work/0-ideas.md`. Why: `work/` stays the single place that shows what is pending.
+
+Top kinds: security, bug, build, architecture
 
 ## Keep it current
 
